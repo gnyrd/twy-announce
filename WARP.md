@@ -26,6 +26,10 @@ Automated system for posting class announcements to a WhatsApp group based on ev
 - [Roadmap](FEATURES.md) - Future plans and ideas
 - [Change History](HISTORY.md) - Completed milestones
 
+**Setup Guides:**
+- [Getting Started](GETTING_STARTED.md) - Local development setup
+- [Docker Guide](DOCKER.md) - Docker setup and deployment
+
 ---
 
 ## Quick Start

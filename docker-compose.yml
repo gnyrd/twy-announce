@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  whatsapp-poster:
+    build: .
+    container_name: twy-whatsapp-poster
+    env_file:
+      - .env
+    volumes:
+      # Persist WhatsApp session across container restarts
+      - ./sessions:/app/sessions
+      # Mount credentials
+      - ./credentials:/app/credentials
+      # Mount logs
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # Override command for different operations
+    # command: node whatsapp_bot.js test

@@ -32,6 +32,8 @@ None yet - system in initial development phase.
 - Project initialized with STATUS/FEATURES/HISTORY documentation system
 - Repository created: `twy-whatsapp-poster`
 - Documentation structure established
+- **Added:** Docker support for containerized deployment
+- **Added:** Makefile for convenient Docker commands
 - **Started:** WhatsApp automation proof of concept
 
 ---

@@ -16,43 +16,47 @@
 
 ## Quick Start
 
-### 1. Install Dependencies
+**Choose your approach:**
+- 🐳 **Docker** (recommended for deployment) → See [DOCKER.md](DOCKER.md)
+- 💻 **Local** (faster for testing) → See [GETTING_STARTED.md](GETTING_STARTED.md)
+
+### Docker Quick Start
 
 ```bash
-# Node.js dependencies (for WhatsApp)
+# 1. Build
+make build
+
+# 2. Configure
+cp .env.example .env
+# Edit .env with your settings
+
+# 3. Authenticate
+make auth
+
+# 4. Find group ID
+make list-groups
+# Add group ID to .env
+
+# 5. Test
+make test
+```
+
+### Local Quick Start
+
+```bash
+# 1. Install
 npm install
 
-# Python dependencies (coming soon)
-# pip install -r requirements.txt
-```
-
-### 2. Configure
-
-```bash
-# Copy environment template
+# 2. Configure
 cp .env.example .env
 
-# Edit .env with your settings
-# At minimum, you'll need to set WHATSAPP_GROUP_ID after authentication
-```
-
-### 3. Authenticate WhatsApp
-
-```bash
-# Start authentication (will show QR code)
+# 3. Authenticate
 npm run auth
 
-# Scan the QR code with WhatsApp (Settings > Linked Devices)
-# Session will be saved for future use
-```
+# 4. Find group ID
+npm run list-groups
 
-### 4. Test Posting
-
-```bash
-# First, keep DRY_RUN=true in .env for safety
-npm run test
-
-# Once you've verified it works, set DRY_RUN=false and test again
+# 5. Test
 npm run test
 ```
 
