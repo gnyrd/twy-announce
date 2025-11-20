@@ -20,14 +20,17 @@ This guide covers running the WhatsApp poster in Docker for development and depl
 
 ## Prerequisites
 
-- Docker Desktop installed on Mac
-- Docker Compose (included with Docker Desktop)
+- **Mac:** OrbStack (recommended) or Docker Desktop
+- **Other platforms:** Docker Desktop
+- Docker Compose (included with OrbStack/Docker Desktop)
 
 **Check installation:**
 ```bash
 docker --version
 docker-compose --version
 ```
+
+**Note for Mac users:** This project uses OrbStack instead of Docker Desktop. OrbStack is faster, lighter, and more Mac-native than Docker Desktop.
 
 ---
 

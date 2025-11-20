@@ -37,6 +37,7 @@ Automated system for posting class announcements to a WhatsApp group based on ev
 **Prerequisites:**
 - Python 3.9+
 - Node.js 18+ (for WhatsApp Web automation)
+- Docker (OrbStack on Mac, Docker Desktop elsewhere)
 - Google Drive API credentials
 - WhatsApp account for automation
 

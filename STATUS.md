@@ -73,6 +73,7 @@ None yet - system not operational.
 - MacOS (local development)
 - Python 3.9+
 - Node.js 18+
+- Docker via OrbStack
 - zsh shell
 
 **Deployment Target:**
