@@ -39,6 +39,22 @@
 - Use Gmail + Google APIs for reliable reminder delivery while keeping WhatsApp automation optional.
 
 ---
+---
+### 2026-01-20: Remove Docker deployment path
+**Category:** Chore / Cleanup  
+**Summary:** Removed the legacy Docker-based deployment path and its support files; canonical deployment is now the Python reminder pipeline on Hetzner.
+
+**Changes:**
+- Deleted Docker-specific files: `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `DOCKER.md`, and `Makefile`.
+- Cleaned remaining references to Docker from WARP.md, README.md, QUICKREF.md, and STATUS.md.
+
+**Impact:**
+- Reduces confusion between historical Docker usage and the current Hetzner + Python/Gmail deployment.
+- Simplifies repository by keeping only actively used paths (Python reminders + Node CLI for manual WhatsApp posting).
+
+**Rationale:**
+- Docker is no longer used in production; the reminder system runs directly on Hetzner, and WhatsApp messages are posted manually from emailed templates.
+
 
 
 ## November 2025

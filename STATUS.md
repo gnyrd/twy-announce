@@ -15,7 +15,7 @@
 |-----------|--------|-------|
 | Google Drive Parser | ⏳ In Development | Testing approach for WhatsApp automation |
 | Scheduler | 📋 Planned | Pending WhatsApp proof of concept |
-| Marvelous Integration | 📋 Planned | Platform investigation needed |
+| Marvelous Integration | ⏳ In Development | Events cached locally; join links fetched from Marvelous |
 | WhatsApp Automation | ⏳ In Development | **Current focus** |
 
 ---
@@ -37,8 +37,6 @@ None yet - system in initial development phase.
 - Project initialized with STATUS/FEATURES/HISTORY documentation system
 - Repository created: `twy-whatsapp-poster`
 - Documentation structure established
-- **Added:** Docker support for containerized deployment
-- **Added:** Makefile for convenient Docker commands
 - **Started:** WhatsApp automation proof of concept
 
 ---
@@ -68,7 +66,7 @@ None yet - system not operational.
 
 1. **WhatsApp automation viability unknown** - Need to validate unofficial API works for our use case
 2. **Google Drive document format unknown** - Need example to design parser
-3. **Marvelous platform integration approach unknown** - Need to investigate if API exists or scraping required
+3. **Marvelous integration wired for join links** - Events synced via internal API and cached; monitor for API changes
 
 ---
 
@@ -78,7 +76,6 @@ None yet - system not operational.
 - MacOS (local development)
 - Python 3.9+
 - Node.js 18+
-- Docker via OrbStack
 - zsh shell
 
 **Deployment Target:**

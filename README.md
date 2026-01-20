@@ -17,10 +17,8 @@
 ## Quick Start
 
 **Choose your approach:**
-- 🐳 **Docker** (recommended for deployment) → See [DOCKER.md](DOCKER.md)
 - 💻 **Local** (faster for testing) → See [GETTING_STARTED.md](GETTING_STARTED.md)
 
-### Docker Quick Start
 
 ```bash
 # 1. Build
@@ -59,6 +57,15 @@ npm run list-groups
 # 5. Test
 npm run test
 ```
+
+## Runtime / Production Overview
+
+- Automatic class-reminder emails are handled by a **Python pipeline** run from cron on a Hetzner host.
+- Cron calls `scripts/run_class_email_reminders.sh`, which loads `.env` and runs `scripts/send_class_email_reminders.py`.
+- The Node-based WhatsApp scripts (`whatsapp_bot.js`, `list_groups.js`, etc.) now serve as an **optional toolbox** for manual WhatsApp tests and one-off posts.
+- For exact cron examples and toolbox commands, see [WARP.md](WARP.md).
+
+
 
 ---
 

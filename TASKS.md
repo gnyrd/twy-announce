@@ -65,20 +65,17 @@
 ### 3. Marvelous Platform Investigation
 **Priority:** Medium  
 **Effort:** 2-3 hours  
+**Status:** ✅ Completed (2026-01-20)  
 **Dependencies:** None (can be done in parallel)
 
 **Description:**
-- Investigate if heymarvelous.com has an API
-- If no API: design web scraping approach
-- Determine what data we need (class links? schedules?)
-- Document authentication requirements
-- Create test cases
+- Confirmed use of internal Namastream API for events.
+- Implemented `scripts/refresh_marvelous_events.py` to cache a trimmed 60-day window under `data/marvelous_events.json`.
+- Wired reminder pipeline to match classes to Marvelous events by start time/title and inject `event/details/<id>` join links, falling back to the calendar URL when unmatched.
 
-**Questions to answer:**
-- Do they have an official API?
-- What authentication is required?
-- Can we get class links programmatically?
-- How reliable will this be?
+**Notes:**
+- Studio slug and URLs are hard-coded; if Tiffany Wood Yoga changes platforms or domains, update the Marvelous constants.
+- API behavior is unofficial and may change; logs and sync failures should be monitored.
 
 ---
 

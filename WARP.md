@@ -28,7 +28,6 @@ Automated system for posting class announcements to a WhatsApp group based on ev
 
 **Setup Guides:**
 - [Getting Started](GETTING_STARTED.md) - Local development setup
-- [Docker Guide](DOCKER.md) - Docker setup and deployment
 
 ---
 
@@ -37,7 +36,6 @@ Automated system for posting class announcements to a WhatsApp group based on ev
 **Prerequisites:**
 - Python 3.9+
 - Node.js 18+ (for WhatsApp Web automation)
-- Docker (OrbStack on Mac, Docker Desktop elsewhere)
 - Google Drive API credentials
 - WhatsApp account for automation
 
@@ -67,11 +65,9 @@ python -m twy_whatsapp_poster.test
 At the moment this project is primarily a Node.js WhatsApp tool, with Python-based scheduler/parser components planned but not yet implemented.
 
 Key pieces that exist today:
-- `whatsapp_bot.js` – main bot entrypoint used by Docker/Makefile for WhatsApp automation experiments.
 - `list_groups.js` – helper to list group IDs.
 - `src/send_to_whatsapp.js` – small one-shot CLI (from the former twy-whatsapp-announcer repo) that sends a message to a group by exact name.
 - `docs/references/` – sample class source and WhatsApp post examples used for designing templates.
-- `Dockerfile`, `docker-compose.yml`, `Makefile` – containerized runtime and convenience commands.
 
 Planned (but not yet present) Python modules mentioned elsewhere in this file (scheduler, Drive parser, Marvelous integration) should be treated as future work.
 
@@ -135,6 +131,42 @@ When user asks about:
 - Log message changes
 
 ---
+
+
+---
+
+## Runtime Environments
+
+### Local Development
+- Run WhatsApp tests and one-off posts using the Node CLI toolbox (see next section).
+- Safe for manual experiments; does not affect the scheduled reminder pipeline.
+
+### Hetzner Production (Cron)
+- Intended deployment is a Hetzner host running the reminder pipeline under cron.
+- Cron calls the thin wrapper script `scripts/run_class_email_reminders.sh` approximately every 30 minutes.
+- That script:
+  - Loads environment from `.env` (if present).
+  - Invokes `scripts/send_class_email_reminders.py` with the current time and arguments.
+  - Uses `data/reminder_state.json` to track which reminders have already been sent.
+
+**Example test command (used during development):**
+```bash
+cd /root/twy-whatsapp
+mv data/reminder_state.json data/reminder_state_backup_test.json 2>/dev/null || true
+REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh --now 2026-01-14T06:05
+```
+
+## WhatsApp Node CLI Toolbox
+
+These tools are optional helpers for talking directly to WhatsApp. They are useful for manual testing and ad-hoc posts, but are **not** required for the Python reminder pipeline.
+
+- `node whatsapp_bot.js auth` – Authenticate the WhatsApp session by scanning a QR code.
+- `node whatsapp_bot.js test` – Send a simple test message to the configured group.
+- `node whatsapp_bot.js post "Message text"` – Post a custom message to the configured group.
+- `node list_groups.js` – List available WhatsApp groups and their IDs.
+- `node src/send_to_whatsapp.js "Group Name" "Message text"` – Send a one-off message to a specific group by name.
+
+Use these from your local machine or the Hetzner host when you want to verify WhatsApp connectivity or send a manual message.
 
 ## Configuration
 

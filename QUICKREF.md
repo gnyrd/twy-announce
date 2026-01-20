@@ -1,10 +1,8 @@
 # Quick Reference
 
-## Docker Commands (Recommended)
 
 ```bash
 # First time setup
-make build                          # Build Docker image
 cp .env.example .env               # Create config (edit after)
 make auth                          # Authenticate WhatsApp (scan QR)
 make list-groups                   # Find your group ID
@@ -70,11 +68,8 @@ twy-whatsapp-poster/
 ├── STATUS.md            # Current state
 ├── TASKS.md             # Current work
 ├── FEATURES.md          # Roadmap
-├── DOCKER.md            # Docker guide (detailed)
 ├── GETTING_STARTED.md   # Local setup guide
 ├── whatsapp_bot.js      # Main bot script
-├── Dockerfile           # Docker image
-├── docker-compose.yml   # Docker services
 ├── Makefile             # Convenient commands
 └── .env                 # Your config (not in git)
 ```
@@ -85,7 +80,6 @@ twy-whatsapp-poster/
 
 ### Can't see QR code
 ```bash
-make auth                          # Docker
 npm run auth                       # Local
 ```
 

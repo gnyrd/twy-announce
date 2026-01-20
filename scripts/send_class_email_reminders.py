@@ -37,7 +37,8 @@ import smtplib
 import sys
 from dataclasses import dataclass
 import base64
-from datetime import date, datetime, time, timedelta
+import requests
+from datetime import date, datetime, time, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -315,6 +316,97 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
     )
 
 
+MARVELOUS_EVENTS_URL = "https://api.namastream.com/api/studios/tiffany-wood-yoga/events"
+MARVELOUS_JOIN_BASE_URL = "https://studio.tiffanywoodyoga.com/event/details"
+
+
+def fetch_marvelous_events() -> list[dict]:
+    """Load events from local cache, falling back to live Marvelous API if needed.
+
+    NOTE: Studio slug and URL are hard-coded for Tiffany Wood Yoga.
+    If the studio URL changes, update MARVELOUS_EVENTS_URL and MARVELOUS_JOIN_BASE_URL.
+    """
+    cache_path = Path(os.environ.get("MARVELOUS_EVENTS_PATH", "./data/marvelous_events.json"))
+
+    # Prefer locally cached snapshot
+    try:
+        if cache_path.exists():
+            with cache_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception as e:  # pragma: no cover - corrupt cache
+        print(f"⚠️ Failed to read Marvelous cache {cache_path}: {e}", file=sys.stderr)
+
+    # Fallback: hit live API directly
+    try:
+        resp = requests.get(MARVELOUS_EVENTS_URL, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return data
+        return []
+    except Exception as e:  # pragma: no cover - network failures
+        print(f"⚠️ Failed to fetch Marvelous events: {e}", file=sys.stderr)
+        return []
+
+
+def find_marvelous_event_for_class(cls: ClassEntry, events: list[dict]) -> str | None:
+    """Return a join URL for this class, if we can match one safely.
+
+    Matching strategy:
+    - Compare start times in UTC within a small tolerance window.
+    - If multiple events match in time, prefer title-equal, then title-substring match.
+    - On ambiguity or no match, return None. Caller can fall back to calendar URL.
+    """
+    if not events:
+        return None
+
+    target_utc = cls.start_dt.astimezone(timezone.utc)
+    tolerance = timedelta(minutes=15)
+
+    candidates: list[tuple[dict, float]] = []
+    for ev in events:
+        start_raw = ev.get("event_start_datetime")
+        if not start_raw:
+            continue
+        try:
+            ev_start = date_parser.parse(start_raw)
+        except Exception:
+            continue
+        if not ev_start.tzinfo:
+            ev_start = ev_start.replace(tzinfo=timezone.utc)
+        diff = abs((ev_start - target_utc).total_seconds())
+        if diff <= tolerance.total_seconds():
+            candidates.append((ev, diff))
+
+    if not candidates:
+        return None
+
+    # Prefer best title match among time-nearby candidates
+    def score(ev: dict) -> tuple[int, int, float]:
+        name = (ev.get("event_name") or "").strip().casefold()
+        title = (cls.title or "").strip().casefold()
+        exact = 0 if name == title and name else 1
+        substr = 0 if (name and title and (name in title or title in name)) else 1
+        start_raw = ev.get("event_start_datetime") or ""
+        try:
+            ev_start = date_parser.parse(start_raw)
+            if not ev_start.tzinfo:
+                ev_start = ev_start.replace(tzinfo=timezone.utc)
+        except Exception:
+            ev_start = target_utc
+        diff = abs((ev_start - target_utc).total_seconds())
+        return (exact, substr, diff)
+
+    candidates.sort(key=lambda pair: score(pair[0]))
+    best_ev, _ = candidates[0]
+    ev_id = best_ev.get("id")
+    if not ev_id:
+        return None
+    return f"{MARVELOUS_JOIN_BASE_URL}/{ev_id}"
+
+
 def load_state(path: Path) -> Dict[str, Dict[str, str]]:
     if not path.exists():
         return {}
@@ -364,7 +456,7 @@ def compute_due_reminders(
     return due
 
 
-def build_email(cls: ClassEntry, offset: int, tz: ZoneInfo, to_addrs: List[str], sender: str) -> EmailMessage:
+def build_email(cls: ClassEntry, offset: int, tz: ZoneInfo, to_addrs: List[str], sender: str, join_url: str | None) -> EmailMessage:
     """Build an EmailMessage whose core is a copy-pastable WhatsApp block."""
     local_start = cls.start_dt.astimezone(tz)
     date_str = local_start.strftime("%B %d, %Y")
@@ -414,7 +506,10 @@ def build_email(cls: ClassEntry, offset: int, tz: ZoneInfo, to_addrs: List[str],
         wa_lines.append(cls.categories)
         wa_lines.append("")
 
-    wa_lines.append("*Link to Join:* [TODO – add HeyMarvelous / studio link here]")
+    if join_url:
+        wa_lines.append(f"*Link to Join:* {join_url}")
+    else:
+        wa_lines.append("*Link to Join:* https://studio.tiffanywoodyoga.com/calendar")
     wa_lines.append("")
     wa_lines.append("See you there! 💕")
 
@@ -542,8 +637,11 @@ def main(argv: List[str] | None = None) -> int:
         print("No reminders due at this time.")
         return 0
 
+    marvel_events = fetch_marvelous_events()
+
     for cls, offset in due:
-        msg = build_email(cls, offset, tz, to_addrs, email_from)
+        join_url = find_marvelous_event_for_class(cls, marvel_events)
+        msg = build_email(cls, offset, tz, to_addrs, email_from, join_url)
         send_email_via_gmail(msg, gmail_creds, args.dry_run)
 
         state.setdefault(cls.id, {})[str(offset)] = now.isoformat()
