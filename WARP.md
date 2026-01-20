@@ -284,3 +284,105 @@ Private project for personal use.
 ## Contact
 
 Project maintained by ganyard for TWEEE WhatsApp group administration.
+
+## 2026-01-20 - HeyMarvelous API Discovery & Client Library
+
+### Summary
+Discovered and documented the undocumented HeyMarvelous (Namastream) API through systematic HAR file analysis. Created a comprehensive Python client library with full CRUD support for events, products, coupons, customers, and partial support for media library items.
+
+### What Was Added
+
+**New Files:**
+- `src/marvelous_client.py` - Complete Python client library (30+ methods)
+- `docs/MARVELOUS_API.md` - Complete API documentation
+- `docs/MARVELOUS_CLIENT_README.md` - Library usage guide
+- `examples/marvelous_example.py` - Working code examples
+
+**Data Files (for investigation):**
+- `data/app.heymarvelous.com.*.har` - HAR files used for API discovery (8 files)
+
+### API Coverage
+
+**Fully Implemented:**
+- Events - Full CRUD + public listing
+- Products - Full CRUD + tags listing
+- Coupons - Full CRUD + pagination + stats
+- Customers - Full CRUD + pagination
+
+**Partially Implemented:**
+- Media Library Items - GET, UPDATE, LIST (creation requires file upload workflow)
+
+### Key Features
+
+1. **Authentication Support** - Two-step flow (email/password → magic code → token)
+2. **Automatic Object Conversion** - Handles nested object to ID conversion for updates
+3. **EditorJS Support** - Helper methods for rich text descriptions
+4. **Pagination** - Support for paginated list endpoints
+5. **Type Hints** - Full type annotations throughout
+6. **Error Handling** - Custom exceptions (MarvelousAPIError, MarvelousAuthError)
+
+### Technical Details
+
+- **Base URL:** https://api.namastream.com
+- **Auth Method:** Token-based (Authorization: Token {key})
+- **Common Pattern:** GET returns full objects, PUT expects IDs for nested references
+- **Pagination:** 10-12 items per page depending on resource
+- **Media Storage:** Videos hosted on Vimeo (not directly downloadable)
+
+### Known Limitations
+
+1. Media library file uploads not yet implemented (requires upload workflow investigation)
+2. Token expiration behavior unknown
+3. Rate limiting not documented
+4. Some instructor/product IDs must be obtained from existing data
+
+### High Priority TODO
+
+- Complete media library items implementation (file upload workflow)
+- Test DELETE endpoint for media items
+- Investigate upload endpoints thoroughly
+
+### Testing
+
+All CRUD operations tested via API:
+- Created, read, updated, and deleted test items for all resources
+- Verified pagination works correctly
+- Confirmed nested object conversion logic
+- Tested with 1285+ media items, 566+ customers, 71+ coupons
+
+### Usage Example
+
+```python
+from marvelous_client import MarvelousClient
+
+client = MarvelousClient(auth_token="your-token")
+
+# Events
+event_id = client.create_event(...)
+client.update_event(event_id, event_name="Updated")
+client.delete_event(event_id)
+
+# Products
+product_id = client.create_product(...)
+tags = client.list_product_tags()
+
+# Coupons
+coupon_id = client.create_coupon(...)
+stats = client.get_coupon_stats()
+
+# Customers
+customer_id = client.create_customer(...)
+customers = client.list_customers(page=1)
+
+# Media
+media_items = client.list_media(page=1)
+client.update_media(media_id, title="New Title")
+```
+
+### References
+
+- API Documentation: `docs/MARVELOUS_API.md`
+- Library Guide: `docs/MARVELOUS_CLIENT_README.md`
+- Examples: `examples/marvelous_example.py`
+- HAR Files: `data/app.heymarvelous.com.*.har`
+
