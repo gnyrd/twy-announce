@@ -22,6 +22,24 @@
 - Prepare for server-side (Hetzner) scheduling and email reminders.
 
 ---
+### 2026-01-20: Email reminder pipeline (Google Doc → Gmail)
+**Category:** Feature / Infrastructure  
+**Summary:** Implemented an email-based reminder system that reads the class plan Google Doc and sends Gmail reminders with copy-pastable WhatsApp blocks.
+
+**Changes:**
+- Added `requirements.txt` and `scripts/send_class_email_reminders.py` for the reminder pipeline.
+- Added `scripts/run_class_email_reminders.sh` wrapper for cron-friendly execution on Hetzner.
+- Updated `.env.example` and docs to document GOOGLE_DOC_ID/TIMEZONE/REMINDER_OFFSETS and Gmail sender/recipient.
+
+**Impact:**
+- Enables three reminders (T-26h/T-25h/T-24h) for each class with WhatsApp-ready text.
+- Reduces manual rebuild of messages from the Google Doc.
+
+**Rationale:**
+- Use Gmail + Google APIs for reliable reminder delivery while keeping WhatsApp automation optional.
+
+---
+
 
 ## November 2025
 

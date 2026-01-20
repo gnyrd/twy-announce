@@ -7,7 +7,7 @@
 
 ## System Health
 
-🟡 Development Phase - Not Yet Operational
+🟡 Development Phase - Email reminders operational; WhatsApp auto-posting still in development
 
 ### Component Status
 
@@ -90,7 +90,8 @@ None yet - system not operational.
 ## Dependencies
 
 ### Installed
-None yet.
+- Python: google-api-python-client, google-auth, google-auth-oauthlib, python-dateutil (for Google Doc + Gmail reminder pipeline)
+- Node.js: whatsapp-web.js, qrcode-terminal (for WhatsApp Web automation experiments)
 
 ### Required Soon
 - Python: `google-api-python-client`, `APScheduler`, `python-dotenv`, `requests`
