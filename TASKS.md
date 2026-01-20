@@ -138,6 +138,32 @@
 
 ---
 
+### 8. Email reminder pipeline (Google Doc → email)
+**Priority:** High  
+**Effort:** 4-6 hours  
+**Dependencies:** Access to class schedule Google Doc; Google API credentials ready
+
+**Description:**
+- Fetch class schedule from Google Doc (Salt Lake City timezone / America-Denver).
+- Parse classes and compute reminder times at 26/25/24 hours before class.
+- Send reminder emails (initially to `jpgan6@gmail.com`) with ready-to-copy WhatsApp text.
+- Persist reminder state so each reminder is sent exactly once.
+
+---
+
+### 9. Hetzner deployment for reminders
+**Priority:** High  
+**Effort:** 3-4 hours  
+**Dependencies:** Email reminder pipeline implemented locally
+
+**Description:**
+- Deploy reminder script to `twy-hetzner` host.
+- Configure environment (.env) with Google + SMTP credentials.
+- Add cron job to run reminders script every 10–15 minutes.
+- Log output to a dedicated log file for debugging.
+
+---
+
 ## 🔄 Recurring Tasks
 
 None yet - will add monitoring tasks once deployed.

@@ -1,7 +1,7 @@
 # twy-whatsapp-poster - Current Status
 
-**Last Verified:** 2025-11-20
-**Version:** v0.1.0 (Initial Development)
+**Last Verified:** 2026-01-20
+**Version:** v0.1.1 (WhatsApp tools consolidated)
 
 ---
 
@@ -27,6 +27,11 @@ None yet - system in initial development phase.
 ---
 
 ## Recent Changes
+
+**2026-01-20:**
+- Consolidated older `twy-whatsapp-announcer` CLI into this repo (`src/send_to_whatsapp.js`).
+- Added class source and WhatsApp post examples under `docs/references/` for template design.
+- Confirmed direction to run scheduling/reminder logic on Hetzner instead of an always-on Mac.
 
 **2025-11-20:**
 - Project initialized with STATUS/FEATURES/HISTORY documentation system

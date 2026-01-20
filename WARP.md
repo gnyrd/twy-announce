@@ -2,7 +2,7 @@
 
 **WhatsApp Group Admin Automation System**
 
-Last Updated: 2025-11-20
+Last Updated: 2026-01-20
 
 ---
 
@@ -64,27 +64,16 @@ python -m twy_whatsapp_poster.test
 
 ## Project Structure
 
-```
-twy-whatsapp-poster/
-├── WARP.md              # This file (index + AI rules)
-├── STATUS.md            # Current state
-├── TASKS.md             # Current work
-├── FEATURES.md          # Future plans
-├── HISTORY.md           # Completed work
-├── .env.example         # Configuration template
-├── requirements.txt     # Python dependencies
-├── package.json         # Node.js dependencies
-├── twy_whatsapp_poster/
-│   ├── __init__.py
-│   ├── scheduler.py     # Daily task scheduler
-│   ├── drive_parser.py  # Google Drive document parser
-│   ├── marvelous.py     # Marvelous platform integration
-│   ├── whatsapp.py      # WhatsApp automation
-│   ├── config.py        # Configuration management
-│   └── test.py          # Testing utilities
-└── scripts/
-    └── start.sh         # Launch script
-```
+At the moment this project is primarily a Node.js WhatsApp tool, with Python-based scheduler/parser components planned but not yet implemented.
+
+Key pieces that exist today:
+- `whatsapp_bot.js` – main bot entrypoint used by Docker/Makefile for WhatsApp automation experiments.
+- `list_groups.js` – helper to list group IDs.
+- `src/send_to_whatsapp.js` – small one-shot CLI (from the former twy-whatsapp-announcer repo) that sends a message to a group by exact name.
+- `docs/references/` – sample class source and WhatsApp post examples used for designing templates.
+- `Dockerfile`, `docker-compose.yml`, `Makefile` – containerized runtime and convenience commands.
+
+Planned (but not yet present) Python modules mentioned elsewhere in this file (scheduler, Drive parser, Marvelous integration) should be treated as future work.
 
 ---
 

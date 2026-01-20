@@ -2,6 +2,27 @@
 
 ---
 
+## January 2026
+
+### 2026-01-20: Consolidated WhatsApp tools
+**Category:** Infrastructure / Documentation  
+**Summary:** Merged the older `twy-whatsapp-announcer` CLI and reference docs into this repo.
+
+**Changes:**
+- Added `src/send_to_whatsapp.js` one-shot CLI for sending messages by group name.
+- Imported class source and WhatsApp post samples into `docs/references/`.
+- Updated WARP.md and STATUS.md to reflect consolidated direction and Hetzner-based scheduling.
+
+**Impact:**
+- Single canonical repo for WhatsApp automation work.
+- Clearer documentation and examples for class-based announcements.
+
+**Rationale:**
+- Reduce duplication between small WhatsApp projects.
+- Prepare for server-side (Hetzner) scheduling and email reminders.
+
+---
+
 ## November 2025
 
 ### 2025-11-20: Project Initialization
