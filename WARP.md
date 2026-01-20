@@ -149,6 +149,19 @@ When user asks about:
   - Invokes `scripts/send_class_email_reminders.py` with the current time and arguments.
   - Uses `data/reminder_state.json` to track which reminders have already been sent.
 
+**Current cron setup on Hetzner (reference):**
+- Marvelous sync (twice daily) –
+  - `0 9,18 * * * cd /root/twy-whatsapp && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
+- Email reminders (every 30 min) –
+  - `*/30 * * * * cd /root/twy-whatsapp && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
+
+- Intended deployment is a Hetzner host running the reminder pipeline under cron.
+- Cron calls the thin wrapper script `scripts/run_class_email_reminders.sh` approximately every 30 minutes.
+- That script:
+  - Loads environment from `.env` (if present).
+  - Invokes `scripts/send_class_email_reminders.py` with the current time and arguments.
+  - Uses `data/reminder_state.json` to track which reminders have already been sent.
+
 **Example test command (used during development):**
 ```bash
 cd /root/twy-whatsapp

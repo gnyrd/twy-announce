@@ -152,13 +152,15 @@
 ### 9. Hetzner deployment for reminders
 **Priority:** High  
 **Effort:** 3-4 hours  
-**Status:** ⏳ In Progress  
+**Status:** ✅ Completed (2026-01-20)  
 **Dependencies:** Email reminder pipeline implemented (Task 8)
 
 **Description:**
 - Run `scripts/send_class_email_reminders.py` on `twy-hetzner` using `.env` + Gmail token files.
-- Add cron job to run reminders script every 10–15 minutes.
-- Log output to a dedicated log file for debugging.
+- Configure cron on Hetzner to:
+  - Sync Marvelous events twice daily via `scripts/refresh_marvelous_events.py` (09:00 and 18:00 local time).
+  - Run `scripts/run_class_email_reminders.sh` every 30 minutes with `REMINDER_OFFSETS=26`.
+- Log output to `logs/marvelous_sync.log` and `logs/reminders.log` for debugging.
 
 ---
 

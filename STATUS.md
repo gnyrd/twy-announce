@@ -22,7 +22,8 @@
 
 ## Active Components
 
-None yet - system in initial development phase.
+- Email reminder pipeline (Google Doc → Gmail) – ✅ Running on Hetzner via cron every 30 minutes.
+- Marvelous event cache – ✅ `scripts/refresh_marvelous_events.py` runs twice daily to update `data/marvelous_events.json`.
 
 ---
 
