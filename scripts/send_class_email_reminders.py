@@ -26,6 +26,10 @@ Google credentials:
   created via a separate, interactive auth flow (see twy-growth-blitz-2025
   scripts). This script will only refresh that token; it will not open
   a browser or prompt for input.
+Usage:
+  source ../.env && python3 send_class_email_reminders.py
+  # Or manually export: export GOOGLE_DOC_ID=... EMAIL_TO=...
+
 """
 
 from __future__ import annotations
@@ -586,7 +590,9 @@ def main(argv: List[str] | None = None) -> int:
 
     doc_id = os.environ.get("GOOGLE_DOC_ID")
     if not doc_id:
-        print("❌ GOOGLE_DOC_ID environment variable is required.", file=sys.stderr)
+        print("❌ GOOGLE_DOC_ID environment variable is required.\n"
+          "See script docstring for all required variables (or run: set -a && source ../.env && set +a).", 
+          file=sys.stderr)
         return 1
 
     tz_name = os.environ.get("TIMEZONE", "America/Denver")
@@ -614,7 +620,9 @@ def main(argv: List[str] | None = None) -> int:
     email_to_raw = os.environ.get("EMAIL_TO")
 
     if not email_to_raw:
-        print("❌ EMAIL_TO environment variable is required.", file=sys.stderr)
+        print("❌ EMAIL_TO environment variable is required.\n"
+          "See script docstring for all required variables (or run: set -a && source ../.env && set +a).", 
+          file=sys.stderr)
         return 1
 
     to_addrs = [addr.strip() for addr in email_to_raw.split(',') if addr.strip()]
