@@ -386,3 +386,41 @@ client.update_media(media_id, title="New Title")
 - Examples: `examples/marvelous_example.py`
 - HAR Files: `data/app.heymarvelous.com.*.har`
 
+
+---
+
+## 2026-02-02: Enhanced Email Reminder Script
+
+### Changes Made
+Updated `scripts/send_class_email_reminders.py` to support Google Docs tabs and flexible date formats:
+
+**Document Tab Support:**
+- Script now uses Google Docs API with `includeTabsContent=True` parameter
+- Automatically detects and reads the tab matching current month/year (e.g., "February 2026")
+- Falls back to plain text export if tabs are not available
+- Adds helpful logging to show which tab is being read
+
+**Flexible Date Format Support:**
+- Added `is_class_heading()` helper function to detect class entry headers
+- Now supports both date formats:
+  - Original: "Monday, Jan 5 — Stretch & Strength"
+  - New: "FEB 2 – Stretch & Strength"
+- Uses regex pattern matching for month abbreviations and full names
+- Added `import re` for pattern matching
+
+**Impact:**
+- Fixed issue where February 2026 classes weren't being parsed
+- System can now handle different formatting styles across months
+- More robust for future document structure changes
+
+**Testing:**
+- Verified script can read "February 2026" tab
+- Successfully parsed all February classes
+- Force-sent missed reminder for Feb 2 class to all recipients
+
+### Files Modified
+- `scripts/send_class_email_reminders.py` (+95, -8 lines)
+
+### Commit
+- Hash: 4150264
+- Message: "Support Google Docs tabs and flexible date formats"
