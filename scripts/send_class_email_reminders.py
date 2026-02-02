@@ -51,6 +51,7 @@ from dateutil import parser as date_parser
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import pickle
+import re
 from zoneinfo import ZoneInfo
 
 GOOGLE_TOKEN_PATH = os.path.expanduser("~/.config/twy-google-sheets-token.pickle")
@@ -126,10 +127,59 @@ def load_gmail_credentials():
 
 
 def fetch_doc_text(doc_id: str) -> str:
+    """Fetch text from the Google Doc tab most relevant to the current date.
+    
+    Looks for tabs named like "February 2026", "January 2026", etc.
+    Falls back to exporting the entire document as plain text if no tabs are found.
+    """
     creds = load_credentials()
+    
+    # First, try to use Docs API to get tabs
+    try:
+        docs_service = build("docs", "v1", credentials=creds)
+        doc = docs_service.documents().get(documentId=doc_id, includeTabsContent=True).execute()
+        
+        if 'tabs' in doc:
+            # Determine the current month/year
+            now = datetime.now()
+            current_month_name = now.strftime("%B")  # e.g., "February"
+            current_year = now.strftime("%Y")        # e.g., "2026"
+            target_tab_name = f"{current_month_name} {current_year}"
+            
+            print(f"📄 Looking for tab '{target_tab_name}' in Google Doc {doc_id}...", file=sys.stderr)
+            
+            # Search for the matching tab
+            for tab in doc['tabs']:
+                tab_props = tab.get('tabProperties', {})
+                tab_title = tab_props.get('title', '')
+                
+                if tab_title == target_tab_name:
+                    print(f"✅ Found tab '{tab_title}'", file=sys.stderr)
+                    
+                    # Extract text from this tab
+                    content = tab.get('documentTab', {}).get('body', {}).get('content', [])
+                    text_lines = []
+                    for element in content:
+                        if 'paragraph' in element:
+                            paragraph = element['paragraph']
+                            for elem in paragraph.get('elements', []):
+                                if 'textRun' in elem:
+                                    text_lines.append(elem['textRun']['content'])
+                    
+                    return ''.join(text_lines)
+            
+            # If we didn't find the exact month, list available tabs
+            available_tabs = [tab.get('tabProperties', {}).get('title', 'Untitled') 
+                            for tab in doc['tabs']]
+            print(f"⚠️  Tab '{target_tab_name}' not found. Available tabs: {', '.join(available_tabs)}", 
+                  file=sys.stderr)
+    
+    except Exception as e:
+        print(f"⚠️  Could not fetch tabs (falling back to plain text export): {e}", file=sys.stderr)
+    
+    # Fallback: use Drive API export
+    print(f"📄 Fetching Google Doc {doc_id} as plain text (no tab support)...", file=sys.stderr)
     drive = build("drive", "v3", credentials=creds)
-
-    print(f"📄 Fetching Google Doc {doc_id} as plain text...", file=sys.stderr)
     data = drive.files().export(fileId=doc_id, mimeType="text/plain").execute()
     if isinstance(data, bytes):
         return data.decode("utf-8", errors="replace")
@@ -157,6 +207,35 @@ def weekday_start_time(d: date) -> time:
         return time(hour=9, minute=0)
     # Default: 8am if we ever see another weekday
     return time(hour=8, minute=0)
+
+
+
+def is_class_heading(line: str) -> bool:
+    """Check if a line is a class heading.
+    
+    Supports formats:
+    - "Monday, Jan 5 — Stretch & Strength"
+    - "FEB 2 – Stretch & Strength"
+    - "### Any heading"
+    """
+    stripped = line.strip()
+    
+    # Original format: markdown heading
+    if stripped.startswith("###"):
+        return True
+    
+    # Original format: weekday-based
+    weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    if any(stripped.startswith(day) for day in weekdays):
+        return True
+    
+    # New format: "FEB 2", "JAN 15", etc.
+    # Match patterns like: FEB 2, JAN 15, MARCH 3, etc.
+    month_pattern = r'^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{1,2}\s*[–—-]'
+    if re.match(month_pattern, stripped, re.IGNORECASE):
+        return True
+    
+    return False
 
 
 def parse_classes(doc_text: str, tz: ZoneInfo) -> List[ClassEntry]:
@@ -187,7 +266,7 @@ def parse_classes(doc_text: str, tz: ZoneInfo) -> List[ClassEntry]:
             entries.append(entry)
 
     for ln in lines:
-        if ln.strip().startswith("###") or ln.strip().startswith("Thursday") or ln.strip().startswith("Monday") or ln.strip().startswith("Tuesday") or ln.strip().startswith("Saturday"):
+        if is_class_heading(ln):
             # Heuristic: heading for a new class
             flush_block(current_block)
             current_block = [ln]
@@ -342,9 +421,15 @@ def fetch_marvelous_events() -> list[dict]:
     except Exception as e:  # pragma: no cover - corrupt cache
         print(f"⚠️ Failed to read Marvelous cache {cache_path}: {e}", file=sys.stderr)
 
-    # Fallback: hit live API directly
+    # Fallback: hit live API directly with browser headers to avoid 403
     try:
-        resp = requests.get(MARVELOUS_EVENTS_URL, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://studio.tiffanywoodyoga.com/calendar",
+            "Origin": "https://studio.tiffanywoodyoga.com",
+        }
+        resp = requests.get(MARVELOUS_EVENTS_URL, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, list):
@@ -435,12 +520,13 @@ def compute_due_reminders(
     now: datetime,
     state: Dict[str, Dict[str, str]],
     window_minutes: int = 15,
+    force: bool = False,
 ) -> List[Tuple[ClassEntry, int]]:
     """Return list of (class, offset_hours) that should fire now.
 
     A reminder is "due" if:
     - now is within [send_at, send_at + window]
-    - and state does not already contain an entry for (class.id, offset)
+    - and state does not already contain an entry for (class.id, offset) (unless force=True)
     """
 
     due: List[Tuple[ClassEntry, int]] = []
@@ -450,7 +536,7 @@ def compute_due_reminders(
         for offset in offsets:
             key = str(offset)
             sent_for_class = state.get(cls.id, {})
-            if key in sent_for_class:
+            if not force and key in sent_for_class:
                 continue
 
             send_at = cls.start_dt - timedelta(hours=offset)
@@ -586,6 +672,7 @@ def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Send class reminder emails based on Google Doc schedule.")
     parser.add_argument("--now", help="Override current time (ISO 8601) for testing, e.g. 2026-01-14T07:00")
     parser.add_argument("--dry-run", action="store_true", help="Do not actually send emails; print them instead.")
+    parser.add_argument("--force", action="store_true", help="Ignore reminder state and send even if already sent.")
     args = parser.parse_args(argv)
 
     doc_id = os.environ.get("GOOGLE_DOC_ID")
@@ -639,7 +726,7 @@ def main(argv: List[str] | None = None) -> int:
         print("⚠️ No classes parsed from Google Doc. Check the document format.", file=sys.stderr)
         return 0
 
-    due = compute_due_reminders(classes, offsets, now, state)
+    due = compute_due_reminders(classes, offsets, now, state, force=args.force)
 
     if not due:
         print("No reminders due at this time.")
