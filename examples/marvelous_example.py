@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""Example usage of the MarvelousClient library."""
+"""Example usage of the marvy library."""
 
 import os
-import sys
 from datetime import datetime, timedelta
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-from marvelous_client import MarvelousClient, MarvelousAPIError
+from marvy import Client, APIError
 
 
 def example_basic_usage():
@@ -15,7 +12,7 @@ def example_basic_usage():
     print("=== Basic Usage Example ===\n")
     
     token = os.environ.get("MARVELOUS_TOKEN", "your-token-here")
-    client = MarvelousClient(auth_token=token)
+    client = Client(auth_token=token)
     
     try:
         print("Listing events...")
@@ -28,7 +25,7 @@ def example_basic_usage():
             print(f"  ID: {first_event['id']}")
             print(f"  Start: {first_event['event_start_datetime']}")
         
-    except MarvelousAPIError as e:
+    except APIError as e:
         print(f"Error: {e}")
 
 

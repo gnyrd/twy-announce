@@ -1,3 +1,4 @@
+marvy @ git+ssh://git@github.com/gnyrd/marvy.git@v0.1.0
 google-auth
 google-auth-oauthlib
 google-api-python-client

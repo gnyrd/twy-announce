@@ -70,6 +70,7 @@ class ClassEntry:
     key_actions: str | None = None
     class_focus: str | None = None
     categories: str | None = None
+    raw_content: str | None = None  # Full content block for simpler formatting
 
 
 def load_credentials():
@@ -310,22 +311,35 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
         # Nothing we can do
         return None
 
-    # Series/name from heading line, e.g. "Thursday, Jan 15 — Expanding Potential"
+    # Series/name from heading line, e.g. "Thursday, Jan 15 — Expanding Potential" or "FEB 2 – Stretch & Strength"
     heading = block[0].strip().lstrip("# ").strip("*")
     series: str | None = None
-    if "—" in heading:
+    title_from_heading: str | None = None
+    
+    if "—" in heading:  # em-dash
         _, _, after = heading.partition("—")
         series = after.strip()
+    elif "–" in heading:  # en-dash (used in "FEB 2 – Stretch & Strength")
+        _, _, after = heading.partition("–")
+        title_from_heading = after.strip()
 
-    # Class title
-    title = series or "Class"
+    # Class title - try Title/Theme: or Class Title: fields first, then fall back to heading
+    title = None
     for ln in block:
-        if "Class Title:" in ln:
-            _, _, tail = ln.partition("Class Title:")
-            tail = tail.strip()
-            if tail:
-                title = tail
+        ln_lower = ln.strip().lower()
+        if "title/theme:" in ln_lower:
+            _, _, tail = ln.partition(":")
+            title = tail.strip()
             break
+        elif "class title:" in ln_lower:
+            _, _, tail = ln.partition(":")
+            title = tail.strip()
+            break
+    
+    # Fall back to extracted title or series from heading
+    if not title:
+        title = title_from_heading or series or "Class"
+
 
     start_time = weekday_start_time(cls_date)
     start_dt = datetime.combine(cls_date, start_time, tzinfo=tz)
@@ -334,7 +348,11 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
 
     # Extract rich text fields from block
     def norm_label(s: str) -> str:
-        return s.strip().strip('*').rstrip(':').lower()
+        # Extract just the label part (before the colon)
+        label = s.strip().strip('*')
+        if ':' in label:
+            label = label.split(':', 1)[0]
+        return label.strip().lower()
 
     description = None
     affirmation = None
@@ -344,9 +362,12 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
 
     labels = {
         'description': 'description',
+        'energetic pulse': 'description',  # Feb format
         'affirmation of the class': 'affirmation',
+        'affirmation': 'affirmation',  # Feb format (shorter)
         'key actions': 'key_actions',
         'class focus': 'class_focus',
+        'physical arc': 'class_focus',  # Feb format
         'categories': 'categories',
     }
 
@@ -385,6 +406,16 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
             categories = value
         i = j
 
+
+    # Extract raw content (everything between heading and "Required Items")
+    raw_content_lines = []
+    for ln in block[1:]:  # Skip the heading
+        ln_lower = ln.strip().lower()
+        if ln_lower.startswith('required item'):
+            break
+        if ln.strip():  # Skip empty lines
+            raw_content_lines.append(ln)
+    raw_content = '\n\n'.join(raw_content_lines) if raw_content_lines else None
     return ClassEntry(
         id=entry_id,
         title=title,
@@ -396,6 +427,7 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
         key_actions=key_actions,
         class_focus=class_focus,
         categories=categories,
+        raw_content=raw_content,
     )
 
 
@@ -568,33 +600,39 @@ def build_email(cls: ClassEntry, offset: int, tz: ZoneInfo, to_addrs: List[str],
     # Intro line
     wa_lines.append(f"✨ Join Tiff for class on {date_str} at {time_str}")
     wa_lines.append("")
-    wa_lines.append(f"*\"{cls.title}\"*")
-    wa_lines.append("")
-
-    # Rich fields from the class source, when available
-    if getattr(cls, 'description', None):
-        wa_lines.append(cls.description)
+    
+    # Use raw_content if available (simpler format), otherwise use parsed fields
+    if getattr(cls, 'raw_content', None):
+        wa_lines.append(cls.raw_content)
+        wa_lines.append("")
+    else:
+        # Legacy format with parsed fields
+        wa_lines.append(f"*\"{cls.title}\"*")
         wa_lines.append("")
 
-    if getattr(cls, 'affirmation', None):
-        wa_lines.append("*Affirmation of the Class:*")
-        wa_lines.append(cls.affirmation)
-        wa_lines.append("")
+        if getattr(cls, 'description', None):
+            wa_lines.append(cls.description)
+            wa_lines.append("")
 
-    if getattr(cls, 'key_actions', None):
-        wa_lines.append("*Key Actions:*")
-        wa_lines.append(cls.key_actions)
-        wa_lines.append("")
+        if getattr(cls, 'affirmation', None):
+            wa_lines.append("*Affirmation of the Class:*")
+            wa_lines.append(cls.affirmation)
+            wa_lines.append("")
 
-    if getattr(cls, 'class_focus', None):
-        wa_lines.append("*Class Focus:*")
-        wa_lines.append(cls.class_focus)
-        wa_lines.append("")
+        if getattr(cls, 'key_actions', None):
+            wa_lines.append("*Key Actions:*")
+            wa_lines.append(cls.key_actions)
+            wa_lines.append("")
 
-    if getattr(cls, 'categories', None):
-        wa_lines.append("*Categories:*")
-        wa_lines.append(cls.categories)
-        wa_lines.append("")
+        if getattr(cls, 'class_focus', None):
+            wa_lines.append("*Class Focus:*")
+            wa_lines.append(cls.class_focus)
+            wa_lines.append("")
+
+        if getattr(cls, 'categories', None):
+            wa_lines.append("*Categories:*")
+            wa_lines.append(cls.categories)
+            wa_lines.append("")
 
     if join_url:
         wa_lines.append(f"*Link to Join:* {join_url}")

@@ -424,3 +424,60 @@ Updated `scripts/send_class_email_reminders.py` to support Google Docs tabs and 
 ### Commit
 - Hash: 4150264
 - Message: "Support Google Docs tabs and flexible date formats"
+
+---
+
+## 2026-02-02: Simplified Email Reminder Formatting
+
+### Problem
+Email reminders were not displaying class details correctly for February classes. The parser was trying to extract individual fields (description, affirmation, etc.) but the February format uses different field names and the extraction logic was failing.
+
+### Solution
+Simplified the email format to include all raw content from the class entry between the heading and "Required Items" line. This makes the system more robust to format changes.
+
+### Changes Made
+
+**ClassEntry dataclass:**
+- Added `raw_content: str | None` field to store the full content block
+
+**parse_block function:**
+- Extract all content lines between heading and "Required Items"
+- Join with double newlines to create `raw_content` field
+- Still extract title from "Title/Theme:" or heading
+
+**build_email function:**
+- Check for `raw_content` field first
+- If present, use raw content as-is in the email
+- Otherwise, fall back to legacy format with individual parsed fields
+
+**Email format now:**
+```
+✨ Join Tiff for class on February 02, 2026 at 5:30 PM MST
+
+Title/Theme: Grounding Boundaries
+
+Energetic Pulse: Establish containment; root to stabilize...
+
+Apex Pose: Parsvottanasana
+
+UPAs: Muscular Energy...
+
+Physical Arc: Standing postures...
+
+Affirmation: Containment is courage.
+
+*Link to Join:* https://studio.tiffanywoodyoga.com/...
+```
+
+### Testing
+- Verified Feb 2 and Feb 3 reminder emails show correct format
+- Re-sent corrected reminders to all recipients
+- Format works for both January (parsed fields) and February (raw content) entries
+
+### Files Modified
+- `scripts/send_class_email_reminders.py`
+  - Updated ClassEntry dataclass
+  - Updated parse_block to extract raw_content
+  - Updated build_email to use raw_content when available
+  - Fixed norm_label to properly extract label portion before colon
+  - Updated title extraction to handle "Title/Theme:" field
