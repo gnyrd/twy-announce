@@ -1,6 +1,6 @@
-# twy-whatsapp-poster
+# twy-announce
 
-**Automated WhatsApp group admin posting for TWEEE class announcements**
+**Automated communication tools for TWEEE operations**
 
 ## Documentation
 
@@ -93,7 +93,8 @@ See [STATUS.md](STATUS.md) for detailed current state.
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| WhatsApp Automation | ⏳ **Testing** | Posting to WhatsApp groups |
+| Daily Status Report | ✅ **Active** | Trello campaign status → Slack |
+| WhatsApp Automation | ⏸️ **Paused** | Posting to WhatsApp groups |
 | Google Drive Parser | 📋 Planned | Extract events from schedule document |
 | Scheduler | 📋 Planned | Daily automation |
 | Marvelous Integration | 📋 Planned | Fetch class links |
