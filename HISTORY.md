@@ -1,4 +1,4 @@
-# twy-whatsapp-poster - Change History
+# twy-announce-poster - Change History
 
 ---
 
@@ -6,7 +6,7 @@
 
 ### 2026-01-20: Consolidated WhatsApp tools
 **Category:** Infrastructure / Documentation  
-**Summary:** Merged the older `twy-whatsapp-announcer` CLI and reference docs into this repo.
+**Summary:** Merged the older `twy-announce-announcer` CLI and reference docs into this repo.
 
 **Changes:**
 - Added `src/send_to_whatsapp.js` one-shot CLI for sending messages by group name.
@@ -64,7 +64,7 @@
 **Summary:** Created repository and documentation structure
 
 **Changes:**
-- Initialized Git repository as `twy-whatsapp-poster`
+- Initialized Git repository as `twy-announce-poster`
 - Implemented STATUS/FEATURES/HISTORY documentation system
 - Created WARP.md with project overview and AI agent rules
 - Created STATUS.md to track system health

@@ -63,7 +63,7 @@ TIMEZONE=America/Denver
 ## File Structure
 
 ```
-twy-whatsapp-poster/
+twy-announce-poster/
 ├── WARP.md              # Project overview & AI rules
 ├── STATUS.md            # Current state
 ├── TASKS.md             # Current work

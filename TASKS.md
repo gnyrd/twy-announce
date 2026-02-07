@@ -1,4 +1,4 @@
-# twy-whatsapp-poster - Current Tasks
+# twy-announce-poster - Current Tasks
 
 **Last Updated:** 2025-11-20
 

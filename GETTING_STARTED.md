@@ -28,7 +28,7 @@ WhatsApp automation is the **highest-risk component** because:
 ### 1. Install Dependencies
 
 ```bash
-cd ~/Repos/twy-whatsapp-poster
+cd ~/Repos/twy-announce-poster
 npm install
 ```
 
@@ -113,7 +113,7 @@ npm run test
 
 Message:
 ---
-🤖 Test message from twy-whatsapp-poster automation
+🤖 Test message from twy-announce-poster automation
 
 If you see this, WhatsApp posting is working! ✅
 ---

@@ -1,5 +1,5 @@
 {
-  "name": "twy-whatsapp-poster",
+  "name": "twy-announce",
   "version": "0.1.0",
   "description": "WhatsApp group admin automation for TWEEE class announcements",
   "main": "whatsapp_bot.js",

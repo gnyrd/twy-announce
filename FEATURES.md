@@ -1,4 +1,4 @@
-# twy-whatsapp-poster - Strategic Roadmap
+# twy-announce-poster - Strategic Roadmap
 
 **Last Updated:** 2025-11-20
 

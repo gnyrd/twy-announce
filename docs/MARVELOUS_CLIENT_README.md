@@ -181,7 +181,7 @@ See `docs/MARVELOUS_API.md` for complete API documentation including:
 
 ## License
 
-Part of the twy-whatsapp-poster project.
+Part of the twy-announce-poster project.
 
 ## Product Management
 

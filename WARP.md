@@ -1,4 +1,4 @@
-# twy-whatsapp-poster
+# twy-announce-poster
 
 **WhatsApp Group Admin Automation System**
 
@@ -66,7 +66,7 @@ At the moment this project is primarily a Node.js WhatsApp tool, with Python-bas
 
 Key pieces that exist today:
 - `list_groups.js` – helper to list group IDs.
-- `src/send_to_whatsapp.js` – small one-shot CLI (from the former twy-whatsapp-announcer repo) that sends a message to a group by exact name.
+- `src/send_to_whatsapp.js` – small one-shot CLI (from the former twy-announce-announcer repo) that sends a message to a group by exact name.
 - `docs/references/` – sample class source and WhatsApp post examples used for designing templates.
 
 Planned (but not yet present) Python modules mentioned elsewhere in this file (scheduler, Drive parser, Marvelous integration) should be treated as future work.
@@ -151,9 +151,9 @@ When user asks about:
 
 **Current cron setup on Hetzner (reference):**
 - Marvelous sync (twice daily) –
-  - `0 9,18 * * * cd /root/twy-whatsapp && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
+  - `0 9,18 * * * cd /root/twy-announce && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
 - Email reminders (every 30 min) –
-  - `*/30 * * * * cd /root/twy-whatsapp && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
+  - `*/30 * * * * cd /root/twy-announce && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
 
 - Intended deployment is a Hetzner host running the reminder pipeline under cron.
 - Cron calls the thin wrapper script `scripts/run_class_email_reminders.sh` approximately every 30 minutes.
@@ -164,7 +164,7 @@ When user asks about:
 
 **Example test command (used during development):**
 ```bash
-cd /root/twy-whatsapp
+cd /root/twy-announce
 mv data/reminder_state.json data/reminder_state_backup_test.json 2>/dev/null || true
 REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh --now 2026-01-14T06:05
 ```
@@ -388,6 +388,23 @@ client.update_media(media_id, title="New Title")
 
 
 ---
+
+## 2026-02-07: Repository Renamed from twy-whatsapp to twy-announce
+
+### Changes Made
+Renamed repository to better reflect its broader purpose:
+
+**Updated References:**
+- Changed package name from `twy-whatsapp-poster` to `twy-announce` in package.json and package-lock.json
+- Updated all documentation files (README.md, WARP.md, STATUS.md, FEATURES.md, HISTORY.md, TASKS.md, QUICKREF.md, GETTING_STARTED.md)
+- Updated configuration files (.env.example, whatsapp_bot.js)
+- Updated Marvelous client documentation (docs/MARVELOUS_CLIENT_README.md)
+- Changed git remote URL from git@github.com:gnyrd/twy-whatsapp.git to git@github.com:gnyrd/twy-announce.git
+- Renamed directory from /root/twy-whatsapp to /root/twy-announce
+
+**Rationale:**
+The new name "twy-announce" better reflects that this system handles various announcement channels (email, WhatsApp, etc.) rather than being WhatsApp-specific.
+
 
 ## 2026-02-02: Enhanced Email Reminder Script
 

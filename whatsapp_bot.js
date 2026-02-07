@@ -96,7 +96,7 @@ async function sendTestMessage() {
         process.exit(1);
     }
     
-    const testMessage = '🤖 Test message from twy-whatsapp-poster automation\n\nIf you see this, WhatsApp posting is working! ✅';
+    const testMessage = '🤖 Test message from twy-announce-poster automation\n\nIf you see this, WhatsApp posting is working! ✅';
     
     if (DRY_RUN) {
         console.log('🔍 DRY RUN MODE - Would send to group:', GROUP_ID);
