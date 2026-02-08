@@ -4,9 +4,9 @@
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import requests
 from dotenv import load_dotenv
@@ -16,6 +16,7 @@ load_dotenv()
 
 # Configuration
 JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
+HISTORY_DIR = Path("/root/twy-announce/data/marvelous/history")
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 
@@ -51,14 +52,128 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
         raise Exception(f"Failed to fetch Marvelous report data: {e}")
 
 
-def format_report(subscriptions: List[Dict[str, Any]]) -> str:
-    """Format subscription data into Slack message."""
-    # Calculate totals
-    total_subs = sum(row["# of Active Subscriptions"] for row in subscriptions)
-    total_revenue = sum(row["Revenue per Cycle"] for row in subscriptions)
+def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
+    """Save daily subscription data to history."""
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Get today's date
-    today = datetime.now().strftime("%A, %b %d, %Y")
+    snapshot = {
+        "date": date,
+        "timestamp": datetime.now().isoformat(),
+        "subscriptions": subscriptions
+    }
+    
+    filepath = HISTORY_DIR / f"{date}.json"
+    with open(filepath, "w") as f:
+        json.dump(snapshot, f, indent=2)
+    
+    print(f"✓ Saved snapshot to {filepath}")
+
+
+def load_historical_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load historical snapshot for a specific date."""
+    filepath = HISTORY_DIR / f"{date}.json"
+    if not filepath.exists():
+        return None
+    
+    try:
+        with open(filepath) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load snapshot for {date}: {e}")
+        return None
+
+
+def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Calculate total subscriptions and revenue."""
+    return {
+        "total_subs": sum(row["# of Active Subscriptions"] for row in subscriptions),
+        "total_revenue": sum(row["Revenue per Cycle"] for row in subscriptions)
+    }
+
+
+def format_change(current: float, previous: float) -> str:
+    """Format change with arrow and sign."""
+    diff = current - previous
+    if diff > 0:
+        return f"↑{diff:+.0f}"
+    elif diff < 0:
+        return f"↓{abs(diff):.0f}"
+    else:
+        return "→"
+
+
+def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
+    """Format subscription data into Slack message with historical comparisons."""
+    # Current totals
+    current_totals = calculate_totals(subscriptions)
+    
+    # Load historical data
+    now = datetime.now()
+    week_ago_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+    month_ago_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    year_ago_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    
+    week_snapshot = load_historical_snapshot(week_ago_date)
+    month_snapshot = load_historical_snapshot(month_ago_date)
+    year_snapshot = load_historical_snapshot(year_ago_date)
+    
+    # Format date
+    today_formatted = now.strftime("%A, %b %d, %Y")
+    
+    # Build message
+    lines = [
+        "📊 *TWY Daily Status Report*",
+        f"_{today_formatted}_",
+        "",
+        f"💰 *Active Subscriptions: {current_totals['total_subs']:.0f}*",
+        f"Total Revenue: ${current_totals['total_revenue']:,.0f}/cycle",
+    ]
+    
+    # Add comparisons only if historical data exists
+    comparisons_added = False
+    
+    # Week-over-week
+    if week_snapshot:
+        week_totals = calculate_totals(week_snapshot["subscriptions"])
+        subs_change = format_change(current_totals['total_subs'], week_totals['total_subs'])
+        revenue_change = format_change(current_totals['total_revenue'], week_totals['total_revenue'])
+        
+        if not comparisons_added:
+            lines.append("")
+            comparisons_added = True
+        
+        lines.append(f"📈 *Week over Week* ({week_ago_date}):")
+        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - week_totals['total_revenue']:+,.0f}")
+    
+    # Month-over-month
+    if month_snapshot:
+        month_totals = calculate_totals(month_snapshot["subscriptions"])
+        subs_change = format_change(current_totals['total_subs'], month_totals['total_subs'])
+        revenue_change = format_change(current_totals['total_revenue'], month_totals['total_revenue'])
+        
+        if not comparisons_added:
+            lines.append("")
+            comparisons_added = True
+        
+        lines.append(f"📅 *Month over Month* ({month_ago_date}):")
+        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - month_totals['total_revenue']:+,.0f}")
+    
+    # Year-over-year
+    if year_snapshot:
+        year_totals = calculate_totals(year_snapshot["subscriptions"])
+        subs_change = format_change(current_totals['total_subs'], year_totals['total_subs'])
+        revenue_change = format_change(current_totals['total_revenue'], year_totals['total_revenue'])
+        
+        if not comparisons_added:
+            lines.append("")
+            comparisons_added = True
+        
+        lines.append(f"🎂 *Year over Year* ({year_ago_date}):")
+        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - year_totals['total_revenue']:+,.0f}")
+    
+    # Product breakdown
+    lines.append("")
+    lines.append("*By Product:*")
     
     # Group by product
     products = {}
@@ -67,17 +182,6 @@ def format_report(subscriptions: List[Dict[str, Any]]) -> str:
         if product not in products:
             products[product] = []
         products[product].append(row)
-    
-    # Build message
-    lines = [
-        "📊 *TWY Daily Status Report*",
-        f"_{today}_",
-        "",
-        f"💰 *Active Subscriptions: {total_subs}*",
-        f"Total Revenue: ${total_revenue:,.0f}/cycle",
-        "",
-        "*By Product:*",
-    ]
     
     # Sort products alphabetically
     for product in sorted(products.keys()):
@@ -135,12 +239,17 @@ def main():
     print("Daily Status Report")
     print("=" * 60)
     
+    today = datetime.now().strftime("%Y-%m-%d")
+    
     try:
         # Get data
         subscriptions = get_marvelous_data()
         
+        # Save snapshot
+        save_daily_snapshot(subscriptions, today)
+        
         # Format message
-        message = format_report(subscriptions)
+        message = format_report(subscriptions, today)
         print("\nReport preview:")
         print("-" * 60)
         print(message)

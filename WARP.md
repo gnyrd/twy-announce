@@ -333,6 +333,16 @@ Implemented automated daily subscription status reports from Marvelous to Slack.
 - Credentials stored in `.env` (gitignored)
 - Tokens refreshed automatically, never hardcoded
 
+
+**Historical Data Tracking (Added 2026-02-08):**
+- Daily snapshots saved to `data/marvelous/history/{date}.json`
+- Conditional comparisons shown when data exists:
+  - Week-over-week (7 days ago)
+  - Month-over-month (30 days ago)
+  - Year-over-year (365 days ago)
+- Comparisons display subscription and revenue changes with directional arrows
+- Gracefully handles missing historical data (comparisons appear as data accumulates)
+
 **Future Enhancements:**
 - Historical data tracking for week-over-week and month-over-month comparisons
 - Additional Marvelous reports integration
