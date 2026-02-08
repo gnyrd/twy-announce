@@ -2,7 +2,7 @@
 
 **WhatsApp Group Admin Automation System**
 
-Last Updated: 2026-01-20
+Last Updated: 2026-02-08
 
 ---
 
@@ -284,6 +284,59 @@ Private project for personal use.
 ## Contact
 
 Project maintained by ganyard for TWEEE WhatsApp group administration.
+
+
+## 2026-02-08 - Daily Status Report Automation
+
+Implemented automated daily subscription status reports from Marvelous to Slack.
+
+**Features:**
+- JWT token refresh automation using Playwright browser automation
+- Daily subscription data fetch from Marvelous Metabase reports
+- Formatted Slack reports with subscription counts and revenue
+- Decoupled JWT refresh (hourly) from report generation (daily at 6am MT)
+
+**Architecture:**
+1. **JWT Refresh (`src/refresh_jwt.py`)**
+   - Logs into Marvelous via magic code URL
+   - Extracts JWT from report iframe using headless Chromium
+   - Caches token to `.jwt_cache.json`
+   - Runs hourly via cron (tokens expire in ~2 hours)
+
+2. **Daily Report (`src/daily_status_report.py`)**
+   - Loads cached JWT token
+   - Fetches Report 56 (Active Subscriptions by Product) from Metabase
+   - Formats data with proper sorting (Monthly before Other)
+   - Posts to Slack via webhook
+   - Runs daily at 6am Mountain Time
+
+**Configuration (in .env):**
+- `MARVELOUS_MAGIC_URL` - Dashboard access URL with magic code
+- `MARVELOUS_SECONDARY_PASSWORD` - Authentication password
+- `SLACK_WEBHOOK_URL` - Slack incoming webhook for posting
+
+**Cron Jobs:**
+```bash
+# JWT refresh every hour
+0 * * * * cd /root/twy-announce && python3 src/refresh_jwt.py
+
+# Daily report at 6am MT (1pm UTC)
+0 13 * * * cd /root/twy-announce && python3 src/daily_status_report.py
+```
+
+**Dependencies Added:**
+- `playwright` - Browser automation for JWT extraction
+- Chromium browser installed via `playwright install chromium`
+
+**Security:**
+- JWT cache file (`.jwt_cache.json`) excluded from git
+- Credentials stored in `.env` (gitignored)
+- Tokens refreshed automatically, never hardcoded
+
+**Future Enhancements:**
+- Historical data tracking for week-over-week and month-over-month comparisons
+- Additional Marvelous reports integration
+- Alert notifications for subscription changes
 
 ## 2026-01-20 - HeyMarvelous API Discovery & Client Library
 
