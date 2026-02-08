@@ -17,6 +17,7 @@ load_dotenv()
 # Configuration
 JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
 HISTORY_DIR = Path("/root/twy-announce/data/marvelous/history")
+MAILCHIMP_HISTORY_DIR = Path("/root/twy-announce/data/mailchimp/history")
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 
@@ -83,6 +84,20 @@ def load_historical_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load Mailchimp snapshot for a specific date."""
+    filepath = MAILCHIMP_HISTORY_DIR / f"{date}.json"
+    if not filepath.exists():
+        return None
+    
+    try:
+        with open(filepath) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load Mailchimp snapshot for {date}: {e}")
+        return None
+
+
 def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     """Calculate total subscriptions and revenue."""
     return {
@@ -124,17 +139,47 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     month_snapshot = load_historical_snapshot(month_ago_date)
     year_snapshot = load_historical_snapshot(year_ago_date)
     
+    # Load Mailchimp data
+    mc_today_snapshot = load_mailchimp_snapshot(today)
+    mc_week_snapshot = load_mailchimp_snapshot(week_ago_date)
+    mc_month_snapshot = load_mailchimp_snapshot(month_ago_date)
+    mc_year_snapshot = load_mailchimp_snapshot(year_ago_date)
+    
     # Format date
     today_formatted = now.strftime("%A, %b %d, %Y")
     
     # Build message
     lines = [
-        "*TWY Daily Status Report*",
-        today_formatted,
+        (f"*TWY Daily Status Report* {today_formatted}"),
         "",
-        "*Membership:*",
-        f" Active Students: {current_totals['total_subs']:.0f}",
     ]
+    
+    # Add Subscribers section if we have today's mailchimp data
+    if mc_today_snapshot:
+        subscriber_count = mc_today_snapshot["subscriber_count"]
+        lines.append("*Subscribers:*")
+        lines.append(f" Total: {subscriber_count}")
+        
+        # Add Mailchimp historical comparisons if data exists
+        if mc_week_snapshot or mc_month_snapshot or mc_year_snapshot:
+            lines.append("")
+            
+            if mc_week_snapshot:
+                change = format_change(subscriber_count, mc_week_snapshot["subscriber_count"])
+                lines.append(f"  Week over week: {change}")
+            
+            if mc_month_snapshot:
+                change = format_change(subscriber_count, mc_month_snapshot["subscriber_count"])
+                lines.append(f"  Month over month: {change}")
+            
+            if mc_year_snapshot:
+                change = format_change(subscriber_count, mc_year_snapshot["subscriber_count"])
+                lines.append(f"  Year over year: {change}")
+        
+        lines.append("")
+    
+    lines.append("*Membership:*")
+    lines.append(f" Active Students: {current_totals['total_subs']:.0f}")
     
     # Add historical comparisons if data exists
     if week_snapshot or month_snapshot or year_snapshot:

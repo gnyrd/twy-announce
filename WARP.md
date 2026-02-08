@@ -561,3 +561,54 @@ Affirmation: Containment is courage.
   - Updated build_email to use raw_content when available
   - Fixed norm_label to properly extract label portion before colon
   - Updated title extraction to handle "Title/Theme:" field
+
+## 2026-02-08: Mailchimp Subscriber Data Integration
+
+### Summary
+Added Mailchimp subscriber count to the daily status report, displayed above the Membership section.
+
+### Changes Made
+
+**New Files:**
+- `src/mailchimp_subscriber_data.py` - Fetches subscriber count from Mailchimp and saves daily snapshots
+
+**Modified Files:**
+- `src/daily_status_report.py` - Loads cached Mailchimp data and displays Subscribers section
+- `requirements.txt` - Added `mailchimp3` dependency
+
+**Data Storage:**
+- Snapshots saved to `data/mailchimp/history/{date}.json`
+- Format: `{"date": "YYYY-MM-DD", "timestamp": "ISO", "subscriber_count": N}`
+
+**Report Output:**
+```
+*TWY Daily Status Report*
+Sunday, Feb 08, 2026
+
+*Subscribers:*
+ Total: 924
+
+  Week over week: +12
+  Month over month: +45
+  Year over year: +200
+
+*Membership:*
+ Active Students: 150
+ ...
+```
+
+**Configuration (.env):**
+- `MAILCHIMP_API_KEY` - API key for Mailchimp
+- `MAILCHIMP_AUDIENCE_ID` - Audience/list ID to track
+
+**Usage:**
+```bash
+# Run mailchimp data fetch first
+python3 src/mailchimp_subscriber_data.py
+
+# Then run daily report
+python3 src/daily_status_report.py
+```
+
+**Pattern:**
+Follows same pattern as Marvelous data - separate script fetches and caches data, daily report reads from cache.
