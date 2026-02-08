@@ -91,15 +91,22 @@ def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
+def simplify_product_name(product: str) -> str:
+    """Simplify product names for display."""
+    if product == "The Archive":
+        return "TWY Archive"
+    return product
+
+
 def format_change(current: float, previous: float) -> str:
-    """Format change with arrow and sign."""
+    """Format change with sign."""
     diff = current - previous
     if diff > 0:
-        return f"↑{diff:+.0f}"
+        return f"+{diff:.0f}"
     elif diff < 0:
-        return f"↓{abs(diff):.0f}"
+        return f"{diff:.0f}"
     else:
-        return "→"
+        return "0"
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
@@ -122,58 +129,34 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     
     # Build message
     lines = [
-        "📊 *TWY Daily Status Report*",
-        f"_{today_formatted}_",
+        "*TWY Daily Status Report*",
+        today_formatted,
         "",
-        f"💰 *Active Subscriptions: {current_totals['total_subs']:.0f}*",
-        f"Total Revenue: ${current_totals['total_revenue']:,.0f}/cycle",
+        "*Membership:*",
+        f" Active Students: {current_totals['total_subs']:.0f}",
     ]
     
-    # Add comparisons only if historical data exists
-    comparisons_added = False
-    
-    # Week-over-week
-    if week_snapshot:
-        week_totals = calculate_totals(week_snapshot["subscriptions"])
-        subs_change = format_change(current_totals['total_subs'], week_totals['total_subs'])
-        revenue_change = format_change(current_totals['total_revenue'], week_totals['total_revenue'])
+    # Add historical comparisons if data exists
+    if week_snapshot or month_snapshot or year_snapshot:
+        lines.append("")
         
-        if not comparisons_added:
-            lines.append("")
-            comparisons_added = True
+        if week_snapshot:
+            week_totals = calculate_totals(week_snapshot["subscriptions"])
+            change = format_change(current_totals['total_subs'], week_totals['total_subs'])
+            lines.append(f"  Week over week: {change}")
         
-        lines.append(f"📈 *Week over Week* ({week_ago_date}):")
-        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - week_totals['total_revenue']:+,.0f}")
-    
-    # Month-over-month
-    if month_snapshot:
-        month_totals = calculate_totals(month_snapshot["subscriptions"])
-        subs_change = format_change(current_totals['total_subs'], month_totals['total_subs'])
-        revenue_change = format_change(current_totals['total_revenue'], month_totals['total_revenue'])
+        if month_snapshot:
+            month_totals = calculate_totals(month_snapshot["subscriptions"])
+            change = format_change(current_totals['total_subs'], month_totals['total_subs'])
+            lines.append(f"  Month over month: {change}")
         
-        if not comparisons_added:
-            lines.append("")
-            comparisons_added = True
-        
-        lines.append(f"📅 *Month over Month* ({month_ago_date}):")
-        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - month_totals['total_revenue']:+,.0f}")
-    
-    # Year-over-year
-    if year_snapshot:
-        year_totals = calculate_totals(year_snapshot["subscriptions"])
-        subs_change = format_change(current_totals['total_subs'], year_totals['total_subs'])
-        revenue_change = format_change(current_totals['total_revenue'], year_totals['total_revenue'])
-        
-        if not comparisons_added:
-            lines.append("")
-            comparisons_added = True
-        
-        lines.append(f"🎂 *Year over Year* ({year_ago_date}):")
-        lines.append(f"  Subs: {subs_change} | Revenue: ${current_totals['total_revenue'] - year_totals['total_revenue']:+,.0f}")
+        if year_snapshot:
+            year_totals = calculate_totals(year_snapshot["subscriptions"])
+            change = format_change(current_totals['total_subs'], year_totals['total_subs'])
+            lines.append(f"  Year over year: {change}")
     
     # Product breakdown
     lines.append("")
-    lines.append("*By Product:*")
     
     # Group by product
     products = {}
@@ -192,8 +175,9 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         for cycle_data in cycles:
             billing_cycle = cycle_data["Billing Cycle"]
             subs = cycle_data["# of Active Subscriptions"]
-            revenue = cycle_data["Revenue per Cycle"]
-            lines.append(f"✅ {product} ({billing_cycle}): {subs} subs - ${revenue:,.0f}")
+            student_word = "student" if subs == 1 else "students"
+            display_name = simplify_product_name(product)
+            lines.append(f" {display_name} ({billing_cycle}): {subs} {student_word}")
     
     return "\n".join(lines)
 
