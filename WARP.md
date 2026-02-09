@@ -287,6 +287,19 @@ Project maintained by ganyard for TWEEE WhatsApp group administration.
 
 
 
+
+## 2026-02-09 - Fix .env Loading in Shell Scripts
+
+Fixed `.env` loading in `youtube_daily.sh` and `instagram_daily.sh` to handle values with special characters (spaces, angle brackets).
+
+**Problem:**
+- The `export $(grep ... | xargs)` pattern failed on `.env` values like `EMAIL_FROM="Name <email@example.com>"`
+- Caused error: `export: not a valid identifier`
+
+**Fix:**
+- Replaced with `set -a; source .env; set +a` which properly handles quoted values
+- Applied to both `youtube_daily.sh` and `instagram_daily.sh`
+
 ## 2026-02-09 - YouTube Subscriber Data Integration
 
 Implemented automated daily YouTube subscriber tracking similar to Instagram follower tracking.

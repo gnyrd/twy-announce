@@ -8,7 +8,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Load .env if it exists
 if [[ -f "$REPO_ROOT/.env" ]]; then
-    export $(grep -v '^#' "$REPO_ROOT/.env" | xargs)
+    set -a
+    source "$REPO_ROOT/.env"
+    set +a
 fi
 
 DATE=$(date +%Y-%m-%d)
