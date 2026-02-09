@@ -286,6 +286,58 @@ Private project for personal use.
 Project maintained by ganyard for TWEEE WhatsApp group administration.
 
 
+
+## 2026-02-09 - YouTube Subscriber Data Integration
+
+Implemented automated daily YouTube subscriber tracking similar to Instagram follower tracking.
+
+**Features:**
+- Daily YouTube subscriber count, view count, and video count snapshots
+- YouTube Data API v3 integration
+- Automated hourly cron job (runs once per day via file existence check)
+- Optional remote sync via scp
+
+**Architecture:**
+1. **YouTube Data Fetch (`src/youtube_subscriber_data.py`)**
+   - Fetches channel statistics via YouTube Data API v3
+   - Captures subscriber_count, view_count, video_count
+   - Saves daily snapshots to `data/youtube/history/{date}.json`
+   - Portable paths using Path.home() for cross-environment compatibility
+
+2. **Daily Wrapper Script (`src/youtube_daily.sh`)**
+   - Checks if today's file exists, exits early if present
+   - Runs Python script to fetch and save data
+   - Optionally syncs to remote server via scp
+   - Runs hourly via cron (effective once-per-day execution)
+
+**Configuration (in .env):**
+- `YOUTUBE_API_KEY` - YouTube Data API key (required)
+- `YOUTUBE_CHANNEL_ID` - Target channel ID (required)
+- `YOUTUBE_REMOTE_DEST` - Optional scp destination (e.g., `root@hetzner:/root/twy-announce/data/youtube/history/`)
+- `YOUTUBE_HISTORY_DIR` - Optional local history dir override (default: `data/youtube/history`)
+
+**Cron Job:**
+```bash
+# YouTube data fetch every hour (skips if today's file exists)
+0 * * * * /Users/admin/Repos/twy-announce/src/youtube_daily.sh
+```
+
+**Dependencies:**
+- `requests` - HTTP client for YouTube API calls
+- YouTube Data API v3 enabled in Google Cloud Console
+
+**Data Format:**
+```json
+{
+  "date": "2026-02-09",
+  "timestamp": "2026-02-09T12:33:31.027349",
+  "subscriber_count": 1070,
+  "view_count": 202062,
+  "video_count": 225
+}
+```
+
+
 ## 2026-02-08 - Daily Status Report Automation
 
 Implemented automated daily subscription status reports from Marvelous to Slack.
