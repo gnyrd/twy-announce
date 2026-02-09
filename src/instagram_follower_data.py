@@ -10,14 +10,23 @@ from pathlib import Path
 from dotenv import load_dotenv
 import instaloader
 
-# Load environment variables
-load_dotenv()
+# Determine repo root from script location
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
 
-# Configuration
-SCRIPT_DIR = Path(__file__).parent.parent
-INSTAGRAM_HISTORY_DIR = SCRIPT_DIR / "data/instagram/history"
-TARGET_PROFILE = "tiffanywoodyoga"
-SESSION_FILE = Path.home() / ".config/instaloader/session-tiffanywoodyoga"
+# Load environment variables
+load_dotenv(REPO_ROOT / ".env")
+
+# Configuration (with env var overrides)
+TARGET_PROFILE = os.getenv("INSTAGRAM_PROFILE", "tiffanywoodyoga")
+INSTAGRAM_HISTORY_DIR = Path(os.getenv(
+    "INSTAGRAM_HISTORY_DIR",
+    REPO_ROOT / "data/instagram/history"
+))
+SESSION_FILE = Path(os.getenv(
+    "INSTAGRAM_SESSION_FILE",
+    Path.home() / f".config/instaloader/session-{TARGET_PROFILE}"
+))
 
 
 def get_instagram_follower_count() -> int:

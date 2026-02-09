@@ -704,16 +704,26 @@ Added Instagram follower count to the daily status report Subscribers section.
 
 **Important: Instagram blocks datacenter IPs**
 - The `instagram_follower_data.py` script must be run from a non-datacenter IP (e.g., local machine)
-- Copy the resulting JSON file to the server before running daily status report
-- Local path: `~/Repos/twy-announce/data/instagram/history/{date}.json`
-- Server path: `/root/twy-announce/data/instagram/history/{date}.json`
+- The wrapper script `instagram_daily.sh` handles fetching and syncing to server
 
-**Usage:**
+**Self-Contained Deployment:**
+Both scripts are fully portable - they determine paths relative to their own location and read config from `.env`:
+- `src/instagram_follower_data.py` - Python script that fetches data
+- `src/instagram_daily.sh` - Wrapper that checks if today's file exists, runs fetch, and SCPs to server
+
+**Configuration (.env):**
 ```bash
-# On local machine (Instagram fetch)
-python3 src/instagram_follower_data.py
-scp data/instagram/history/YYYY-MM-DD.json root@SERVER:/root/twy-announce/data/instagram/history/
-
-# On server (daily report)
-python3 src/daily_status_report.py
+INSTAGRAM_REMOTE_DEST=root@hetzner:/root/twy-announce/data/instagram/history/
+# Optional overrides:
+# INSTAGRAM_PROFILE=tiffanywoodyoga
+# INSTAGRAM_SESSION_FILE=~/.config/instaloader/session-tiffanywoodyoga
+# INSTAGRAM_HISTORY_DIR=/path/to/history
 ```
+
+**Deployment:**
+1. Clone repo to any machine with residential IP
+2. Create instaloader session: `instaloader --login tiffanywoodyoga`
+3. Set `INSTAGRAM_REMOTE_DEST` in `.env`
+4. Add hourly cron: `0 * * * * /path/to/repo/src/instagram_daily.sh`
+
+The wrapper script runs hourly, skips if today's file already exists, ensuring it runs once per day when the machine is awake.
