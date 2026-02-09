@@ -19,6 +19,7 @@ JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
 HISTORY_DIR = Path("/root/twy-announce/data/marvelous/history")
 MAILCHIMP_HISTORY_DIR = Path("/root/twy-announce/data/mailchimp/history")
 INSTAGRAM_HISTORY_DIR = Path("/root/twy-announce/data/instagram/history")
+YOUTUBE_HISTORY_DIR = Path("/root/twy-announce/data/youtube/history")
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 
@@ -112,6 +113,20 @@ def load_instagram_snapshot(date: str) -> Optional[Dict[str, Any]]:
         print(f"Warning: Could not load Instagram snapshot for {date}: {e}")
         return None
 
+
+
+def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load YouTube snapshot for a specific date."""
+    filepath = YOUTUBE_HISTORY_DIR / f"{date}.json"
+    if not filepath.exists():
+        return None
+    
+    try:
+        with open(filepath) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load YouTube snapshot for {date}: {e}")
+        return None
 
 def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     """Calculate total subscriptions and revenue."""
@@ -208,6 +223,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     ig_month_snapshot = load_instagram_snapshot(month_ago_date)
     ig_year_snapshot = load_instagram_snapshot(year_ago_date)
     
+    # Load YouTube data
+    yt_today_snapshot = load_youtube_snapshot(today)
+    yt_week_snapshot = load_youtube_snapshot(week_ago_date)
+    yt_month_snapshot = load_youtube_snapshot(month_ago_date)
+    yt_year_snapshot = load_youtube_snapshot(year_ago_date)
+    
     # Format date
     today_formatted = now.strftime("%A, %b %d, %Y")
     
@@ -218,7 +239,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     ]
     
     # Add Subscribers section if we have any subscriber data
-    if mc_today_snapshot or ig_today_snapshot:
+    if mc_today_snapshot or ig_today_snapshot or yt_today_snapshot:
         lines.append("*Subscribers:*")
         
         # Email (Mailchimp)
@@ -242,6 +263,17 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
             month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
             year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
             lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
+        
+        # YouTube
+        if yt_today_snapshot:
+            subscriber_count = yt_today_snapshot["subscriber_count"]
+            lines.append(f" YouTube: {subscriber_count:,}")
+            
+            # Add deltas for YouTube
+            week_val = yt_week_snapshot["subscriber_count"] if yt_week_snapshot else None
+            month_val = yt_month_snapshot["subscriber_count"] if yt_month_snapshot else None
+            year_val = yt_year_snapshot["subscriber_count"] if yt_year_snapshot else None
+            lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
         
         lines.append("")
     

@@ -792,3 +792,16 @@ INSTAGRAM_REMOTE_DEST=root@hetzner:/root/twy-announce/data/instagram/history/
 4. Add hourly cron: `0 * * * * /path/to/repo/src/instagram_daily.sh`
 
 The wrapper script runs hourly, skips if today's file already exists, ensuring it runs once per day when the machine is awake.
+
+## 2026-02-09: YouTube Subscribers Added to Daily Report
+- **Change**: Added YouTube subscriber tracking to daily status report
+- **Files Modified**:
+  - `src/daily_status_report.py`: Added YouTube subscriber display following same pattern as Instagram
+    - Added `YOUTUBE_HISTORY_DIR` constant
+    - Added `load_youtube_snapshot()` function
+    - Loading YouTube snapshots (today, week, month, year) for historical comparison
+    - Display YouTube subscribers with week/month/year deltas in Subscribers section
+- **Pattern**: Follows existing Instagram/Mailchimp pattern
+  - Loads daily snapshots from `data/youtube/history/{date}.json`
+  - Extracts `subscriber_count` field
+  - Displays formatted count with historical deltas
