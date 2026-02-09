@@ -14,9 +14,10 @@ import instaloader
 load_dotenv()
 
 # Configuration
-INSTAGRAM_HISTORY_DIR = Path("/root/twy-announce/data/instagram/history")
+SCRIPT_DIR = Path(__file__).parent.parent
+INSTAGRAM_HISTORY_DIR = SCRIPT_DIR / "data/instagram/history"
 TARGET_PROFILE = "tiffanywoodyoga"
-SESSION_FILE = Path("/root/.config/instaloader/session-tiffanywoodyoga")
+SESSION_FILE = Path.home() / ".config/instaloader/session-tiffanywoodyoga"
 
 
 def get_instagram_follower_count() -> int:

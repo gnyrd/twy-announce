@@ -2,7 +2,7 @@
 
 **WhatsApp Group Admin Automation System**
 
-Last Updated: 2026-02-08
+Last Updated: 2026-02-09
 
 ---
 
@@ -612,6 +612,31 @@ python3 src/daily_status_report.py
 
 **Pattern:**
 Follows same pattern as Marvelous data - separate script fetches and caches data, daily report reads from cache.
+
+## 2026-02-09: Path Portability Fix for Instagram Script
+
+### Summary
+Fixed hardcoded `/root` paths in `instagram_follower_data.py` to make the script portable across different environments (macOS, Linux, Docker).
+
+### Changes Made
+
+**Modified Files:**
+- `src/instagram_follower_data.py` - Updated path configuration
+
+**Path Changes:**
+- `SESSION_FILE`: Changed from `/root/.config/instaloader/session-tiffanywoodyoga` to `Path.home() / ".config/instaloader/session-tiffanywoodyoga"` (dynamically resolves to user's home directory)
+- `INSTAGRAM_HISTORY_DIR`: Changed from `/root/twy-announce/data/instagram/history` to `Path(__file__).parent.parent / "data/instagram/history"` (relative to script location)
+
+**Benefits:**
+- Script now works on macOS development environment (`/Users/admin/...`)
+- Still works in production Docker/Linux environment (`/root/...`)
+- Data directory is relative to project root, making the script relocatable
+
+### Configuration Update
+
+**~/.zshrc:**
+- Added `/Users/admin/Library/Python/3.9/bin` to PATH for Python package scripts (normalizer, pyrsa-*, instaloader, google-oauthlib-tool)
+
 
 ## 2026-02-09: Product Breakdown Format Improvement
 
