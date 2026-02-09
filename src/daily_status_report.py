@@ -124,6 +124,23 @@ def format_change(current: float, previous: float) -> str:
         return "0"
 
 
+def get_product_counts(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """Extract product counts from a snapshot."""
+    if not snapshot:
+        return {}
+    counts = {}
+    for row in snapshot["subscriptions"]:
+        product = row["Product Name"]
+        if product not in counts:
+            counts[product] = {"Monthly": 0, "Other": 0}
+        billing_cycle = row["Billing Cycle"]
+        if billing_cycle == "Monthly":
+            counts[product]["Monthly"] = row["# of Active Subscriptions"]
+        else:
+            counts[product]["Other"] = row["# of Active Subscriptions"]
+    return counts
+
+
 def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     """Format subscription data into Slack message with historical comparisons."""
     # Current totals
@@ -203,26 +220,64 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     # Product breakdown
     lines.append("")
     
-    # Group by product
+    # Group by product and billing cycle
     products = {}
     for row in subscriptions:
         product = row["Product Name"]
         if product not in products:
-            products[product] = []
-        products[product].append(row)
+            products[product] = {"Monthly": 0, "Other": 0}
+        billing_cycle = row["Billing Cycle"]
+        if billing_cycle == "Monthly":
+            products[product]["Monthly"] = row["# of Active Subscriptions"]
+        else:
+            products[product]["Other"] = row["# of Active Subscriptions"]
+    
+    # Get historical product counts
+    week_counts = get_product_counts(week_snapshot)
+    month_counts = get_product_counts(month_snapshot)
+    year_counts = get_product_counts(year_snapshot)
     
     # Sort products alphabetically
     for product in sorted(products.keys()):
-        # Sort billing cycles: Monthly first, then Other
-        cycles = products[product]
-        cycles.sort(key=lambda x: (x["Billing Cycle"] != "Monthly", x["Billing Cycle"]))
+        monthly = products[product]["Monthly"]
+        annual = products[product]["Other"]
+        display_name = simplify_product_name(product)
         
-        for cycle_data in cycles:
-            billing_cycle = cycle_data["Billing Cycle"]
-            subs = cycle_data["# of Active Subscriptions"]
-            student_word = "student" if subs == 1 else "students"
-            display_name = simplify_product_name(product)
-            lines.append(f" {display_name} ({billing_cycle}): {subs} {student_word}")
+        # Collect all values for this product to determine alignment
+        all_monthly = [monthly]
+        all_annual = [annual]
+        
+        for hist_counts in [week_counts, month_counts, year_counts]:
+            if product in hist_counts:
+                all_monthly.append(monthly - hist_counts[product]["Monthly"])
+                all_annual.append(annual - hist_counts[product]["Other"])
+        
+        # Determine max width needed (account for +/- signs on deltas)
+        def calc_width(val, is_delta):
+            if is_delta:
+                return len(f"+{abs(val)}") if val >= 0 else len(str(val))
+            return len(str(val))
+        
+        max_monthly_width = max(calc_width(v, i > 0) for i, v in enumerate(all_monthly))
+        max_annual_width = max(calc_width(v, i > 0) for i, v in enumerate(all_annual))
+        
+        total_subs = monthly + annual
+        student_word = "student" if total_subs == 1 else "students"
+        lines.append(f" {display_name} (Monthly/Annual): {monthly:>{max_monthly_width}} / {annual:>{max_annual_width}} {student_word}")
+        
+        # Add historical comparisons per product
+        has_history = False
+        for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
+            if product in hist_counts:
+                has_history = True
+                m_diff = monthly - hist_counts[product]["Monthly"]
+                a_diff = annual - hist_counts[product]["Other"]
+                m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
+                a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
+                lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}} / {a_str:>{max_annual_width}}")
+        
+        if has_history:
+            lines.append("")  # Blank line after product block with history
     
     return "\n".join(lines)
 

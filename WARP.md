@@ -612,3 +612,33 @@ python3 src/daily_status_report.py
 
 **Pattern:**
 Follows same pattern as Marvelous data - separate script fetches and caches data, daily report reads from cache.
+
+## 2026-02-09: Product Breakdown Format Improvement
+
+### Summary
+Reformatted the product breakdown section in the daily status report to consolidate Monthly/Annual billing cycles on a single line with per-product historical comparisons.
+
+### Changes Made
+
+**Modified Files:**
+- `src/daily_status_report.py` - Updated `format_report()` function and added `get_product_counts()` helper
+
+**New Format:**
+```
+ TWY Archive (Monthly/Annual): 1 / 6 students
+   𝚫 week:  +1 / +2
+   𝚫 month: +1 / +2
+   𝚫 year:  +1 / +2
+
+ The Yoga Lifestyle Membership (Monthly/Annual): 29 / 2 students
+   𝚫 week:   +3 / +1
+   𝚫 month: +10 / +0
+   𝚫 year:  +15 / +2
+```
+
+**Features:**
+- Monthly and Annual counts displayed on same line with ` / ` separator
+- Per-product week/month/year deltas shown below each product
+- Column alignment within each product block (slashes line up vertically)
+- Blank line between product blocks for readability
+- "Other" billing cycle displayed as "Annual" in the label

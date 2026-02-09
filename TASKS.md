@@ -1,212 +1,95 @@
-# twy-announce-poster - Current Tasks
+# twy-announce - Current Tasks
 
-**Last Updated:** 2025-11-20
+**Last Updated:** 2026-02-08
 
 ---
 
 ## 🔄 In Progress
 
-### WhatsApp Automation Proof of Concept
-**Status:** ⏳ Active  
-**Priority:** Critical  
-**Estimated Effort:** 2-4 hours  
-**Deadline:** ASAP (blocks all other work)
-
-**Goal:** Validate that WhatsApp posting works reliably before building rest of system.
-
-**Steps:**
-- 🔄 Set up Node.js project with whatsapp-web.js
-- 🔄 Create authentication script
-- 🔄 Test connecting to WhatsApp Web
-- 🔄 Test posting to target group
-- 🔄 Document any rate limits or restrictions
-- 🔄 Assess reliability and risk of account restrictions
-
-**Acceptance Criteria:**
-- Can authenticate to WhatsApp Web
-- Can send test message to target group
-- No immediate account warnings/restrictions
-- Documented any limitations or risks
+None currently.
 
 ---
 
 ## 📋 Next Up (Priority Order)
 
-### 1. Google Drive Document Analysis
+### 1. Add Sales Data to Daily Status Report
 **Priority:** High  
-**Effort:** 1-2 hours  
-**Dependencies:** Need access to the Google Drive document
-
-**Description:**
-- Get link to or copy of the scheduling document
-- Analyze format and structure
-- Design parser strategy
-- Identify edge cases (formatting inconsistencies)
-
-**Blockers:** Waiting for user to provide document access
-
----
-
-### 2. Google Drive Parser Implementation
-**Priority:** High  
-**Effort:** 3-5 hours  
-**Dependencies:** Task #1 complete, WhatsApp POC successful
-
-**Description:**
-- Set up Google Drive API credentials
-- Implement document fetcher
-- Parse event data (dates, times, class names)
-- Extract relevant content for posts
-- Handle formatting inconsistencies
-- Unit tests for parser
-
----
-
-### 3. Marvelous Platform Investigation
-**Priority:** Medium  
 **Effort:** 2-3 hours  
-**Status:** ✅ Completed (2026-01-20)  
-**Dependencies:** None (can be done in parallel)
+**Dependencies:** Marvelous API access
 
 **Description:**
-- Confirmed use of internal Namastream API for events.
-- Implemented `scripts/refresh_marvelous_events.py` to cache a trimmed 60-day window under `data/marvelous_events.json`.
-- Wired reminder pipeline to match classes to Marvelous events by start time/title and inject `event/details/<id>` join links, falling back to the calendar URL when unmatched.
-
-**Notes:**
-- Studio slug and URLs are hard-coded; if Tiffany Wood Yoga changes platforms or domains, update the Marvelous constants.
-- API behavior is unofficial and may change; logs and sync failures should be monitored.
-
----
-
-### 4. Message Template System
-**Priority:** Medium  
-**Effort:** 2-3 hours  
-**Dependencies:** Google Drive parser design (Task #1)
-
-**Description:**
-- Design message template structure
-- Support variable substitution (class name, date, time, link)
-- Make templates configurable
-- Handle missing data gracefully (e.g., no Marvelous link)
-
----
-
-### 5. Scheduler Implementation
-**Priority:** Medium  
-**Effort:** 3-4 hours  
-**Dependencies:** WhatsApp POC, Google Drive parser complete
-
-**Description:**
-- Set up APScheduler
-- Configure daily check time (configurable, default mid-afternoon MT)
-- Check Google Drive for next day's events
-- Generate and post messages
-- Logging and error handling
-- Dry-run mode for testing
-
----
-
-### 6. Local Deployment Setup
-**Priority:** Medium  
-**Effort:** 2-3 hours  
-**Dependencies:** All core components working
-
-**Description:**
-- Create launch script
-- Set up launchd plist for auto-start
-- Environment variable management
-- Log file rotation
-- Graceful shutdown handling
-
----
-
-### 7. Testing & Reliability
-**Priority:** Medium  
-**Effort:** 2-3 hours  
-**Dependencies:** Core components complete
-
-**Description:**
-- End-to-end integration tests
-- Error recovery testing
-- Rate limit handling
-- Network failure handling
-- Dry-run mode validation
-
----
-
-### 8. Email reminder pipeline (Google Doc → Gmail)
-**Priority:** High  
-**Effort:** 4-6 hours  
-**Status:** ✅ Completed (2026-01-20)  
-**Dependencies:** Access to class schedule Google Doc; Google API credentials ready
-
-**Description:**
-- Fetch class schedule from Google Doc (Salt Lake City timezone / America-Denver).
-- Parse classes and compute reminder times at 26/25/24 hours before class.
-- Send reminder emails via Gmail API (initially to `jpgan6@gmail.com`) with a copy-pastable WhatsApp block.
-- Track reminder send-state in `data/reminder_state.json` so each reminder is sent exactly once.
-
----
-
-### 9. Hetzner deployment for reminders
-**Priority:** High  
-**Effort:** 3-4 hours  
-**Status:** ✅ Completed (2026-01-20)  
-**Dependencies:** Email reminder pipeline implemented (Task 8)
-
-**Description:**
-- Run `scripts/send_class_email_reminders.py` on `twy-hetzner` using `.env` + Gmail token files.
-- Configure cron on Hetzner to:
-  - Sync Marvelous events twice daily via `scripts/refresh_marvelous_events.py` (09:00 and 18:00 local time).
-  - Run `scripts/run_class_email_reminders.sh` every 30 minutes with `REMINDER_OFFSETS=26`.
-- Log output to `logs/marvelous_sync.log` and `logs/reminders.log` for debugging.
+- Add Sales section to daily status report
+- Fetch sales/revenue data from Marvelous
+- Display with historical comparisons (week/month/year over week)
 
 ---
 
 ## 🔄 Recurring Tasks
 
-None yet - will add monitoring tasks once deployed.
+### Daily Status Report
+- **Marvelous JWT refresh:** Hourly via cron (`src/refresh_jwt.py`)
+- **Mailchimp subscriber data:** Daily before report (`src/mailchimp_subscriber_data.py`)
+- **Daily report:** 6am MT (`src/daily_status_report.py`)
 
----
-
-## ⏸️ Paused
-
-None.
+### Email Reminders
+- **Marvelous event sync:** Twice daily at 9am/6pm (`scripts/refresh_marvelous_events.py`)
+- **Email reminders:** Every 30 min (`scripts/run_class_email_reminders.sh`)
 
 ---
 
 ## ✅ Recently Completed
 
-None yet.
+### 2026-02-08: Mailchimp Subscriber Integration
+- Added `src/mailchimp_subscriber_data.py` to fetch and cache subscriber counts
+- Updated `src/daily_status_report.py` to display Subscribers section
+- Historical tracking with week/month/year over week comparisons
+
+### 2026-02-08: Daily Status Report - Historical Tracking
+- Added daily snapshots to `data/marvelous/history/`
+- Week/month/year over week comparisons for membership
+
+### 2026-02-02: Google Docs Tab Support
+- Updated email reminder script to read month-specific tabs
+- Added flexible date format parsing
+
+### 2026-01-20: Marvelous API Discovery
+- Documented internal Namastream API
+- Created `src/marvelous_client.py` library
+- Implemented event caching for join links
+
+### 2026-01-20: Email Reminder Pipeline
+- Google Doc parsing for class schedules
+- Gmail API integration for sending reminders
+- State tracking to prevent duplicate sends
+- Deployed on Hetzner with cron
+
+---
+
+## ⏸️ Paused
+
+### WhatsApp Automation
+**Reason:** Email reminders working well; WhatsApp automation lower priority  
+**Unblock:** Resume when WhatsApp posting becomes a priority
+
+### Google Drive Document Parser (for WhatsApp)
+**Reason:** Depends on WhatsApp automation  
+**Unblock:** Resume after WhatsApp POC
 
 ---
 
 ## 🚫 Blocked
 
-**Blocked tasks will be listed here with:**
-- ❌ Task name
-- Blocking reason
-- What's needed to unblock
-
-Currently none.
+None.
 
 ---
 
 ## Notes
 
-**WhatsApp Automation Risk Assessment Needed:**
-- Using unofficial WhatsApp Web API (whatsapp-web.js)
-- Could result in account restrictions/bans
-- Need to understand risks before proceeding with full build
-- Consider fallback options if WhatsApp automation proves unreliable
-
 **Platform Flexibility:**
-- Marvelous integration should be modular
+- Marvelous integration designed to be modular
 - User mentioned platform may change in future
-- Design with easy swapping in mind
 
-**Configuration Priority:**
-- Posting time must be configurable (default mid-afternoon Mountain Time)
-- Support for timezone changes
-- Dry-run mode for safe testing
+**Current Production Systems:**
+- Email reminders: Running on Hetzner via cron
+- Daily status report: Running on Hetzner via cron
+- Marvelous sync: Running on Hetzner via cron
