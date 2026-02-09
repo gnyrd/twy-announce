@@ -642,3 +642,53 @@ Reformatted the product breakdown section in the daily status report to consolid
 - Column alignment within each product block (slashes line up vertically)
 - Blank line between product blocks for readability
 - "Other" billing cycle displayed as "Annual" in the label
+
+## 2026-02-09: Instagram Follower Data Integration
+
+### Summary
+Added Instagram follower count to the daily status report Subscribers section.
+
+### Changes Made
+
+**New Files:**
+- `src/instagram_follower_data.py` - Fetches follower count from Instagram using instaloader and saves daily snapshots
+
+**Modified Files:**
+- `src/daily_status_report.py` - Loads cached Instagram data and displays in Subscribers section with per-metric deltas
+- `requirements.txt` - Added `instaloader` dependency
+
+**Data Storage:**
+- Snapshots saved to `data/instagram/history/{date}.json`
+- Format: `{"date": "YYYY-MM-DD", "timestamp": "ISO", "follower_count": N}`
+
+**Report Output:**
+```
+*Subscribers:*
+ Email: 924
+   Δ week:  +10
+   Δ month: +50
+ Instagram: 2,298
+   Δ week:  +25
+   Δ month: +100
+```
+
+**Session Authentication:**
+- Uses instaloader session file at `/root/.config/instaloader/session-tiffanywoodyoga`
+- Session must be created on the server due to Instagram IP restrictions
+- Run `instaloader --login tiffanywoodyoga` on server to create/refresh session
+
+**Important: Instagram blocks datacenter IPs**
+- The `instagram_follower_data.py` script must be run from a non-datacenter IP (e.g., local machine)
+- Copy the resulting JSON file to the server before running daily status report
+- Local path: `~/Repos/twy-announce/data/instagram/history/{date}.json`
+- Server path: `/root/twy-announce/data/instagram/history/{date}.json`
+
+**Usage:**
+```bash
+# On local machine (Instagram fetch)
+python3 src/instagram_follower_data.py
+scp data/instagram/history/YYYY-MM-DD.json root@SERVER:/root/twy-announce/data/instagram/history/
+
+# On server (daily report)
+python3 src/daily_status_report.py
+```

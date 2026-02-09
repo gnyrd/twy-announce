@@ -18,6 +18,7 @@ load_dotenv()
 JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
 HISTORY_DIR = Path("/root/twy-announce/data/marvelous/history")
 MAILCHIMP_HISTORY_DIR = Path("/root/twy-announce/data/mailchimp/history")
+INSTAGRAM_HISTORY_DIR = Path("/root/twy-announce/data/instagram/history")
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 
@@ -98,6 +99,20 @@ def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def load_instagram_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load Instagram snapshot for a specific date."""
+    filepath = INSTAGRAM_HISTORY_DIR / f"{date}.json"
+    if not filepath.exists():
+        return None
+    
+    try:
+        with open(filepath) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load Instagram snapshot for {date}: {e}")
+        return None
+
+
 def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     """Calculate total subscriptions and revenue."""
     return {
@@ -141,6 +156,31 @@ def get_product_counts(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Dict[str
     return counts
 
 
+def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> List[str]:
+    """Format delta lines for a subscriber metric. Only include lines where there's a change."""
+    lines = []
+    
+    if week_val is not None:
+        diff = current - week_val
+        if diff != 0:
+            change = f"+{diff}" if diff > 0 else str(diff)
+            lines.append(f"   Δ week:  {change}")
+    
+    if month_val is not None:
+        diff = current - month_val
+        if diff != 0:
+            change = f"+{diff}" if diff > 0 else str(diff)
+            lines.append(f"   Δ month: {change}")
+    
+    if year_val is not None:
+        diff = current - year_val
+        if diff != 0:
+            change = f"+{diff}" if diff > 0 else str(diff)
+            lines.append(f"   Δ year:  {change}")
+    
+    return lines
+
+
 def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     """Format subscription data into Slack message with historical comparisons."""
     # Current totals
@@ -162,6 +202,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     mc_month_snapshot = load_mailchimp_snapshot(month_ago_date)
     mc_year_snapshot = load_mailchimp_snapshot(year_ago_date)
     
+    # Load Instagram data
+    ig_today_snapshot = load_instagram_snapshot(today)
+    ig_week_snapshot = load_instagram_snapshot(week_ago_date)
+    ig_month_snapshot = load_instagram_snapshot(month_ago_date)
+    ig_year_snapshot = load_instagram_snapshot(year_ago_date)
+    
     # Format date
     today_formatted = now.strftime("%A, %b %d, %Y")
     
@@ -171,27 +217,31 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         "",
     ]
     
-    # Add Subscribers section if we have today's mailchimp data
-    if mc_today_snapshot:
-        subscriber_count = mc_today_snapshot["subscriber_count"]
+    # Add Subscribers section if we have any subscriber data
+    if mc_today_snapshot or ig_today_snapshot:
         lines.append("*Subscribers:*")
-        lines.append(f" Total: {subscriber_count}")
         
-        # Add Mailchimp historical comparisons if data exists
-        if mc_week_snapshot or mc_month_snapshot or mc_year_snapshot:
-            lines.append("")
+        # Email (Mailchimp)
+        if mc_today_snapshot:
+            subscriber_count = mc_today_snapshot["subscriber_count"]
+            lines.append(f" Email: {subscriber_count:,}")
             
-            if mc_week_snapshot:
-                change = format_change(subscriber_count, mc_week_snapshot["subscriber_count"])
-                lines.append(f"  Week over week: {change}")
+            # Add deltas for email
+            week_val = mc_week_snapshot["subscriber_count"] if mc_week_snapshot else None
+            month_val = mc_month_snapshot["subscriber_count"] if mc_month_snapshot else None
+            year_val = mc_year_snapshot["subscriber_count"] if mc_year_snapshot else None
+            lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
+        
+        # Instagram
+        if ig_today_snapshot:
+            follower_count = ig_today_snapshot["follower_count"]
+            lines.append(f" Instagram: {follower_count:,}")
             
-            if mc_month_snapshot:
-                change = format_change(subscriber_count, mc_month_snapshot["subscriber_count"])
-                lines.append(f"  Month over month: {change}")
-            
-            if mc_year_snapshot:
-                change = format_change(subscriber_count, mc_year_snapshot["subscriber_count"])
-                lines.append(f"  Year over year: {change}")
+            # Add deltas for Instagram
+            week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
+            month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
+            year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
+            lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
         
         lines.append("")
     
@@ -263,7 +313,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         
         total_subs = monthly + annual
         student_word = "student" if total_subs == 1 else "students"
-        lines.append(f" {display_name} (Monthly/Annual): {monthly:>{max_monthly_width}} / {annual:>{max_annual_width}} {student_word}")
+        lines.append(f" {display_name} (Monthly / Annual): {monthly:>{max_monthly_width}} / {annual:>{max_annual_width}} {student_word}")
         
         # Add historical comparisons per product
         has_history = False
