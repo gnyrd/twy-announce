@@ -854,13 +854,15 @@ Fixed JWT token refresh automation by implementing smart caching and using Playw
 - Works reliably with recorded user actions
 - Portable across development and production environments
 
-### Cron Updates Needed
-- Remove or reduce frequency of hourly JWT refresh cron
-- Consider weekly safety refresh instead
-- Smart caching will handle token validity automatically
+### Cron Updates
+- ✓ Removed hourly JWT refresh cron (was redundant and failing)
+- Daily status report (`run_daily_report.sh`) already calls `refresh_jwt.py` as Step 1
+- Smart caching ensures token only refreshed when needed (< 24 hours until expiry)
+- Tokens last 7 days, daily report runs daily, so automatic refresh ~once per week
 
 ### Testing
 - ✓ Successfully extracted JWT on macOS development environment
 - ✓ Token cached to project root `.jwt_cache.json`
 - ✓ Smart caching correctly identifies valid tokens
-- Ready for production testing on Hetzner server
+- ✓ Production tested on Hetzner server - working perfectly
+- ✓ Hourly cron removed from production
