@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
@@ -114,7 +114,6 @@ def load_instagram_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-
 def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
     """Load YouTube snapshot for a specific date."""
     filepath = YOUTUBE_HISTORY_DIR / f"{date}.json"
@@ -127,6 +126,53 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         print(f"Warning: Could not load YouTube snapshot for {date}: {e}")
         return None
+
+
+def extract_all_counts(
+    subscriptions: List[Dict[str, Any]],
+    mailchimp: Optional[Dict[str, Any]],
+    instagram: Optional[Dict[str, Any]],
+    youtube: Optional[Dict[str, Any]]
+) -> Dict[str, int]:
+    """Extract all counts into a flat dict for comparison."""
+    counts = {}
+    
+    # Marvelous subscription counts
+    for row in subscriptions:
+        product = row["Product Name"]
+        cycle = row["Billing Cycle"]
+        key = f"marvelous:{product}:{cycle}"
+        counts[key] = row["# of Active Subscriptions"]
+    
+    # Subscriber counts
+    if mailchimp:
+        counts["mailchimp:subscriber_count"] = mailchimp.get("subscriber_count", 0)
+    if instagram:
+        counts["instagram:follower_count"] = instagram.get("follower_count", 0)
+    if youtube:
+        counts["youtube:subscriber_count"] = youtube.get("subscriber_count", 0)
+    
+    return counts
+
+
+def compare_counts(today: Dict[str, int], yesterday: Dict[str, int]) -> Dict[str, int]:
+    """Compare counts and return dict of changes (key -> delta)."""
+    changes = {}
+    all_keys = set(today.keys()) | set(yesterday.keys())
+    
+    for key in all_keys:
+        today_val = today.get(key, 0)
+        yesterday_val = yesterday.get(key, 0)
+        if today_val != yesterday_val:
+            changes[key] = today_val - yesterday_val
+    
+    return changes
+
+
+def is_monday() -> bool:
+    """Check if today is Monday."""
+    return datetime.now().weekday() == 0
+
 
 def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     """Calculate total subscriptions and revenue."""
@@ -150,6 +196,16 @@ def format_change(current: float, previous: float) -> str:
         return f"+{diff:.0f}"
     elif diff < 0:
         return f"{diff:.0f}"
+    else:
+        return "0"
+
+
+def format_change_highlighted(delta: int) -> str:
+    """Format a change with bold and arrow for highlighting."""
+    if delta > 0:
+        return f"*+{delta} ↑*"
+    elif delta < 0:
+        return f"*{delta} ↓*"
     else:
         return "0"
 
@@ -196,7 +252,7 @@ def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: O
     return lines
 
 
-def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
+def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
     """Format subscription data into Slack message with historical comparisons."""
     # Current totals
     current_totals = calculate_totals(subscriptions)
@@ -230,11 +286,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
     yt_year_snapshot = load_youtube_snapshot(year_ago_date)
     
     # Format date
-    today_formatted = now.strftime("%A, %b %d, %Y")
+    today_formatted = now.strftime("%a, %b %d")
     
     # Build message
     lines = [
-        (f"*TWY Daily Status Report* {today_formatted}"),
+        (f"*TWY Status* {today_formatted}"),
         "",
     ]
     
@@ -245,7 +301,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         # Email (Mailchimp)
         if mc_today_snapshot:
             subscriber_count = mc_today_snapshot["subscriber_count"]
-            lines.append(f" Email: {subscriber_count:,}")
+            change_key = "mailchimp:subscriber_count"
+            if change_key in changes:
+                lines.append(f" Email: {subscriber_count:,} {format_change_highlighted(changes[change_key])}")
+            else:
+                lines.append(f" Email: {subscriber_count:,}")
             
             # Add deltas for email
             week_val = mc_week_snapshot["subscriber_count"] if mc_week_snapshot else None
@@ -256,7 +316,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         # Instagram
         if ig_today_snapshot:
             follower_count = ig_today_snapshot["follower_count"]
-            lines.append(f" Instagram: {follower_count:,}")
+            change_key = "instagram:follower_count"
+            if change_key in changes:
+                lines.append(f" Instagram: {follower_count:,} {format_change_highlighted(changes[change_key])}")
+            else:
+                lines.append(f" Instagram: {follower_count:,}")
             
             # Add deltas for Instagram
             week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
@@ -267,7 +331,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         # YouTube
         if yt_today_snapshot:
             subscriber_count = yt_today_snapshot["subscriber_count"]
-            lines.append(f" YouTube: {subscriber_count:,}")
+            change_key = "youtube:subscriber_count"
+            if change_key in changes:
+                lines.append(f" YouTube: {subscriber_count:,} {format_change_highlighted(changes[change_key])}")
+            else:
+                lines.append(f" YouTube: {subscriber_count:,}")
             
             # Add deltas for YouTube
             week_val = yt_week_snapshot["subscriber_count"] if yt_week_snapshot else None
@@ -278,7 +346,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         lines.append("")
     
     lines.append("*Membership:*")
-    lines.append(f" Active Students: {current_totals['total_subs']:.0f}")
+    lines.append(f" Active: {current_totals['total_subs']:.0f}")
     
     # Add historical comparisons if data exists
     if week_snapshot or month_snapshot or year_snapshot:
@@ -287,17 +355,17 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         if week_snapshot:
             week_totals = calculate_totals(week_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], week_totals['total_subs'])
-            lines.append(f"  Week over week: {change}")
+            lines.append(f"  Δ week: {change}")
         
         if month_snapshot:
             month_totals = calculate_totals(month_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], month_totals['total_subs'])
-            lines.append(f"  Month over month: {change}")
+            lines.append(f"  Δ month: {change}")
         
         if year_snapshot:
             year_totals = calculate_totals(year_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], year_totals['total_subs'])
-            lines.append(f"  Year over year: {change}")
+            lines.append(f"  Δ year: {change}")
     
     # Product breakdown
     lines.append("")
@@ -325,6 +393,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         annual = products[product]["Other"]
         display_name = simplify_product_name(product)
         
+        # Check for changes in this product
+        monthly_change_key = f"marvelous:{product}:Monthly"
+        annual_change_key = f"marvelous:{product}:Other"
+        monthly_changed = monthly_change_key in changes
+        annual_changed = annual_change_key in changes
+        
         # Collect all values for this product to determine alignment
         all_monthly = [monthly]
         all_annual = [annual]
@@ -344,8 +418,17 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str) -> str:
         max_annual_width = max(calc_width(v, i > 0) for i, v in enumerate(all_annual))
         
         total_subs = monthly + annual
-        student_word = "student" if total_subs == 1 else "students"
-        lines.append(f" {display_name} (Monthly / Annual): {monthly:>{max_monthly_width}} / {annual:>{max_annual_width}} {student_word}")
+        # student_word = "student" if total_subs == 1 else "students"
+        
+        # Build product line with change highlights
+        monthly_str = str(monthly)
+        annual_str = str(annual)
+        if monthly_changed:
+            monthly_str = f"{monthly} {format_change_highlighted(changes[monthly_change_key])}"
+        if annual_changed:
+            annual_str = f"{annual} {format_change_highlighted(changes[annual_change_key])}"
+        
+        lines.append(f" {display_name} (Monthly / Annual): {monthly_str} / {annual_str}")
         
         # Add historical comparisons per product
         has_history = False
@@ -406,16 +489,57 @@ def main():
     print("=" * 60)
     
     today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
     try:
-        # Get data
+        # Get today's data
         subscriptions = get_marvelous_data()
         
-        # Save snapshot
+        # Save snapshot (always)
         save_daily_snapshot(subscriptions, today)
         
+        # Load today's subscriber data
+        mc_today = load_mailchimp_snapshot(today)
+        ig_today = load_instagram_snapshot(today)
+        yt_today = load_youtube_snapshot(today)
+        
+        # Extract today's counts
+        today_counts = extract_all_counts(subscriptions, mc_today, ig_today, yt_today)
+        
+        # Load yesterday's data for comparison
+        yesterday_snapshot = load_historical_snapshot(yesterday)
+        mc_yesterday = load_mailchimp_snapshot(yesterday)
+        ig_yesterday = load_instagram_snapshot(yesterday)
+        yt_yesterday = load_youtube_snapshot(yesterday)
+        
+        # Extract yesterday's counts
+        yesterday_subs = yesterday_snapshot["subscriptions"] if yesterday_snapshot else []
+        yesterday_counts = extract_all_counts(yesterday_subs, mc_yesterday, ig_yesterday, yt_yesterday)
+        
+        # Compare counts
+        changes = compare_counts(today_counts, yesterday_counts)
+        
+        # Determine if we should send
+        should_send = False
+        send_reason = ""
+        
+        if is_monday():
+            should_send = True
+            send_reason = "Monday (weekly report)"
+        elif changes:
+            should_send = True
+            send_reason = f"Data changed: {len(changes)} metric(s)"
+        else:
+            send_reason = "No changes from yesterday"
+        
+        print(f"\nSend decision: {'YES' if should_send else 'NO'} - {send_reason}")
+        
+        if not should_send:
+            print("\n✓ Skipping report (no changes)")
+            return 0
+        
         # Format message
-        message = format_report(subscriptions, today)
+        message = format_report(subscriptions, today, changes)
         print("\nReport preview:")
         print("-" * 60)
         print(message)

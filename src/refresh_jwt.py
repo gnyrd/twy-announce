@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Refresh Marvelous JWT tokens using Playwright browser automation."""
 
+import base64
 import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from dotenv import load_dotenv
@@ -19,6 +21,75 @@ SECONDARY_PASSWORD = os.getenv("MARVELOUS_SECONDARY_PASSWORD")
 # File paths
 JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
 
+# Token validity buffer (refresh if expires within this time)
+TOKEN_REFRESH_BUFFER_HOURS = 24
+
+
+def decode_jwt_payload(jwt_token: str) -> dict:
+    """Decode JWT payload without verification (just to read expiry)."""
+    try:
+        # JWT format: header.payload.signature
+        parts = jwt_token.split('.')
+        if len(parts) != 3:
+            return None
+        
+        # Decode payload (add padding if needed)
+        payload = parts[1]
+        # Add padding if necessary
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception as e:
+        print(f"Warning: Could not decode JWT payload: {e}")
+        return None
+
+
+def is_cached_token_valid() -> bool:
+    """Check if cached JWT token exists and is still valid."""
+    if not JWT_CACHE_FILE.exists():
+        print("No cached token found")
+        return False
+    
+    try:
+        # Load cached token
+        with open(JWT_CACHE_FILE) as f:
+            cache_data = json.load(f)
+            jwt_token = cache_data.get("jwt_token")
+        
+        if not jwt_token:
+            print("Cached token is empty")
+            return False
+        
+        # Decode payload to check expiry
+        payload = decode_jwt_payload(jwt_token)
+        if not payload or 'exp' not in payload:
+            print("Could not read token expiry")
+            return False
+        
+        exp_timestamp = payload['exp']
+        current_timestamp = time.time()
+        buffer_seconds = TOKEN_REFRESH_BUFFER_HOURS * 3600
+        
+        # Check if token expires within buffer time
+        time_until_expiry = exp_timestamp - current_timestamp
+        
+        if time_until_expiry > buffer_seconds:
+            hours_remaining = time_until_expiry / 3600
+            print(f"✓ Cached token is valid (expires in {hours_remaining:.1f} hours)")
+            return True
+        else:
+            hours_remaining = time_until_expiry / 3600
+            print(f"Cached token expires soon (in {hours_remaining:.1f} hours), refreshing...")
+            return False
+            
+    except Exception as e:
+        print(f"Error checking cached token: {e}")
+        return False
+
+
 def save_jwt(jwt_token: str, report_id: int):
     """Save JWT token to cache file."""
     cache_data = {
@@ -28,6 +99,7 @@ def save_jwt(jwt_token: str, report_id: int):
     with open(JWT_CACHE_FILE, "w") as f:
         json.dump(cache_data, f, indent=2)
     print(f"JWT cached to {JWT_CACHE_FILE}")
+
 
 def extract_jwt_with_playwright(report_id: int = 56) -> str:
     """Extract JWT token using Playwright with magic code URL."""
@@ -118,6 +190,7 @@ def extract_jwt_with_playwright(report_id: int = 56) -> str:
         finally:
             browser.close()
 
+
 def main():
     """Main entry point."""
     report_id = 56  # Active Subscriptions by Product
@@ -126,6 +199,13 @@ def main():
     print("Marvelous JWT Refresh Script")
     print("=" * 60)
     
+    # Check if cached token is still valid
+    if is_cached_token_valid():
+        print("\n✓ Using cached JWT token (still valid)")
+        return 0
+    
+    # Token expired or doesn't exist, fetch new one
+    print("\nFetching new JWT token...")
     jwt_token = extract_jwt_with_playwright(report_id)
     
     if jwt_token:
@@ -135,6 +215,7 @@ def main():
     else:
         print("\n✗ FAILED: Could not refresh JWT token")
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())
