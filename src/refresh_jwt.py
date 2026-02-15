@@ -15,11 +15,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration from environment
-MAGIC_URL = os.getenv("MARVELOUS_MAGIC_URL")
+TWY_USERNAME = os.getenv("MARVELOUS_TWY_USERNAME")
+TWY_PASSWORD = os.getenv("MARVELOUS_TWY_PASSWORD")
 SECONDARY_PASSWORD = os.getenv("MARVELOUS_SECONDARY_PASSWORD")
 
 # File paths
-JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
+JWT_CACHE_FILE = Path(__file__).parent.parent / ".jwt_cache.json"
 
 # Token validity buffer (refresh if expires within this time)
 TOKEN_REFRESH_BUFFER_HOURS = 24
@@ -102,9 +103,9 @@ def save_jwt(jwt_token: str, report_id: int):
 
 
 def extract_jwt_with_playwright(report_id: int = 56) -> str:
-    """Extract JWT token using Playwright with magic code URL."""
-    if not MAGIC_URL or not SECONDARY_PASSWORD:
-        raise ValueError("Missing MARVELOUS_MAGIC_URL or MARVELOUS_SECONDARY_PASSWORD in .env")
+    """Extract JWT token using Playwright - recorded flow."""
+    if not TWY_USERNAME or not TWY_PASSWORD or not SECONDARY_PASSWORD:
+        raise ValueError("Missing credentials in .env")
     
     print(f"Launching browser to fetch JWT for Report {report_id}...")
     
@@ -115,59 +116,62 @@ def extract_jwt_with_playwright(report_id: int = 56) -> str:
         page = context.new_page()
         
         try:
-            # Navigate directly to magic code URL
-            print("Navigating to Marvelous dashboard with magic code...")
-            page.goto(MAGIC_URL, wait_until="domcontentloaded", timeout=30000)
+            # Navigate to login page
+            print("Navigating to login page...")
+            page.goto("https://app.heymarvelous.com/login", wait_until="domcontentloaded", timeout=30000)
             
-            # Wait a bit for page to load
+            # Fill email
+            print("Filling email...")
+            page.get_by_role("textbox", name="Email").click()
+            page.get_by_role("textbox", name="Email").fill(TWY_USERNAME)
+            
+            # Fill password
+            print("Filling password...")
+            page.get_by_role("textbox", name="Password").click()
+            page.get_by_role("textbox", name="Password").fill(TWY_PASSWORD)
+            
+            # Click login button
+            print("Clicking login...")
+            page.get_by_role("button", name="Log in").click()
+            
+            # Wait for secondary password challenge
             page.wait_for_timeout(3000)
             
-            # Check if password challenge appears
-            print("Checking for password challenge...")
-            password_inputs = page.locator("input[type='password']").all()
+            # Fill secondary password
+            print("Filling secondary password...")
+            page.get_by_role("textbox", name="Password").click()
+            page.get_by_role("textbox", name="Password").fill(SECONDARY_PASSWORD)
             
-            if len(password_inputs) > 0:
-                print(f"Found {len(password_inputs)} password field(s), entering secondary password...")
-                # Fill the first visible password field
-                for pwd_input in password_inputs:
-                    if pwd_input.is_visible():
-                        pwd_input.fill(SECONDARY_PASSWORD)
-                        break
-                
-                # Click submit button
-                submit_buttons = page.locator("button[type='submit'], button:has-text('Submit'), button:has-text('Continue'), button:has-text('Verify')").all()
-                for btn in submit_buttons:
-                    if btn.is_visible():
-                        print("Clicking submit button...")
-                        btn.click()
-                        break
-                
-                # Wait for URL to change (indicating successful auth)
-                print("Waiting for authentication...")
-                page.wait_for_timeout(5000)
-            else:
-                print("No password challenge, already authenticated")
+            # Click unlock
+            print("Clicking unlock...")
+            page.get_by_role("button", name="Unlock").click()
             
-            print(f"Current URL: {page.url}")
+            # Wait for dashboard
+            page.wait_for_timeout(3000)
             
-            # Navigate to report page
-            report_url = f"https://app.heymarvelous.com/reports/users/{report_id}"
-            print(f"Navigating to report page: {report_url}")
-            page.goto(report_url, wait_until="domcontentloaded", timeout=30000)
+            # Navigate to Reports
+            print("Navigating to Reports...")
+            page.get_by_role("link", name="Reports").click()
             
-            # Wait for page to render
-            page.wait_for_timeout(5000)
+            # Click Students section
+            print("Opening Students section...")
+            page.get_by_role("link", name="What are they up to? Students").click()
+            
+            # Click Active Subscriptions report
+            print("Opening Active Subscriptions report...")
+            page.get_by_role("link", name="Active Subscriptions by").click()
             
             # Wait for iframe to load
-            print("Waiting for report iframe to load...")
+            print("Waiting for report iframe...")
+            page.wait_for_timeout(5000)
+            
             iframe_locator = page.locator("iframe[src*='reports.heymarv.com']")
             iframe_locator.wait_for(timeout=20000)
             
-            # Get iframe src attribute
+            # Get iframe src and extract JWT
             iframe_src = iframe_locator.get_attribute("src")
             print(f"Found iframe: {iframe_src[:80]}...")
             
-            # Extract JWT from iframe src
             match = re.search(r'reports\.heymarv\.com/embed/question/(eyJ[^#?]+)', iframe_src)
             if match:
                 jwt_token = match.group(1)
@@ -188,6 +192,7 @@ def extract_jwt_with_playwright(report_id: int = 56) -> str:
             traceback.print_exc()
             return None
         finally:
+            context.close()
             browser.close()
 
 

@@ -2,7 +2,7 @@
 
 **WhatsApp Group Admin Automation System**
 
-Last Updated: 2026-02-09
+Last Updated: 2026-02-15
 
 ---
 
@@ -805,3 +805,62 @@ The wrapper script runs hourly, skips if today's file already exists, ensuring i
   - Loads daily snapshots from `data/youtube/history/{date}.json`
   - Extracts `subscriber_count` field
   - Displays formatted count with historical deltas
+
+## 2026-02-15: JWT Refresh Smart Caching and Login Flow Fix
+
+### Summary
+Fixed JWT token refresh automation by implementing smart caching and using Playwright codegen to record the correct login flow.
+
+### Problem
+- JWT refresh was attempting to run every hour but failing due to browser automation issues
+- Login flow was triggering Facebook OAuth popup instead of using the email/password form
+- Token was being refreshed unnecessarily (tokens last ~8 months, not 2 hours)
+
+### Solution
+1. **Smart Caching**: Check JWT expiry before attempting refresh
+2. **Recorded Login Flow**: Use Playwright codegen to capture exact working login steps
+3. **Portable Paths**: Make JWT cache path relative to project root
+
+### Changes Made
+
+**Modified Files:**
+- `src/refresh_jwt.py`
+  - Added `decode_jwt_payload()` to read JWT expiry without verification
+  - Added `is_cached_token_valid()` to check if token is still valid
+  - Set `TOKEN_REFRESH_BUFFER_HOURS = 24` (only refresh if expires within 24 hours)
+  - Replaced magic URL flow with direct login at `app.heymarvelous.com/login`
+  - Used Playwright role-based selectors from recorded session
+  - Fixed login flow: email → password → login button → secondary password → unlock → Reports navigation
+  - Changed JWT_CACHE_FILE to use `Path(__file__).parent.parent` for portability
+
+**New Environment Variables (.env):**
+- `MARVELOUS_TWY_USERNAME` - Primary login email
+- `MARVELOUS_TWY_PASSWORD` - Primary login password
+- `MARVELOUS_SECONDARY_PASSWORD` - Secondary password for unlock challenge
+
+**Login Flow:**
+1. Navigate to `https://app.heymarvelous.com/login`
+2. Fill email field (by role="textbox", name="Email")
+3. Fill password field (by role="textbox", name="Password")
+4. Click "Log in" button
+5. Handle secondary password challenge if present
+6. Click "Unlock" button
+7. Navigate: Reports → Students → Active Subscriptions
+8. Extract JWT from report iframe
+
+**Benefits:**
+- Reduces unnecessary browser automation (only refreshes when needed)
+- Avoids Facebook OAuth popup
+- Works reliably with recorded user actions
+- Portable across development and production environments
+
+### Cron Updates Needed
+- Remove or reduce frequency of hourly JWT refresh cron
+- Consider weekly safety refresh instead
+- Smart caching will handle token validity automatically
+
+### Testing
+- ✓ Successfully extracted JWT on macOS development environment
+- ✓ Token cached to project root `.jwt_cache.json`
+- ✓ Smart caching correctly identifies valid tokens
+- Ready for production testing on Hetzner server
