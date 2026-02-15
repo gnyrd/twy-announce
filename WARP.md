@@ -866,3 +866,13 @@ Fixed JWT token refresh automation by implementing smart caching and using Playw
 - ✓ Smart caching correctly identifies valid tokens
 - ✓ Production tested on Hetzner server - working perfectly
 - ✓ Hourly cron removed from production
+
+## 2026-02-15: Daily Report Formatting Improvements
+
+### Changes Made
+- **Skip zero-change delta lines**: Product breakdown delta lines (week/month/year) now only display when there's an actual change (Monthly or Annual ≠ 0)
+- **Remove extra blank line**: Removed unnecessary blank line between "Active: N" and the membership delta lines
+- **Consistent delta symbol**: Standardized on monospace delta `𝚫` throughout the report (was mixing Greek `Δ` and monospace `𝚫`)
+
+### Files Modified
+- `src/daily_status_report.py`

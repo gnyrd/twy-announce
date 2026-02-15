@@ -235,19 +235,19 @@ def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: O
         diff = current - week_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   Δ week:  {change}")
+            lines.append(f"   𝚫 week:  {change}")
     
     if month_val is not None:
         diff = current - month_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   Δ month: {change}")
+            lines.append(f"   𝚫 month: {change}")
     
     if year_val is not None:
         diff = current - year_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   Δ year:  {change}")
+            lines.append(f"   𝚫 year:  {change}")
     
     return lines
 
@@ -350,22 +350,21 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     
     # Add historical comparisons if data exists
     if week_snapshot or month_snapshot or year_snapshot:
-        lines.append("")
         
         if week_snapshot:
             week_totals = calculate_totals(week_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], week_totals['total_subs'])
-            lines.append(f"  Δ week: {change}")
+            lines.append(f"  𝚫 week: {change}")
         
         if month_snapshot:
             month_totals = calculate_totals(month_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], month_totals['total_subs'])
-            lines.append(f"  Δ month: {change}")
+            lines.append(f"  𝚫 month: {change}")
         
         if year_snapshot:
             year_totals = calculate_totals(year_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], year_totals['total_subs'])
-            lines.append(f"  Δ year: {change}")
+            lines.append(f"  𝚫 year: {change}")
     
     # Product breakdown
     lines.append("")
@@ -439,7 +438,8 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
                 a_diff = annual - hist_counts[product]["Other"]
                 m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
                 a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
-                lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}} / {a_str:>{max_annual_width}}")
+                if m_diff != 0 or a_diff != 0:
+                    lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}} / {a_str:>{max_annual_width}}")
         
         if has_history:
             lines.append("")  # Blank line after product block with history
