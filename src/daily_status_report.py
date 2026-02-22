@@ -15,11 +15,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-JWT_CACHE_FILE = Path("/root/twy-announce/.jwt_cache.json")
-HISTORY_DIR = Path("/root/twy-announce/data/marvelous/history")
-MAILCHIMP_HISTORY_DIR = Path("/root/twy-announce/data/mailchimp/history")
-INSTAGRAM_HISTORY_DIR = Path("/root/twy-announce/data/instagram/history")
-YOUTUBE_HISTORY_DIR = Path("/root/twy-announce/data/youtube/history")
+JWT_CACHE_FILE = Path("/root/twy/announce/.jwt_cache.json")
+HISTORY_DIR = Path("/root/twy/announce/data/marvelous/history")
+MAILCHIMP_HISTORY_DIR = Path("/root/twy/announce/data/mailchimp/history")
+INSTAGRAM_HISTORY_DIR = Path("/root/twy/announce/data/instagram/history")
+YOUTUBE_HISTORY_DIR = Path("/root/twy/announce/data/youtube/history")
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 
@@ -354,17 +354,20 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if week_snapshot:
             week_totals = calculate_totals(week_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], week_totals['total_subs'])
-            lines.append(f"  𝚫 week: {change}")
+            if change != "0":
+                lines.append(f"   𝚫 week: {change}")
         
         if month_snapshot:
             month_totals = calculate_totals(month_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], month_totals['total_subs'])
-            lines.append(f"  𝚫 month: {change}")
+            if change != "0":
+                lines.append(f"   𝚫 month: {change}")
         
         if year_snapshot:
             year_totals = calculate_totals(year_snapshot["subscriptions"])
             change = format_change(current_totals['total_subs'], year_totals['total_subs'])
-            lines.append(f"  𝚫 year: {change}")
+            if change != "0":
+                lines.append(f"   𝚫 year: {change}")
     
     # Product breakdown
     lines.append("")
