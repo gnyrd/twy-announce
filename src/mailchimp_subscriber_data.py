@@ -14,7 +14,8 @@ from mailchimp3 import MailChimp
 load_dotenv()
 
 # Configuration
-MAILCHIMP_HISTORY_DIR = Path("/root/twy-announce/data/mailchimp/history")
+PROJECT_ROOT = Path(__file__).parent.parent
+MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 
 
 def get_mailchimp_subscriber_count() -> int:

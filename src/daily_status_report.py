@@ -15,11 +15,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-JWT_CACHE_FILE = Path("/root/twy/announce/.jwt_cache.json")
-HISTORY_DIR = Path("/root/twy/announce/data/marvelous/history")
-MAILCHIMP_HISTORY_DIR = Path("/root/twy/announce/data/mailchimp/history")
-INSTAGRAM_HISTORY_DIR = Path("/root/twy/announce/data/instagram/history")
-YOUTUBE_HISTORY_DIR = Path("/root/twy/announce/data/youtube/history")
+PROJECT_ROOT = Path(__file__).parent.parent
+JWT_CACHE_FILE = PROJECT_ROOT / ".jwt_cache.json"
+HISTORY_DIR = PROJECT_ROOT / "data/marvelous/history"
+MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
+INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
+YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
 METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
 
 

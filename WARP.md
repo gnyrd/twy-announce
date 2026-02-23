@@ -104,6 +104,7 @@ When user asks about:
 6. **NEVER update docs** for minor refactoring or internal changes
 7. **WhatsApp automation is sensitive** - always test changes carefully
 8. **Secrets management** - never expose credentials, use environment variables
+9. **Use relative paths everywhere possible** — never hardcode absolute paths in source code or scripts. Use `Path(__file__).parent.parent` (Python) or `$(dirname "$0")/..` (shell) to resolve project root. Absolute paths are only acceptable in cron entries and remote SCP destinations where a relative path is not possible.
 
 ### Documentation Update Rules
 
@@ -151,9 +152,9 @@ When user asks about:
 
 **Current cron setup on Hetzner (reference):**
 - Marvelous sync (twice daily) –
-  - `0 9,18 * * * cd /root/twy-announce && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
+  - `0 9,18 * * * cd /root/twy/announce && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
 - Email reminders (every 30 min) –
-  - `*/30 * * * * cd /root/twy-announce && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
+  - `*/30 * * * * cd /root/twy/announce && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
 
 - Intended deployment is a Hetzner host running the reminder pipeline under cron.
 - Cron calls the thin wrapper script `scripts/run_class_email_reminders.sh` approximately every 30 minutes.
@@ -164,7 +165,7 @@ When user asks about:
 
 **Example test command (used during development):**
 ```bash
-cd /root/twy-announce
+cd /root/twy/announce
 mv data/reminder_state.json data/reminder_state_backup_test.json 2>/dev/null || true
 REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh --now 2026-01-14T06:05
 ```
@@ -326,7 +327,7 @@ Implemented automated daily YouTube subscriber tracking similar to Instagram fol
 **Configuration (in .env):**
 - `YOUTUBE_API_KEY` - YouTube Data API key (required)
 - `YOUTUBE_CHANNEL_ID` - Target channel ID (required)
-- `YOUTUBE_REMOTE_DEST` - Optional scp destination (e.g., `root@hetzner:/root/twy-announce/data/youtube/history/`)
+- `YOUTUBE_REMOTE_DEST` - Optional scp destination (e.g., `root@hetzner:/root/twy/announce/data/youtube/history/`)
 - `YOUTUBE_HISTORY_DIR` - Optional local history dir override (default: `data/youtube/history`)
 
 **Cron Job:**
@@ -383,10 +384,10 @@ Implemented automated daily subscription status reports from Marvelous to Slack.
 **Cron Jobs:**
 ```bash
 # JWT refresh every hour
-0 * * * * cd /root/twy-announce && python3 src/refresh_jwt.py
+0 * * * * cd /root/twy/announce && python3 src/refresh_jwt.py
 
 # Daily report at 6am MT (1pm UTC)
-0 13 * * * cd /root/twy-announce && python3 src/daily_status_report.py
+0 13 * * * cd /root/twy/announce && python3 src/daily_status_report.py
 ```
 
 **Dependencies Added:**
@@ -528,7 +529,7 @@ Renamed repository to better reflect its broader purpose:
 - Updated configuration files (.env.example, whatsapp_bot.js)
 - Updated Marvelous client documentation (docs/MARVELOUS_CLIENT_README.md)
 - Changed git remote URL from git@github.com:gnyrd/twy-whatsapp.git to git@github.com:gnyrd/twy-announce.git
-- Renamed directory from /root/twy-whatsapp to /root/twy-announce
+- Renamed directory from /root/twy-whatsapp to /root/twy/announce
 
 **Rationale:**
 The new name "twy-announce" better reflects that this system handles various announcement channels (email, WhatsApp, etc.) rather than being WhatsApp-specific.
@@ -690,7 +691,7 @@ Fixed hardcoded `/root` paths in `instagram_follower_data.py` to make the script
 
 **Path Changes:**
 - `SESSION_FILE`: Changed from `/root/.config/instaloader/session-tiffanywoodyoga` to `Path.home() / ".config/instaloader/session-tiffanywoodyoga"` (dynamically resolves to user's home directory)
-- `INSTAGRAM_HISTORY_DIR`: Changed from `/root/twy-announce/data/instagram/history` to `Path(__file__).parent.parent / "data/instagram/history"` (relative to script location)
+- `INSTAGRAM_HISTORY_DIR`: Changed from `/root/twy/announce/data/instagram/history` to `Path(__file__).parent.parent / "data/instagram/history"` (relative to script location)
 
 **Benefits:**
 - Script now works on macOS development environment (`/Users/admin/...`)
@@ -778,7 +779,7 @@ Both scripts are fully portable - they determine paths relative to their own loc
 
 **Configuration (.env):**
 ```bash
-INSTAGRAM_REMOTE_DEST=root@hetzner:/root/twy-announce/data/instagram/history/
+INSTAGRAM_REMOTE_DEST=root@hetzner:/root/twy/announce/data/instagram/history/
 # Optional overrides:
 # INSTAGRAM_PROFILE=tiffanywoodyoga
 # INSTAGRAM_SESSION_FILE=~/.config/instaloader/session-tiffanywoodyoga

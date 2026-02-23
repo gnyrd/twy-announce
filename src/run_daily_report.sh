@@ -3,7 +3,7 @@
 
 set -e
 
-cd /root/twy-announce
+cd "$(dirname "$0")/.."
 
 echo "========================================="
 echo "Daily Status Report Runner"
