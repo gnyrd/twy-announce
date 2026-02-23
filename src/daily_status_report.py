@@ -430,22 +430,29 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if annual_changed:
             annual_str = f"{annual} {format_change_highlighted(changes[annual_change_key])}"
         
-        lines.append(f" {display_name} (Monthly / Annual): {monthly_str} / {annual_str}")
-        
-        # Add historical comparisons per product
-        has_history = False
+        lines.append(f" {display_name}: ")
+        lines.append(f"   Annual: {annual_str}")
+
+        # Add annual deltas
         for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
             if product in hist_counts:
-                has_history = True
-                m_diff = monthly - hist_counts[product]["Monthly"]
                 a_diff = annual - hist_counts[product]["Other"]
-                m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
-                a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
-                if m_diff != 0 or a_diff != 0:
-                    lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}} / {a_str:>{max_annual_width}}")
-        
-        if has_history:
-            lines.append("")  # Blank line after product block with history
+                if a_diff != 0:
+                    a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
+                    lines.append(f"   𝚫 {label}:  {a_str:>{max_annual_width}}")
+
+        lines.append(f"   Monthly: {monthly_str}")
+
+        # Add monthly deltas
+        for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
+            if product in hist_counts:
+                m_diff = monthly - hist_counts[product]["Monthly"]
+                if m_diff != 0:
+                    m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
+                    lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}}")
+
+        lines.append("")  # Blank line after product block
+
     
     return "\n".join(lines)
 
