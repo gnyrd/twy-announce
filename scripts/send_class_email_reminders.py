@@ -584,7 +584,7 @@ def build_email(cls: ClassEntry, offset: int, tz: ZoneInfo, to_addrs: List[str],
     date_str = local_start.strftime("%B %d, %Y")
     time_str = local_start.strftime("%-I:%M %p %Z")
 
-    subj = f"WhatsApp reminder (T-{offset}h): {cls.title} on {date_str}"
+    subj = f"[TWY Notify] WhatsApp reminder (T-{offset}h): {cls.title} on {date_str}"
 
     header_lines = [
         f"T-{offset}h reminder for a Tiffany Wood Yoga WhatsApp post.",
@@ -742,13 +742,7 @@ def main(argv: List[str] | None = None) -> int:
         now = datetime.now(tz)
 
     email_from = os.environ.get("EMAIL_FROM")
-    email_to_raw = os.environ.get("EMAIL_TO")
-
-    if not email_to_raw:
-        print("❌ EMAIL_TO environment variable is required.\n"
-          "See script docstring for all required variables (or run: set -a && source ../.env && set +a).", 
-          file=sys.stderr)
-        return 1
+    email_to_raw = os.environ.get("EMAIL_TO", "admin@tiffanywoodyoga.com")
 
     to_addrs = [addr.strip() for addr in email_to_raw.split(',') if addr.strip()]
     if not to_addrs:
