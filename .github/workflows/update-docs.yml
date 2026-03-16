@@ -46,17 +46,12 @@ jobs:
             Update the documentation in the `twy-overview` repo to reflect these changes.
             The twy-overview repo is already checked out in your environment.
 
+            ### Style guide
+            BEFORE making any changes, read `docs/STYLE_GUIDE.md` in the twy-overview repo. It contains editorial rules that MUST be followed. Do not violate any rule in that file.
+
             ### Documentation structure
             - `docs/technical/` — developer-level technical reference (one .md per source repo, plus architecture.md, deployment.md, environment-variables.md)
             - `docs/user-guide/` — end-user how-to guides (task-oriented, non-technical)
-
-            ### Rules
-            1. **Technical docs get everything.** All changes should be reflected in the technical docs.
-            2. **User guide skips preview features.** If a feature is gated behind the cookie-based `{% if preview %}` pattern (a preview cookie toggle in the Flask app), do NOT add it to the user guide. It belongs only in the technical docs, clearly marked as preview.
-            3. **Be surgical.** Only update docs that are actually affected by the changes. Do not rewrite entire documents.
-            4. **Preserve style.** Match the existing tone, structure, and formatting of each doc file.
-            5. **Cross-references.** If changes affect architecture (new services, changed ports, new dependencies), update `architecture.md`. If new env vars are added, update `environment-variables.md`.
-            6. **No fluff.** Do not add speculative documentation. Only document what the code actually does.
 
             ### Repo-to-doc mapping
             The source repo `${{ github.repository }}` maps to:
