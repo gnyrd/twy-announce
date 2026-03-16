@@ -3,6 +3,7 @@ name: Update TWY Docs
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   update-docs:
@@ -67,3 +68,17 @@ jobs:
 
             If the changes don't affect documentation (e.g. only whitespace, CI config, or test-only changes), do nothing and explain why.
           environment: 0Udatpt3mJh5FaI8XrJVEY
+
+  retry-on-failure:
+    runs-on: ubuntu-latest
+    needs: update-docs
+    if: failure() && github.run_attempt < 3
+    permissions:
+      actions: write
+    steps:
+      - name: Retry workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Attempt ${{ github.run_attempt }} failed, retrying..."
+          gh workflow run update-docs.yml --repo ${{ github.repository }} --ref main
