@@ -1,6 +1,6 @@
 # twy-announce - Current Tasks
 
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-03-19
 
 ---
 
@@ -33,11 +33,19 @@ None currently.
 
 ### Email Reminders
 - **Marvelous event sync:** Twice daily at 9am/6pm (`scripts/refresh_marvelous_events.py`)
+- **Mailchimp membership sync:** Daily at 1am (`scripts/run_mailchimp_sync.sh`)
 - **Email reminders:** Every 30 min (`scripts/run_class_email_reminders.sh`)
 
 ---
 
 ## ✅ Recently Completed
+
+### 2026-03-19: Mailchimp Membership Sync (Marvelous Reports)
+- Implemented report-driven Mailchimp sync from `users/15` (active) + `users/14` (canceled)
+- Added JWT refresh/report helper and switched sync auth flow to embedded report JWTs
+- Enforced canceled-report JWT refresh on every run to prevent stale date-window misses
+- Added role-tag overrides for owner/admin accounts
+- Set cron wrapper schedule to once daily at 1am
 
 ### 2026-02-08: Mailchimp Subscriber Integration
 - Added `src/mailchimp_subscriber_data.py` to fetch and cache subscriber counts

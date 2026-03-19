@@ -1,6 +1,6 @@
 # twy-announce-poster - Current Status
 
-**Last Verified:** 2026-01-20
+**Last Verified:** 2026-03-19
 **Version:** v0.1.1 (WhatsApp tools consolidated)
 
 ---
@@ -28,6 +28,12 @@
 ---
 
 ## Recent Changes
+
+**2026-03-19:**
+- Added Marvelous report-driven Mailchimp membership sync (`src/sync_mailchimp.py`) using active report `users/15` and canceled report `users/14`.
+- Added JWT-based report fetch helper (`src/marvelous_report_jwt.py`) and daily Mailchimp sync wrapper script (`scripts/run_mailchimp_sync.sh`).
+- Updated cancellation flow to refresh canceled-report JWT on every sync run so embedded report date windows stay current.
+- Added explicit role tagging for key accounts (`Role - Owner` / `Role - Admin`) in sync processing.
 
 **2026-01-20:**
 - Consolidated older `twy-announce-announcer` CLI into this repo (`src/send_to_whatsapp.js`).

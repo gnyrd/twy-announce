@@ -2,7 +2,7 @@
 
 **WhatsApp Group Admin Automation System**
 
-Last Updated: 2026-02-15
+Last Updated: 2026-03-19
 
 ---
 
@@ -153,6 +153,8 @@ When user asks about:
 **Current cron setup on Hetzner (reference):**
 - Marvelous sync (twice daily) –
   - `0 9,18 * * * cd /root/twy/announce && /usr/bin/python3 scripts/refresh_marvelous_events.py >> logs/marvelous_sync.log 2>&1`
+- Mailchimp membership sync (daily at 1am) –
+  - `0 1 * * * cd /root/twy/announce && ./scripts/run_mailchimp_sync.sh >> logs/mailchimp_sync.log 2>&1`
 - Email reminders (every 30 min) –
   - `*/30 * * * * cd /root/twy/announce && REMINDER_OFFSETS=26 ./scripts/run_class_email_reminders.sh >> logs/reminders.log 2>&1`
 
