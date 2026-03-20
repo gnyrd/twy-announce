@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper script to refresh JWT and run daily status report
+# Wrapper script to sync HeyMarvelous data and run daily status report
 
 set -e
 
@@ -10,14 +10,16 @@ echo "Daily Status Report Runner"
 echo "Time: $(date)"
 echo "========================================="
 
-# Step 1: Refresh JWT token
+# Step 1: Sync HeyMarvelous data to SQLite
 echo ""
-echo "Step 1: Refreshing JWT token..."
-python3 src/refresh_jwt.py
+echo "Step 1: Syncing HeyMarvelous data..."
+cd /root/twy/marvy
+.venv/bin/python3 scripts/sync.py
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to refresh JWT token"
+    echo "ERROR: Failed to sync HeyMarvelous data"
     exit 1
 fi
+cd -
 
 # Step 2: Run daily status report
 echo ""
@@ -31,4 +33,4 @@ fi
 echo ""
 echo "========================================="
 echo "Daily Status Report Complete"
-echo "========================================="
+echo "=========================================" 

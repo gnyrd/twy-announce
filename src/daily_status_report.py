@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
+import sqlite3
 import requests
 from dotenv import load_dotenv
 
@@ -16,44 +17,52 @@ load_dotenv()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent
-JWT_CACHE_FILE = PROJECT_ROOT / ".jwt_cache.json"
 HISTORY_DIR = PROJECT_ROOT / "data/marvelous/history"
 MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
-METABASE_URL = "https://reports.heymarv.com/api/embed/card/{jwt_token}/query/json"
-
-
-def load_cached_jwt() -> str:
-    """Load JWT token from cache file."""
-    try:
-        with open(JWT_CACHE_FILE) as f:
-            cache_data = json.load(f)
-            return cache_data["jwt_token"]
-    except Exception as e:
-        raise Exception(f"Failed to load cached JWT: {e}")
+MARVY_DB = Path("/root/twy/marvy/marvy.db")
 
 
 def get_marvelous_data() -> List[Dict[str, Any]]:
-    """Fetch active subscription data from Marvelous using cached JWT."""
-    jwt_token = load_cached_jwt()
-    
-    url = METABASE_URL.format(jwt_token=jwt_token)
-    
-    print(f"Fetching Marvelous subscription data...")
-    try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        if not data:
-            raise Exception("No data returned from Marvelous report")
-        
-        print(f"✓ Fetched {len(data)} subscription records")
-        return data
-        
-    except requests.RequestException as e:
-        raise Exception(f"Failed to fetch Marvelous report data: {e}")
+    """Read active subscription data from local SQLite database."""
+    print(f"Reading subscription data from {MARVY_DB}...")
+    conn = sqlite3.connect(str(MARVY_DB))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT pr.product_name as product_name,
+               CASE pr.recurring_type
+                   WHEN 'monthly' THEN 'Monthly'
+                   ELSE 'Other'
+               END as billing_cycle,
+               COUNT(*) as active_count,
+               COALESCE(SUM(last_pay.amount_paid), 0) as revenue_per_cycle
+        FROM subscriptions s
+        JOIN products pr ON pr.id = s.product_id
+        LEFT JOIN (
+            SELECT customer_id, product_id, amount_paid,
+                   ROW_NUMBER() OVER (PARTITION BY customer_id, product_id ORDER BY created DESC) as rn
+            FROM purchases WHERE amount_paid > 0
+        ) last_pay ON last_pay.customer_id = s.customer_id
+                   AND last_pay.product_id = s.product_id
+                   AND last_pay.rn = 1
+        WHERE s.subscription_active = 1
+          AND pr.product_name != 'The Yoga Lifestyle: On-demand Library'
+        GROUP BY pr.id
+        ORDER BY pr.product_name
+    """).fetchall()
+    conn.close()
+    data = [
+        {
+            "Product Name": r["product_name"],
+            "Billing Cycle": r["billing_cycle"],
+            "# of Active Subscriptions": r["active_count"],
+            "Revenue per Cycle": r["revenue_per_cycle"],
+        }
+        for r in rows
+    ]
+    print(f"✓ Found {len(data)} active subscription groups")
+    return data
 
 
 def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
@@ -316,18 +325,19 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         
         # Instagram
         if ig_today_snapshot:
-            follower_count = ig_today_snapshot["follower_count"]
-            change_key = "instagram:follower_count"
-            if change_key in changes:
-                lines.append(f" Instagram: {follower_count:,} {format_change_highlighted(changes[change_key])}")
-            else:
-                lines.append(f" Instagram: {follower_count:,}")
-            
-            # Add deltas for Instagram
-            week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
-            month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
-            year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
-            lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
+            lines.append(" Instagram: Login Failure!")
+            # follower_count = ig_today_snapshot["follower_count"]
+#             change_key = "instagram:follower_count"
+#             if change_key in changes:
+#                 lines.append(f" Instagram: {follower_count:,} {format_change_highlighted(changes[change_key])}")
+#             else:
+#                 lines.append(f" Instagram: {follower_count:,}")
+#             
+#             # Add deltas for Instagram
+#             week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
+#             month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
+#             year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
+#             lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
         
         # YouTube
         if yt_today_snapshot:
