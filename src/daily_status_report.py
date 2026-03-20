@@ -66,18 +66,20 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
 
 
 
-def get_year_ago_count() -> int:
-    """Approximate active member count one year ago from purchase history."""
-    from datetime import datetime, timedelta
-    year_ago = (datetime.now() - timedelta(days=365)).isoformat()
+def get_member_count_ago(days: int) -> int:
+    """Approximate active member count N days ago from purchase history."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
     conn = sqlite3.connect(str(MARVY_DB))
     result = conn.execute("""
         SELECT COUNT(*) FROM subscriptions s
         JOIN products pr ON pr.id = s.product_id
+        JOIN (SELECT DISTINCT customer_id, product_id FROM purchases
+              WHERE amount_paid > 0) paid
+          ON paid.customer_id = s.customer_id AND paid.product_id = s.product_id
         WHERE pr.product_name != 'The Yoga Lifestyle: On-demand Library'
           AND s.first_purchase < ?
           AND (s.subscription_active = 1 OR s.last_time_purchase > ?)
-    """, (year_ago, year_ago)).fetchone()[0]
+    """, (cutoff, cutoff)).fetchone()[0]
     conn.close()
     return result
 
@@ -377,25 +379,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     lines.append("*Membership:*")
     lines.append(f" Active: {current_totals['total_subs']:.0f}")
     
-    # Add historical comparisons if data exists
-    if True:  # always show deltas
-        
-        if week_snapshot:
-            week_totals = calculate_totals(week_snapshot["subscriptions"])
-            change = format_change(current_totals['total_subs'], week_totals['total_subs'])
-            if change != "0":
-                lines.append(f"   𝚫 week: {change}")
-        
-        if month_snapshot:
-            month_totals = calculate_totals(month_snapshot["subscriptions"])
-            change = format_change(current_totals['total_subs'], month_totals['total_subs'])
-            if change != "0":
-                lines.append(f"   𝚫 month: {change}")
-        
-        year_ago_count = get_year_ago_count()
-        change = format_change(current_totals['total_subs'], year_ago_count)
+    for label, days in [("week", 7), ("month", 30), ("year", 365)]:
+        count_ago = get_member_count_ago(days)
+        change = format_change(current_totals['total_subs'], count_ago)
         if change != "0":
-            lines.append(f"   𝚫 year: {change}")
+            lines.append(f"   𝚫 {label}: {change}")
     
     # Product breakdown
     lines.append("")
