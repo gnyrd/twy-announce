@@ -64,23 +64,22 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
 
 
 
-def get_recent_cancellations(n: int = 5) -> List[Dict[str, Any]]:
-    """Return the N most recently churned subscribers by last payment date."""
+
+
+def get_year_ago_count() -> int:
+    """Approximate active member count one year ago from purchase history."""
+    from datetime import datetime, timedelta
+    year_ago = (datetime.now() - timedelta(days=365)).isoformat()
     conn = sqlite3.connect(str(MARVY_DB))
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("""
-        SELECT s.full_name as name,
-               pr.product_name as product,
-               date(s.last_time_purchase) as last_payment
-        FROM subscriptions s
+    result = conn.execute("""
+        SELECT COUNT(*) FROM subscriptions s
         JOIN products pr ON pr.id = s.product_id
-        WHERE s.subscription_active = 0
-          AND pr.product_name != 'The Yoga Lifestyle: On-demand Library'
-        ORDER BY s.last_time_purchase DESC
-        LIMIT ?
-    """, (n,)).fetchall()
+        WHERE pr.product_name != 'The Yoga Lifestyle: On-demand Library'
+          AND s.first_purchase < ?
+          AND (s.subscription_active = 1 OR s.last_time_purchase > ?)
+    """, (year_ago, year_ago)).fetchone()[0]
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
@@ -379,7 +378,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     lines.append(f" Active: {current_totals['total_subs']:.0f}")
     
     # Add historical comparisons if data exists
-    if week_snapshot or month_snapshot or year_snapshot:
+    if True:  # always show deltas
         
         if week_snapshot:
             week_totals = calculate_totals(week_snapshot["subscriptions"])
@@ -393,20 +392,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             if change != "0":
                 lines.append(f"   𝚫 month: {change}")
         
-        if year_snapshot:
-            year_totals = calculate_totals(year_snapshot["subscriptions"])
-            change = format_change(current_totals['total_subs'], year_totals['total_subs'])
-            if change != "0":
-                lines.append(f"   𝚫 year: {change}")
+        year_ago_count = get_year_ago_count()
+        change = format_change(current_totals['total_subs'], year_ago_count)
+        if change != "0":
+            lines.append(f"   𝚫 year: {change}")
     
-    # Recent cancellations
-    recent_exits = get_recent_cancellations(5)
-    if recent_exits:
-        lines.append(" Recent exits:")
-        for ex in recent_exits:
-            product_short = "Archive" if "Archive" in ex["product"] else "Membership"
-            lines.append(f"   {ex['name']} ({product_short}, {ex['last_payment']})")
-
     # Product breakdown
     lines.append("")
     
