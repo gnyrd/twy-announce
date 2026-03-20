@@ -26,20 +26,19 @@ MARVY_DB = Path("/root/twy/marvy/marvy.db")
 
 def get_marvelous_data() -> List[Dict[str, Any]]:
     """Read active subscription data from local SQLite database."""
-    print(f"Reading subscription data from {MARVY_DB}...")
     conn = sqlite3.connect(str(MARVY_DB))
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
-        SELECT pr.product_name as product_name,
-               CASE pr.recurring_type
-                   WHEN 'monthly' THEN 'Monthly'
-                   ELSE 'Other'
+        SELECT pr.product_name,
+               CASE
+                   WHEN last_pay.amount_paid > pr.price * 3 THEN 'Annual'
+                   ELSE 'Monthly'
                END as billing_cycle,
                COUNT(*) as active_count,
                COALESCE(SUM(last_pay.amount_paid), 0) as revenue_per_cycle
         FROM subscriptions s
         JOIN products pr ON pr.id = s.product_id
-        LEFT JOIN (
+        JOIN (
             SELECT customer_id, product_id, amount_paid,
                    ROW_NUMBER() OVER (PARTITION BY customer_id, product_id ORDER BY created DESC) as rn
             FROM purchases WHERE amount_paid > 0
@@ -48,11 +47,11 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
                    AND last_pay.rn = 1
         WHERE s.subscription_active = 1
           AND pr.product_name != 'The Yoga Lifestyle: On-demand Library'
-        GROUP BY pr.id
-        ORDER BY pr.product_name
+        GROUP BY pr.product_name, billing_cycle
+        ORDER BY pr.product_name, billing_cycle
     """).fetchall()
     conn.close()
-    data = [
+    return [
         {
             "Product Name": r["product_name"],
             "Billing Cycle": r["billing_cycle"],
@@ -61,8 +60,6 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
-    print(f"✓ Found {len(data)} active subscription groups")
-    return data
 
 
 def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
@@ -228,12 +225,13 @@ def get_product_counts(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Dict[str
     for row in snapshot["subscriptions"]:
         product = row["Product Name"]
         if product not in counts:
-            counts[product] = {"Monthly": 0, "Other": 0}
+            counts[product] = {"Monthly": 0, "Annual": 0}
         billing_cycle = row["Billing Cycle"]
         if billing_cycle == "Monthly":
             counts[product]["Monthly"] = row["# of Active Subscriptions"]
         else:
-            counts[product]["Other"] = row["# of Active Subscriptions"]
+            # "Annual" (new) or "Other" (old snapshots) both map to Annual
+            counts[product]["Annual"] += row["# of Active Subscriptions"]
     return counts
 
 
@@ -388,12 +386,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     for row in subscriptions:
         product = row["Product Name"]
         if product not in products:
-            products[product] = {"Monthly": 0, "Other": 0}
+            products[product] = {"Monthly": 0, "Annual": 0}
         billing_cycle = row["Billing Cycle"]
         if billing_cycle == "Monthly":
             products[product]["Monthly"] = row["# of Active Subscriptions"]
         else:
-            products[product]["Other"] = row["# of Active Subscriptions"]
+            products[product]["Annual"] += row["# of Active Subscriptions"]
     
     # Get historical product counts
     week_counts = get_product_counts(week_snapshot)
@@ -403,12 +401,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     # Sort products alphabetically
     for product in sorted(products.keys()):
         monthly = products[product]["Monthly"]
-        annual = products[product]["Other"]
+        annual = products[product]["Annual"]
         display_name = simplify_product_name(product)
         
         # Check for changes in this product
         monthly_change_key = f"marvelous:{product}:Monthly"
-        annual_change_key = f"marvelous:{product}:Other"
+        annual_change_key = f"marvelous:{product}:Annual"
         monthly_changed = monthly_change_key in changes
         annual_changed = annual_change_key in changes
         
@@ -419,7 +417,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         for hist_counts in [week_counts, month_counts, year_counts]:
             if product in hist_counts:
                 all_monthly.append(monthly - hist_counts[product]["Monthly"])
-                all_annual.append(annual - hist_counts[product]["Other"])
+                all_annual.append(annual - hist_counts[product]["Annual"])
         
         # Determine max width needed (account for +/- signs on deltas)
         def calc_width(val, is_delta):
@@ -447,7 +445,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         # Add annual deltas
         for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
             if product in hist_counts:
-                a_diff = annual - hist_counts[product]["Other"]
+                a_diff = annual - hist_counts[product]["Annual"]
                 if a_diff != 0:
                     a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
                     lines.append(f"   𝚫 {label}:  {a_str:>{max_annual_width}}")
