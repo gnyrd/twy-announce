@@ -62,6 +62,27 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
     ]
 
 
+
+
+def get_recent_cancellations(n: int = 5) -> List[Dict[str, Any]]:
+    """Return the N most recently churned subscribers by last payment date."""
+    conn = sqlite3.connect(str(MARVY_DB))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT s.full_name as name,
+               pr.product_name as product,
+               date(s.last_time_purchase) as last_payment
+        FROM subscriptions s
+        JOIN products pr ON pr.id = s.product_id
+        WHERE s.subscription_active = 0
+          AND pr.product_name != 'The Yoga Lifestyle: On-demand Library'
+        ORDER BY s.last_time_purchase DESC
+        LIMIT ?
+    """, (n,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
     """Save daily subscription data to history."""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -378,6 +399,14 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             if change != "0":
                 lines.append(f"   𝚫 year: {change}")
     
+    # Recent cancellations
+    recent_exits = get_recent_cancellations(5)
+    if recent_exits:
+        lines.append(" Recent exits:")
+        for ex in recent_exits:
+            product_short = "Archive" if "Archive" in ex["product"] else "Membership"
+            lines.append(f"   {ex['name']} ({product_short}, {ex['last_payment']})")
+
     # Product breakdown
     lines.append("")
     
