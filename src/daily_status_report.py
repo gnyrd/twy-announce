@@ -323,11 +323,6 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     lines.append("*Membership:*")
     lines.append(f" Active: {current_totals['total_subs']:.0f}")
 
-    for label, days in [("week", 7), ("month", 30), ("year", 365)]:
-        count_ago = get_member_count_ago(days)
-        change = format_change(current_totals['total_subs'], count_ago)
-        if change != "0":
-            lines.append(f"   𝚫 {label}: {change}")
 
     lines.append("")
 
