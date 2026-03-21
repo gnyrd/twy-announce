@@ -17,7 +17,6 @@ load_dotenv()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent
-HISTORY_DIR = PROJECT_ROOT / "data/marvelous/history"
 MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
@@ -62,10 +61,6 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
     ]
 
 
-
-
-
-
 def get_member_count_ago(days: int) -> int:
     """Approximate active member count N days ago from purchase history."""
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
@@ -84,35 +79,41 @@ def get_member_count_ago(days: int) -> int:
     return result
 
 
-def save_daily_snapshot(subscriptions: List[Dict[str, Any]], date: str):
-    """Save daily subscription data to history."""
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    
-    snapshot = {
-        "date": date,
-        "timestamp": datetime.now().isoformat(),
-        "subscriptions": subscriptions
-    }
-    
-    filepath = HISTORY_DIR / f"{date}.json"
-    with open(filepath, "w") as f:
-        json.dump(snapshot, f, indent=2)
-    
-    print(f"✓ Saved snapshot to {filepath}")
+def get_product_counts_ago(days: int) -> Dict[str, Dict[str, int]]:
+    """Get per-product, per-billing-cycle active subscription counts N days ago from DB."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    conn = sqlite3.connect(str(MARVY_DB))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT pr.product_name,
+               CASE
+                   WHEN last_pay.amount_paid > pr.price * 3 THEN 'Annual'
+                   ELSE 'Monthly'
+               END as billing_cycle,
+               COUNT(*) as active_count
+        FROM subscriptions s
+        JOIN products pr ON pr.id = s.product_id
+        JOIN (
+            SELECT customer_id, product_id, amount_paid,
+                   ROW_NUMBER() OVER (PARTITION BY customer_id, product_id ORDER BY created DESC) as rn
+            FROM purchases WHERE amount_paid > 0
+        ) last_pay ON last_pay.customer_id = s.customer_id
+                   AND last_pay.product_id = s.product_id
+                   AND last_pay.rn = 1
+        WHERE pr.product_name != 'The Yoga Lifestyle: On-demand Library'
+          AND s.first_purchase < ?
+          AND (s.subscription_active = 1 OR s.last_time_purchase > ?)
+        GROUP BY pr.product_name, billing_cycle
+    """, (cutoff, cutoff)).fetchall()
+    conn.close()
 
-
-def load_historical_snapshot(date: str) -> Optional[Dict[str, Any]]:
-    """Load historical snapshot for a specific date."""
-    filepath = HISTORY_DIR / f"{date}.json"
-    if not filepath.exists():
-        return None
-    
-    try:
-        with open(filepath) as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Warning: Could not load snapshot for {date}: {e}")
-        return None
+    counts = {}
+    for row in rows:
+        product = row["product_name"]
+        if product not in counts:
+            counts[product] = {"Monthly": 0, "Annual": 0}
+        counts[product][row["billing_cycle"]] = row["active_count"]
+    return counts
 
 
 def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
@@ -120,7 +121,6 @@ def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
     filepath = MAILCHIMP_HISTORY_DIR / f"{date}.json"
     if not filepath.exists():
         return None
-    
     try:
         with open(filepath) as f:
             return json.load(f)
@@ -134,7 +134,6 @@ def load_instagram_snapshot(date: str) -> Optional[Dict[str, Any]]:
     filepath = INSTAGRAM_HISTORY_DIR / f"{date}.json"
     if not filepath.exists():
         return None
-    
     try:
         with open(filepath) as f:
             return json.load(f)
@@ -148,7 +147,6 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
     filepath = YOUTUBE_HISTORY_DIR / f"{date}.json"
     if not filepath.exists():
         return None
-    
     try:
         with open(filepath) as f:
             return json.load(f)
@@ -157,30 +155,19 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def extract_all_counts(
-    subscriptions: List[Dict[str, Any]],
+def extract_subscriber_counts(
     mailchimp: Optional[Dict[str, Any]],
     instagram: Optional[Dict[str, Any]],
     youtube: Optional[Dict[str, Any]]
 ) -> Dict[str, int]:
-    """Extract all counts into a flat dict for comparison."""
+    """Extract email/social subscriber counts into a flat dict for comparison."""
     counts = {}
-    
-    # Marvelous subscription counts
-    for row in subscriptions:
-        product = row["Product Name"]
-        cycle = row["Billing Cycle"]
-        key = f"marvelous:{product}:{cycle}"
-        counts[key] = row["# of Active Subscriptions"]
-    
-    # Subscriber counts
     if mailchimp:
         counts["mailchimp:subscriber_count"] = mailchimp.get("subscriber_count", 0)
     if instagram:
         counts["instagram:follower_count"] = instagram.get("follower_count", 0)
     if youtube:
         counts["youtube:subscriber_count"] = youtube.get("subscriber_count", 0)
-    
     return counts
 
 
@@ -188,13 +175,11 @@ def compare_counts(today: Dict[str, int], yesterday: Dict[str, int]) -> Dict[str
     """Compare counts and return dict of changes (key -> delta)."""
     changes = {}
     all_keys = set(today.keys()) | set(yesterday.keys())
-    
     for key in all_keys:
         today_val = today.get(key, 0)
         yesterday_val = yesterday.get(key, 0)
         if today_val != yesterday_val:
             changes[key] = today_val - yesterday_val
-    
     return changes
 
 
@@ -239,96 +224,72 @@ def format_change_highlighted(delta: int) -> str:
         return "0"
 
 
-def get_product_counts(snapshot: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
-    """Extract product counts from a snapshot."""
-    if not snapshot:
-        return {}
-    counts = {}
-    for row in snapshot["subscriptions"]:
-        product = row["Product Name"]
-        if product not in counts:
-            counts[product] = {"Monthly": 0, "Annual": 0}
-        billing_cycle = row["Billing Cycle"]
-        if billing_cycle == "Monthly":
-            counts[product]["Monthly"] = row["# of Active Subscriptions"]
-        else:
-            # "Annual" (new) or "Other" (old snapshots) both map to Annual
-            counts[product]["Annual"] += row["# of Active Subscriptions"]
-    return counts
-
-
 def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> List[str]:
     """Format delta lines for a subscriber metric. Only include lines where there's a change."""
     lines = []
-    
+
     if week_val is not None:
         diff = current - week_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
             lines.append(f"   𝚫 week:  {change}")
-    
+
     if month_val is not None:
         diff = current - month_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
             lines.append(f"   𝚫 month: {change}")
-    
+
     if year_val is not None:
         diff = current - year_val
         if diff != 0:
             change = f"+{diff}" if diff > 0 else str(diff)
             lines.append(f"   𝚫 year:  {change}")
-    
+
     return lines
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
     """Format subscription data into Slack message with historical comparisons."""
-    # Current totals
     current_totals = calculate_totals(subscriptions)
-    
-    # Load historical data
+
     now = datetime.now()
     week_ago_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     month_ago_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     year_ago_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
-    
-    week_snapshot = load_historical_snapshot(week_ago_date)
-    month_snapshot = load_historical_snapshot(month_ago_date)
-    year_snapshot = load_historical_snapshot(year_ago_date)
-    
+
     # Load Mailchimp data
     mc_today_snapshot = load_mailchimp_snapshot(today)
     mc_week_snapshot = load_mailchimp_snapshot(week_ago_date)
     mc_month_snapshot = load_mailchimp_snapshot(month_ago_date)
     mc_year_snapshot = load_mailchimp_snapshot(year_ago_date)
-    
+
     # Load Instagram data
     ig_today_snapshot = load_instagram_snapshot(today)
-    ig_week_snapshot = load_instagram_snapshot(week_ago_date)
-    ig_month_snapshot = load_instagram_snapshot(month_ago_date)
-    ig_year_snapshot = load_instagram_snapshot(year_ago_date)
-    
+
     # Load YouTube data
     yt_today_snapshot = load_youtube_snapshot(today)
     yt_week_snapshot = load_youtube_snapshot(week_ago_date)
     yt_month_snapshot = load_youtube_snapshot(month_ago_date)
     yt_year_snapshot = load_youtube_snapshot(year_ago_date)
-    
-    # Format date
+
+    # HM historical product counts from DB
+    day_counts = get_product_counts_ago(1)
+    week_counts = get_product_counts_ago(7)
+    month_counts = get_product_counts_ago(30)
+    year_counts = get_product_counts_ago(365)
+
     today_formatted = now.strftime("%a, %b %d")
-    
-    # Build message
+
     lines = [
-        (f"*TWY Status* {today_formatted}"),
+        f"*TWY Status* {today_formatted}",
         "",
     ]
-    
-    # Add Subscribers section if we have any subscriber data
+
+    # Subscribers section
     if mc_today_snapshot or ig_today_snapshot or yt_today_snapshot:
         lines.append("*Subscribers:*")
-        
-        # Email (Mailchimp)
+
         if mc_today_snapshot:
             subscriber_count = mc_today_snapshot["subscriber_count"]
             change_key = "mailchimp:subscriber_count"
@@ -336,30 +297,14 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
                 lines.append(f" Email: {subscriber_count:,} {format_change_highlighted(changes[change_key])}")
             else:
                 lines.append(f" Email: {subscriber_count:,}")
-            
-            # Add deltas for email
             week_val = mc_week_snapshot["subscriber_count"] if mc_week_snapshot else None
             month_val = mc_month_snapshot["subscriber_count"] if mc_month_snapshot else None
             year_val = mc_year_snapshot["subscriber_count"] if mc_year_snapshot else None
             lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
-        
-        # Instagram
+
         if ig_today_snapshot:
             lines.append(" Instagram: Login Failure!")
-            # follower_count = ig_today_snapshot["follower_count"]
-#             change_key = "instagram:follower_count"
-#             if change_key in changes:
-#                 lines.append(f" Instagram: {follower_count:,} {format_change_highlighted(changes[change_key])}")
-#             else:
-#                 lines.append(f" Instagram: {follower_count:,}")
-#             
-#             # Add deltas for Instagram
-#             week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
-#             month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
-#             year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
-#             lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
-        
-        # YouTube
+
         if yt_today_snapshot:
             subscriber_count = yt_today_snapshot["subscriber_count"]
             change_key = "youtube:subscriber_count"
@@ -367,109 +312,91 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
                 lines.append(f" YouTube: {subscriber_count:,} {format_change_highlighted(changes[change_key])}")
             else:
                 lines.append(f" YouTube: {subscriber_count:,}")
-            
-            # Add deltas for YouTube
             week_val = yt_week_snapshot["subscriber_count"] if yt_week_snapshot else None
             month_val = yt_month_snapshot["subscriber_count"] if yt_month_snapshot else None
             year_val = yt_year_snapshot["subscriber_count"] if yt_year_snapshot else None
             lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
-        
+
         lines.append("")
-    
+
+    # Membership section
     lines.append("*Membership:*")
     lines.append(f" Active: {current_totals['total_subs']:.0f}")
-    
+
     for label, days in [("week", 7), ("month", 30), ("year", 365)]:
         count_ago = get_member_count_ago(days)
         change = format_change(current_totals['total_subs'], count_ago)
         if change != "0":
             lines.append(f"   𝚫 {label}: {change}")
-    
-    # Product breakdown
+
     lines.append("")
-    
-    # Group by product and billing cycle
+
+    # Group current subscriptions by product and billing cycle
     products = {}
     for row in subscriptions:
         product = row["Product Name"]
         if product not in products:
             products[product] = {"Monthly": 0, "Annual": 0}
-        billing_cycle = row["Billing Cycle"]
-        if billing_cycle == "Monthly":
+        cycle = row["Billing Cycle"]
+        if cycle == "Monthly":
             products[product]["Monthly"] = row["# of Active Subscriptions"]
         else:
             products[product]["Annual"] += row["# of Active Subscriptions"]
-    
-    # Get historical product counts
-    week_counts = get_product_counts(week_snapshot)
-    month_counts = get_product_counts(month_snapshot)
-    year_counts = get_product_counts(year_snapshot)
-    
-    # Sort products alphabetically
+
     for product in sorted(products.keys()):
         monthly = products[product]["Monthly"]
         annual = products[product]["Annual"]
         display_name = simplify_product_name(product)
-        
-        # Check for changes in this product
-        monthly_change_key = f"marvelous:{product}:Monthly"
-        annual_change_key = f"marvelous:{product}:Annual"
-        monthly_changed = monthly_change_key in changes
-        annual_changed = annual_change_key in changes
-        
-        # Collect all values for this product to determine alignment
-        all_monthly = [monthly]
-        all_annual = [annual]
-        
-        for hist_counts in [week_counts, month_counts, year_counts]:
-            if product in hist_counts:
-                all_monthly.append(monthly - hist_counts[product]["Monthly"])
-                all_annual.append(annual - hist_counts[product]["Annual"])
-        
-        # Determine max width needed (account for +/- signs on deltas)
-        def calc_width(val, is_delta):
-            if is_delta:
-                return len(f"+{abs(val)}") if val >= 0 else len(str(val))
-            return len(str(val))
-        
-        max_monthly_width = max(calc_width(v, i > 0) for i, v in enumerate(all_monthly))
-        max_annual_width = max(calc_width(v, i > 0) for i, v in enumerate(all_annual))
-        
-        total_subs = monthly + annual
-        # student_word = "student" if total_subs == 1 else "students"
-        
-        # Build product line with change highlights
-        monthly_str = str(monthly)
+
+        # Day-over-day deltas for highlighted arrows
+        day_monthly = day_counts.get(product, {}).get("Monthly", 0)
+        day_annual = day_counts.get(product, {}).get("Annual", 0)
+        monthly_delta = monthly - day_monthly
+        annual_delta = annual - day_annual
+
+        # Determine max width for delta alignment
+        all_monthly_deltas = [monthly_delta]
+        all_annual_deltas = [annual_delta]
+        for hist in [week_counts, month_counts, year_counts]:
+            if product in hist:
+                all_monthly_deltas.append(monthly - hist[product]["Monthly"])
+                all_annual_deltas.append(annual - hist[product]["Annual"])
+
+        def delta_width(val):
+            return len(f"+{abs(val)}") if val >= 0 else len(str(val))
+
+        max_monthly_width = max(delta_width(v) for v in all_monthly_deltas)
+        max_annual_width = max(delta_width(v) for v in all_annual_deltas)
+
         annual_str = str(annual)
-        if monthly_changed:
-            monthly_str = f"{monthly} {format_change_highlighted(changes[monthly_change_key])}"
-        if annual_changed:
-            annual_str = f"{annual} {format_change_highlighted(changes[annual_change_key])}"
-        
+        if annual_delta != 0:
+            annual_str = f"{annual} {format_change_highlighted(annual_delta)}"
+
+        monthly_str = str(monthly)
+        if monthly_delta != 0:
+            monthly_str = f"{monthly} {format_change_highlighted(monthly_delta)}"
+
         lines.append(f" {display_name}: ")
         lines.append(f"   Annual: {annual_str}")
 
-        # Add annual deltas
-        for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product in hist_counts:
-                a_diff = annual - hist_counts[product]["Annual"]
+        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
+            if product in hist:
+                a_diff = annual - hist[product]["Annual"]
                 if a_diff != 0:
                     a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
                     lines.append(f"   𝚫 {label}:  {a_str:>{max_annual_width}}")
 
         lines.append(f"   Monthly: {monthly_str}")
 
-        # Add monthly deltas
-        for label, hist_counts in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product in hist_counts:
-                m_diff = monthly - hist_counts[product]["Monthly"]
+        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
+            if product in hist:
+                m_diff = monthly - hist[product]["Monthly"]
                 if m_diff != 0:
                     m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
                     lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}}")
 
-        lines.append("")  # Blank line after product block
+        lines.append("")
 
-    
     return "\n".join(lines)
 
 
@@ -478,9 +405,8 @@ def post_to_slack(message: str):
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
     bot_token = os.getenv("SLACK_BOT_TOKEN")
     channel = os.getenv("SLACK_CHANNEL", "#twy-status")
-    
+
     if webhook_url:
-        # Use webhook
         print("Posting to Slack via webhook...")
         resp = requests.post(
             webhook_url,
@@ -489,9 +415,8 @@ def post_to_slack(message: str):
         )
         resp.raise_for_status()
         print("✓ Posted to Slack")
-        
+
     elif bot_token:
-        # Use Slack API
         print("Posting to Slack via bot token...")
         resp = requests.post(
             "https://slack.com/api/chat.postMessage",
@@ -503,7 +428,7 @@ def post_to_slack(message: str):
         if not result.get("ok"):
             raise Exception(f"Slack API error: {result.get('error')}")
         print("✓ Posted to Slack")
-        
+
     else:
         raise ValueError("No Slack credentials found. Set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN in .env")
 
@@ -513,70 +438,64 @@ def main():
     print("=" * 60)
     print("Daily Status Report")
     print("=" * 60)
-    
+
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
+
     try:
-        # Get today's data
         subscriptions = get_marvelous_data()
-        
-        # Save snapshot (always)
-        save_daily_snapshot(subscriptions, today)
-        
-        # Load today's subscriber data
+
+        # Load today's subscriber snapshots (email/social only)
         mc_today = load_mailchimp_snapshot(today)
         ig_today = load_instagram_snapshot(today)
         yt_today = load_youtube_snapshot(today)
-        
-        # Extract today's counts
-        today_counts = extract_all_counts(subscriptions, mc_today, ig_today, yt_today)
-        
-        # Load yesterday's data for comparison
-        yesterday_snapshot = load_historical_snapshot(yesterday)
+
+        # Load yesterday's subscriber snapshots for comparison
         mc_yesterday = load_mailchimp_snapshot(yesterday)
         ig_yesterday = load_instagram_snapshot(yesterday)
         yt_yesterday = load_youtube_snapshot(yesterday)
-        
-        # Extract yesterday's counts
-        yesterday_subs = yesterday_snapshot["subscriptions"] if yesterday_snapshot else []
-        yesterday_counts = extract_all_counts(yesterday_subs, mc_yesterday, ig_yesterday, yt_yesterday)
-        
-        # Compare counts
+
+        today_counts = extract_subscriber_counts(mc_today, ig_today, yt_today)
+        yesterday_counts = extract_subscriber_counts(mc_yesterday, ig_yesterday, yt_yesterday)
         changes = compare_counts(today_counts, yesterday_counts)
-        
-        # Determine if we should send
+
+        # Check HM membership change (DB query, no snapshot needed)
+        current_total = int(calculate_totals(subscriptions)["total_subs"])
+        hm_yesterday_total = get_member_count_ago(1)
+        hm_changed = current_total != hm_yesterday_total
+
         should_send = False
         send_reason = ""
-        
+
         if is_monday():
             should_send = True
             send_reason = "Monday (weekly report)"
         elif changes:
             should_send = True
-            send_reason = f"Data changed: {len(changes)} metric(s)"
+            send_reason = f"Subscriber data changed: {len(changes)} metric(s)"
+        elif hm_changed:
+            should_send = True
+            send_reason = f"HM membership changed: {hm_yesterday_total} -> {current_total}"
         else:
             send_reason = "No changes from yesterday"
-        
+
         print(f"\nSend decision: {'YES' if should_send else 'NO'} - {send_reason}")
-        
+
         if not should_send:
             print("\n✓ Skipping report (no changes)")
             return 0
-        
-        # Format message
+
         message = format_report(subscriptions, today, changes)
         print("\nReport preview:")
         print("-" * 60)
         print(message)
         print("-" * 60)
-        
-        # Post to Slack
+
         post_to_slack(message)
-        
+
         print("\n✓ Daily status report completed successfully")
         return 0
-        
+
     except Exception as e:
         print(f"\n✗ Error: {e}")
         return 1
