@@ -303,7 +303,19 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
 
         if ig_today_snapshot:
-            lines.append(" Instagram: Login Failure!")
+            ig_week_snapshot = load_instagram_snapshot(week_ago_date)
+            ig_month_snapshot = load_instagram_snapshot(month_ago_date)
+            ig_year_snapshot = load_instagram_snapshot(year_ago_date)
+            follower_count = ig_today_snapshot["follower_count"]
+            change_key = "instagram:follower_count"
+            if change_key in changes:
+                lines.append(f" Instagram: {follower_count:,} {format_change_highlighted(changes[change_key])}")
+            else:
+                lines.append(f" Instagram: {follower_count:,}")
+            week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
+            month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
+            year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
+            lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
 
         if yt_today_snapshot:
             subscriber_count = yt_today_snapshot["subscriber_count"]
