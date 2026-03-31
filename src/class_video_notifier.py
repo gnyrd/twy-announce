@@ -110,32 +110,17 @@ def thumb_line(milestones: dict) -> str:
 def build_notifications(class_slug: str, date_iso: str, milestones: dict, sent: dict) -> list[str]:
     name = class_display_name(date_iso, milestones["plan"])
     date_fmt = format_date(date_iso)
-    edit_url = f"{TRIM_BASE_URL}/{date_iso}"
     messages = []
 
-    if milestones["ready_to_edit"] and not sent.get("ready_to_edit"):
-        msg = f"🎬 *{name}* ({date_fmt}) — <{edit_url}|edit>\n{thumb_line(milestones)}"
-        messages.append(("ready_to_edit", msg))
-
     if milestones["thumbnails_ready"] and not sent.get("thumbnails_ready"):
-        # Only send separately if ready_to_edit was already sent (otherwise it's in that message)
-        if sent.get("ready_to_edit"):
-            best = milestones["thumbnail_best"]
-            detail = f"Best: {best}" if best else ""
-            msg = f"🖼 *{name}* ({date_fmt}) — thumbnails ready"
-            if detail:
-                msg += f"\n{detail}"
-            messages.append(("thumbnails_ready", msg))
-        else:
-            messages.append(("thumbnails_ready", None))  # will be included in ready_to_edit
+        msg = f"🖼 *{name}* ({date_fmt}) — thumbnails ready"
+        messages.append(("thumbnails_ready", msg))
 
     if milestones["posted_to_marvelous"] and not sent.get("posted_to_marvelous"):
         msg = f"✅ *{name}* ({date_fmt}) — posted to Marvelous"
         messages.append(("posted_to_marvelous", msg))
 
     return messages
-
-
 def prune_state(state: dict) -> dict:
     cutoff = (datetime.now() - timedelta(days=SCAN_DAYS)).strftime("%Y-%m-%d")
     return {k: v for k, v in state.items() if k[:10] >= cutoff}
