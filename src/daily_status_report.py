@@ -315,7 +315,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
             month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
             year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
-            lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
+#             lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
 
         if yt_today_snapshot:
             subscriber_count = yt_today_snapshot["subscriber_count"]
