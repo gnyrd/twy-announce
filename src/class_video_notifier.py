@@ -10,11 +10,12 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from twy_paths import load_env
+from twy_classplan import load_plan as _load_plan
 
-load_dotenv()
+load_env()
 
-CLASSES_DIR     = Path("/root/twy/data/classes")
-CLASS_PLANS_DIR = Path("/root/twy/data/class-plans")
+CLASSES_DIR = Path("/root/twy/data/classes")
 STATE_FILE      = Path(__file__).parent.parent / "state/class_video_notifications.json"
 WEBHOOK_URL     = os.getenv("SLACK_VIDEO_WEBHOOK_URL")
 TRIM_BASE_URL   = "https://classes.tiffanywood.yoga/trim"
@@ -34,13 +35,7 @@ def save_state(state: dict):
 
 
 def load_class_plan(date_iso: str) -> dict | None:
-    path = CLASS_PLANS_DIR / date_iso[:7] / f"{date_iso}.json"
-    if path.exists():
-        try:
-            return json.loads(path.read_text())
-        except Exception:
-            return None
-    return None
+    return _load_plan(date_iso)
 
 
 def class_display_name(date_iso: str, plan: dict | None) -> str:
