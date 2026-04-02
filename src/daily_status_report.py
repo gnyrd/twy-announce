@@ -13,7 +13,7 @@ import requests
 from dotenv import load_dotenv
 
 # Load environment variables
-from twy_paths import load_env
+from twy_paths import load_env, marvy_db_path
 load_env()
 load_dotenv(override=False)
 
@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
-MARVY_DB = Path(os.environ.get("MARVY_DB_PATH", "/root/twy/data/marvy.db"))
+MARVY_DB = marvy_db_path()
 
 
 def get_marvelous_data() -> List[Dict[str, Any]]:
