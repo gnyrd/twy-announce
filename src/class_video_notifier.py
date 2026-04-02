@@ -10,15 +10,15 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from twy_paths import load_env
+from twy_paths import load_env, classes_dir
 from twy_classplan import load_plan as _load_plan
 
 load_env()
 
-CLASSES_DIR = Path("/root/twy/data/classes")
+CLASSES_DIR = classes_dir()
 STATE_FILE      = Path(__file__).parent.parent / "state/class_video_notifications.json"
 WEBHOOK_URL     = os.getenv("SLACK_VIDEO_WEBHOOK_URL")
-TRIM_BASE_URL   = "https://classes.tiffanywood.yoga/trim"
+TRIM_BASE_URL   = "https://classes.tiffanywoodyoga.com/trim"
 SCAN_DAYS       = 30
 DATE_RE         = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
@@ -108,7 +108,8 @@ def build_notifications(class_slug: str, date_iso: str, milestones: dict, sent: 
     messages = []
 
     if milestones["thumbnails_ready"] and not sent.get("thumbnails_ready"):
-        msg = f"🖼 *{name}* ({date_fmt}) — thumbnails ready"
+        trim_url = f"{TRIM_BASE_URL}/{date_iso}"
+        msg = f":frame_with_picture: *{name}* ({date_fmt}) — <{trim_url}|Ready>"
         messages.append(("thumbnails_ready", msg))
 
     if milestones["posted_to_marvelous"] and not sent.get("posted_to_marvelous"):
