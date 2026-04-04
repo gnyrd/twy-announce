@@ -5,8 +5,8 @@ Newsletter prompt generation -- runs daily via cron.
 Logic:
 - Any day: if next month's newsletters already exist, nothing to do.
 - Any day: if next month's prompts exist but newsletters don't, post reminder to #status-newsletters.
-- On/after 28th: if prompts don't exist yet, check class plan coverage and generate them.
-- Before 28th: no prompt generation, but still sends reminder if prompts exist without newsletters.
+- On/after 25th: if prompts don't exist yet, check class plan coverage and generate them.
+- Before 25th: no prompt generation, but still sends reminder if prompts exist without newsletters.
 """
 import json
 import os
@@ -78,9 +78,9 @@ def main():
         print(msg)
         return
 
-    # Only generate prompts on/after 28th
-    if today.day < 28:
-        print(f"{today}: before 28th, skipping prompt generation")
+    # Only generate prompts on/after 25th
+    if today.day < 25:
+        print(f"{today}: before 25th, skipping prompt generation")
         return
 
     # Load overview
