@@ -131,3 +131,116 @@ Write this as Tiff -- direct, warm, no yoga-speak. This person is on the fence. 
 Hard limit: 175 words. Subject line included, not counted.
 Structure: subject line, 2-3 short paragraphs, event details, register link, sign-off.
 No headers. No bullets."""
+
+
+# Reference emails (April 2026, Tiff's voice) — quality bar for prompt templates
+_PH1_REFERENCE = """Hello!
+
+Thank you for being part of this month's Yoga Habit class.
+
+There was something truly beautiful in the way we practiced together — across locations, across lives — yet meeting in a shared rhythm of attention and care. These moments remind me how real this work is. Even for one class, when we return to our center, something shifts.
+
+I often think of this practice as a living expression of Indra's Net — each of us a point of light, connected. When we remember our center, and then carry that into our lives, it quietly strengthens the whole.
+
+The challenge, of course, is not the one class — it's staying connected to that awareness as life continues.
+
+That's where Abhyāsa comes in.
+
+If you'd like to continue practicing, I'd love to have you inside The Yoga Lifestyle. It's a space to return to — again and again — no matter what's happening in your life.
+
+As a simple invitation, I'm offering your first month for $49 if you join this week.
+
+You can explore and join here:
+[link]
+
+Whether or not you continue, I'm so glad you showed up. It matters.
+
+With gratitude,
+Tiffany
+
+---
+
+✨ Our next Yoga Habit class is [NEXT MONTH DATE] — I'd love for you to join us.
+
+The community really does feel different when you're part of it. Even if this is the only class you can make, it matters.
+
+Building a habit takes time. Let this be a gentle place to begin."""
+
+_PH2_REFERENCE = """Hi,
+
+As the week begins to wind down, I wanted to offer a small reminder…
+
+You already know how to return to your center.
+
+We touched that place together in practice — that steady point underneath the movement, the breath, the noise of the week. It's still there.
+
+Even a few conscious breaths…
+Even one moment of remembering…
+That is practice.
+
+If you feel the pull to reconnect, I'd love to have you continue inside The Yoga Lifestyle. It's a place to return to — again and again — in a way that supports real life.
+
+Your first month is just $49 — that offer closes soon.
+
+You can explore it here:
+[link]
+
+And if not, simply pause for a moment today and remember:
+your center hasn't gone anywhere.
+
+With love,
+Tiffany
+
+P.S. Our next Yoga Habit class is [NEXT MONTH DATE] — mark your calendar. You are always welcome and wanted here."""
+
+
+def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for the first post-Habit-class follow-up email (send +24hrs)."""
+    habit_date = get_habit_class_date(year, month)
+    habit_str = habit_date.strftime("%B %-d")
+    habit_plan = plans.get(habit_date.isoformat(), {})
+
+    return f"""Write a follow-up email to people who attended the Yoga Habit free class on {habit_str}.
+
+Class context:
+Title: {habit_plan.get('title', 'The Yoga Habit')}
+Description: {habit_plan.get('description', '')}
+Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
+
+This email sends 24 hours after class ends. The reader just practiced with Tiff for the first time (or returned after a gap). They're in the afterglow.
+
+Goal: warm, personal thank-you that naturally opens into an invitation to continue inside The Yoga Lifestyle. Offer: first month for $49 via the link below. Do not fabricate details about the class — use only what's provided above.
+
+Leave a literal "[link]" placeholder where the membership offer link goes. Do not invent a URL.
+
+Reference quality (Tiff's voice and tone — match this):
+{_PH1_REFERENCE}
+
+Hard limit: 250 words. Subject line included, not counted.
+Structure: subject line, 3-4 short paragraphs, [link] on its own line, brief closing, sign-off.
+No headers. No bullets."""
+
+
+def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for the second post-Habit-class follow-up email (send +7 days)."""
+    habit_date = get_habit_class_date(year, month)
+    habit_str = habit_date.strftime("%B %-d")
+    habit_plan = plans.get(habit_date.isoformat(), {})
+
+    return f"""Write a second follow-up email for people who attended the Yoga Habit free class on {habit_str}.
+
+Class context:
+Title: {habit_plan.get('title', 'The Yoga Habit')}
+Description: {habit_plan.get('description', '')}
+Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
+
+This email sends 7 days after class. The offer is still open but closing soon. The reader has had a week to think about it. Tone is gentle, non-pushy. A quiet reminder that the door is still open.
+
+Goal: re-open the invitation to The Yoga Lifestyle. Offer: first month for $49, closes soon. Leave a literal "[link]" placeholder where the membership offer link goes.
+
+Reference quality (Tiff's voice and tone — match this):
+{_PH2_REFERENCE}
+
+Hard limit: 200 words. Subject line included, not counted.
+Structure: subject line, 2-3 short paragraphs, [link] on its own line, brief closing, sign-off + P.S.
+No headers. No bullets."""
