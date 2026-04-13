@@ -4,7 +4,8 @@ Builds fully populated prompt text for Tweee (members + non-members).
 """
 import calendar
 from datetime import date
-import requests as _requests
+import sys
+import requests
 
 CLASSES_API = "http://localhost:5003"
 
@@ -19,7 +20,7 @@ def get_habit_class_date(year: int, month: int) -> date:
     from_date = f"{year:04d}-{month:02d}-01"
     to_date = f"{year:04d}-{month:02d}-{last_day:02d}"
     try:
-        resp = _requests.get(
+        resp = requests.get(
             f"{CLASSES_API}/api/plans",
             params={"from": from_date, "to": to_date},
             timeout=10,
@@ -28,8 +29,8 @@ def get_habit_class_date(year: int, month: int) -> date:
             for plan in resp.json():
                 if plan.get("class_type") == "Habit":
                     return date.fromisoformat(plan["date"])
-    except Exception:
-        pass
+    except requests.RequestException as exc:
+        print(f"[get_habit_class_date] API unreachable, falling back to second Saturday: {exc}", file=sys.stderr)
     # Fallback: second Saturday
     count = 0
     for day in range(1, last_day + 1):
