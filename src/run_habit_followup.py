@@ -31,6 +31,7 @@ from slack import post_slack
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+MARVY_DB             = "/root/twy/data/marvy.db"
 MOUNTAIN             = ZoneInfo("America/Denver")
 CLASSES_API          = "http://localhost:5003"
 MEMBERSHIP_PRODUCT   = 52025
@@ -91,25 +92,21 @@ def find_existing_campaign(title: str) -> dict | None:
 
 
 def get_habit_coupon_url(today: date) -> str:
-    """Look up this month's Habit coupon via marvy, return checkout URL.
-    Falls back to HABIT_[MON][YYYY] convention if marvy lookup fails."""
+    """Look up this month's Habit coupon in marvy.db, return checkout URL.
+    Falls back to HABIT_[MON][YYYY] convention if the coupon isn't cached."""
+    import sqlite3
     mon  = today.strftime("%b").upper()
     yyyy = str(today.year)
     expected_code = f"HABIT_{mon}{yyyy}"
     try:
-        c = marvy_client()
-        page = 1
-        while True:
-            resp = c.list_coupons(page=page)
-            for coupon in resp.get("results", []):
-                if coupon.get("code") == expected_code:
-                    return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={coupon['code']}"
-            if not resp.get("next"):
-                break
-            page += 1
-        log.warning("Coupon %s not found via marvy; using convention", expected_code)
-    except (requests.RequestException, KeyError, ValueError) as e:
-        log.warning("marvy coupon lookup failed: %s; using convention", e)
+        conn = sqlite3.connect(MARVY_DB)
+        row = conn.execute("SELECT code FROM coupons WHERE code = ?", (expected_code,)).fetchone()
+        conn.close()
+        if row:
+            return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={row[0]}"
+        log.warning("Coupon %s not found in marvy.db; using convention", expected_code)
+    except sqlite3.Error as e:
+        log.warning("marvy.db lookup failed: %s; using convention", e)
     return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={expected_code}"
 
 
