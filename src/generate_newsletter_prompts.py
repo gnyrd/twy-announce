@@ -24,7 +24,7 @@ load_env()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from newsletter import save_prompt, prompt_path, newsletter_path
-from newsletter_prompt import check_coverage, assemble_lifestyle_prompt, assemble_non_lifestyle_prompt
+from habit_newsletter_prompt import check_coverage, assemble_lifestyle_prompt, assemble_non_lifestyle_prompt, assemble_ph1_prompt, assemble_ph2_prompt
 from slack import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
@@ -62,17 +62,21 @@ def main():
     # If newsletters already exist for next month, nothing to do
     nl_lifestyle = newsletter_path(year, month, "lifestyle")
     nl_non_lifestyle = newsletter_path(year, month, "non-lifestyle")
-    if nl_lifestyle.exists() and nl_non_lifestyle.exists():
-        print(f"Newsletters exist for {month_label}, nothing to do")
+    nl_ph1 = newsletter_path(year, month, "ph1")
+    nl_ph2 = newsletter_path(year, month, "ph2")
+    if nl_lifestyle.exists() and nl_non_lifestyle.exists() and nl_ph1.exists() and nl_ph2.exists():
+        print(f"All four newsletters exist for {month_label}, nothing to do")
         return
 
     # If prompts already exist but newsletters don't, send daily reminder
     p_lifestyle = prompt_path(year, month, "lifestyle")
     p_non_lifestyle = prompt_path(year, month, "non-lifestyle")
-    if p_lifestyle.exists() and p_non_lifestyle.exists():
+    p_ph1 = prompt_path(year, month, "ph1")
+    p_ph2 = prompt_path(year, month, "ph2")
+    if p_lifestyle.exists() and p_non_lifestyle.exists() and p_ph1.exists() and p_ph2.exists():
         msg = (
-            f":bell: Newsletter prompts are ready for {month_label} but newsletters haven't been generated yet. "
-            f"Trigger Tweee: \"Create the {month_label} newsletters\""
+            f":bell: All prompts ready for {month_label} but content hasn't been generated yet. "
+            f"Trigger Tweee: \"Create the {month_label} Yoga Habit content\""
         )
         post_slack(SLACK_STATUS_CHANNEL, msg)
         print(msg)
@@ -106,13 +110,17 @@ def main():
     # Assemble and save prompts
     lifestyle_prompt = assemble_lifestyle_prompt(overview, plans, year, month)
     non_lifestyle_prompt = assemble_non_lifestyle_prompt(overview, plans, year, month)
+    ph1_prompt = assemble_ph1_prompt(overview, plans, year, month)
+    ph2_prompt = assemble_ph2_prompt(overview, plans, year, month)
 
     save_prompt(year, month, "lifestyle", lifestyle_prompt)
     save_prompt(year, month, "non-lifestyle", non_lifestyle_prompt)
+    save_prompt(year, month, "ph1", ph1_prompt)
+    save_prompt(year, month, "ph2", ph2_prompt)
 
     msg = (
-        f":memo: Newsletter prompts ready for {month_label}. "
-        f"Trigger Tweee: \"Create the {month_label} newsletters\""
+        f":memo: All prompts ready for {month_label} (newsletters + follow-ups). "
+        f"Trigger Tweee: \"Create the {month_label} Yoga Habit content\""
     )
     post_slack(SLACK_STATUS_CHANNEL, msg)
     print(msg)
