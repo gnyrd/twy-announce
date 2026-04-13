@@ -103,7 +103,7 @@ def get_habit_coupon_url(today: date) -> str:
             if coupon["code"] == expected_code:
                 return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={coupon['code']}"
         log.warning("Coupon %s not found via marvy; using convention", expected_code)
-    except Exception as e:
+    except (requests.RequestException, KeyError, ValueError) as e:
         log.warning("marvy coupon lookup failed: %s; using convention", e)
     return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={expected_code}"
 
@@ -178,8 +178,12 @@ def schedule_campaign(campaign_id: str, send_time: str) -> None:
     r = requests.post(mc_url(f"/campaigns/{campaign_id}/actions/schedule"),
                       auth=mc_auth(), json={"schedule_time": send_time}, timeout=15)
     if r.status_code == 400 and "already scheduled" in r.text:
-        requests.post(mc_url(f"/campaigns/{campaign_id}/actions/unschedule"),
-                      auth=mc_auth(), timeout=15)
+        unsched = requests.post(mc_url(f"/campaigns/{campaign_id}/actions/unschedule"),
+                                auth=mc_auth(), timeout=15)
+        if unsched.status_code != 204:
+            raise RuntimeError(
+                f"Unschedule failed for {campaign_id}: {unsched.status_code} {unsched.text[:120]}"
+            )
         r = requests.post(mc_url(f"/campaigns/{campaign_id}/actions/schedule"),
                           auth=mc_auth(), json={"schedule_time": send_time}, timeout=15)
     if r.status_code != 204:
