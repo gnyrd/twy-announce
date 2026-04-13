@@ -1,83 +1,65 @@
 #!/usr/bin/env python3
-"""
-Daily cron: tag Yoga Habit attendees who became Yoga Lifestyle subscribers.
+"""Daily cron: tag Habit attendees who redeemed their coupon.
 
-For each open HABIT_* coupon window:
-  1. Find MC contacts tagged 'Yoga Habit - YYYY-MM'
-  2. Cross-ref with contacts tagged 'Membership - Yoga Lifestyle'
-  3. Tag matches with 'Yoga Habit - YYYY-MM - Redeemed' (idempotent)
+For each active HABIT_* coupon:
+  1. Compute target amount = product.price - coupon.discount_amount (from marvy.db)
+  2. Find local purchases in redeem window where amount_paid == target_amount
+  3. Cross-ref purchase emails with MC 'Yoga Habit - YYYY-MM' attendee tag
+  4. For matches: tag 'Yoga Habit - YYYY-MM - Redeemed' (idempotent)
 
-marvy has no purchase API so this uses MC tag cross-reference as a redemption proxy.
+Reads from marvy.db only - no live HM API calls.
 """
-import os
-import sys
+import calendar
 import hashlib
-import requests
+import json
 import logging
+import os
+import sqlite3
+import sys
 from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "paths"))
 from twy_paths import load_env
-
 load_env()
+
+import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-MAILCHIMP_API_KEY  = os.getenv("MAILCHIMP_API_KEY", "")
-MAILCHIMP_LIST_ID  = os.getenv("MAILCHIMP_AUDIENCE_ID", "")
-MC_SERVER          = os.getenv("MAILCHIMP_SERVER_PREFIX", "")
-LIFESTYLE_TAG_NAME = "Membership - Yoga Lifestyle"
+MAILCHIMP_API_KEY = os.getenv("MAILCHIMP_API_KEY", "")
+MAILCHIMP_LIST_ID = os.getenv("MAILCHIMP_AUDIENCE_ID", "")
+MC_SERVER         = os.getenv("MAILCHIMP_SERVER_PREFIX", "")
+
+MARVY_DB = "/root/twy/data/marvy.db"
 
 
 def mc_url(path: str) -> str:
     return f"https://{MC_SERVER}.api.mailchimp.com/3.0{path}"
 
 
-def mc_auth() -> tuple:
+def mc_auth() -> tuple[str, str]:
     return ("anystring", MAILCHIMP_API_KEY)
 
 
-def marvy_client():
-    sys.path.insert(0, "/root/twy/marvy")
-    from marvy import Client
-    resp = requests.post(
-        "https://api.namastream.com/auth/login/",
-        json={"email": os.environ["MARVELOUS_USERNAME"], "password": os.environ["MARVELOUS_PASSWORD"]},
-        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return Client(auth_token=resp.json()["key"])
-
-
-def get_open_habit_coupons() -> list[dict]:
-    """Return HABIT_* coupons whose redeem_end is today or in the future."""
+def get_open_habit_coupons(db: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return HABIT_* coupons whose window is still open."""
     today = date.today().isoformat()
-    c = marvy_client()
-    open_coupons = []
-    page = 1
-    while True:
-        resp = c.list_coupons(page=page)
-        for coupon in resp.get("results", []):
-            code = coupon.get("code") or ""
-            if code.startswith("HABIT_") and coupon.get("redeem_end", "") >= today:
-                open_coupons.append(coupon)
-        if not resp.get("next"):
-            break
-        page += 1
-    return open_coupons
+    return db.execute("""
+        SELECT code, discount_amount, products_json, redeem_start, redeem_end
+        FROM coupons
+        WHERE code LIKE 'HABIT_%' AND redeem_end >= ?
+        ORDER BY redeem_start
+    """, (today,)).fetchall()
 
 
-def parse_habit_tag_month(coupon_code: str) -> tuple[int, int] | None:
-    """Parse HABIT_MAY2026 -> (2026, 5). Returns None if unparseable."""
-    import calendar
+def parse_habit_month(coupon_code: str) -> tuple[int, int] | None:
+    """Parse HABIT_MAY2026 -> (2026, 5)."""
     try:
-        # HABIT_[MON][YYYY] e.g. HABIT_MAY2026
-        suffix = coupon_code.replace("HABIT_", "")  # MAY2026
-        mon_abbr = suffix[:3]   # MAY
-        yyyy = int(suffix[3:])  # 2026
+        suffix = coupon_code.replace("HABIT_", "")
+        mon_abbr = suffix[:3]
+        yyyy = int(suffix[3:])
         months = {m.upper(): i for i, m in enumerate(calendar.month_abbr) if m}
         month = months.get(mon_abbr)
         if month:
@@ -87,8 +69,45 @@ def parse_habit_tag_month(coupon_code: str) -> tuple[int, int] | None:
     return None
 
 
-def lookup_tag_id(tag_name: str) -> int | None:
-    """Return MC tag id for a name, or None if not found."""
+def find_redeemer_emails(db: sqlite3.Connection, coupon: sqlite3.Row) -> set[str]:
+    """Find purchase emails where amount_paid matches the discounted price."""
+    products = json.loads(coupon["products_json"])
+    discount = float(coupon["discount_amount"])
+
+    targets: list[tuple[int, float]] = []
+    for p in products:
+        pid = p["id"]
+        row = db.execute("SELECT price FROM products WHERE id=?", (pid,)).fetchone()
+        if row is None or row["price"] is None:
+            log.warning("coupon %s: no cached price for product %s - skipping",
+                        coupon["code"], pid)
+            continue
+        target = round(float(row["price"]) - discount, 2)
+        targets.append((pid, target))
+
+    if not targets:
+        return set()
+
+    start = coupon["redeem_start"]
+    end_plus = coupon["redeem_end"] + "T23:59:59Z"
+
+    emails: set[str] = set()
+    for pid, target in targets:
+        rows = db.execute("""
+            SELECT customer_email FROM purchases
+            WHERE product_id = ? AND amount_paid = ?
+              AND created >= ? AND created <= ?
+              AND is_canceled = 0
+        """, (pid, target, start, end_plus)).fetchall()
+        for r in rows:
+            if r["customer_email"]:
+                emails.add(r["customer_email"].lower())
+    return emails
+
+
+def get_habit_attendees(year: int, month: int) -> set[str]:
+    """Return email set of contacts tagged 'Yoga Habit - YYYY-MM' in MC."""
+    tag_name = f"Yoga Habit - {year:04d}-{month:02d}"
     resp = requests.get(
         mc_url(f"/lists/{MAILCHIMP_LIST_ID}/tag-search"),
         params={"name": tag_name},
@@ -97,25 +116,26 @@ def lookup_tag_id(tag_name: str) -> int | None:
     )
     resp.raise_for_status()
     tags = resp.json().get("tags", [])
-    return tags[0]["id"] if tags else None
+    if not tags:
+        log.info("MC tag '%s' not found - no attendees for %s-%02d", tag_name, year, month)
+        return set()
+    tag_id = tags[0]["id"]
 
-
-def get_emails_with_tag(tag_id: int) -> set[str]:
-    """Paginate list members and return emails tagged with tag_id."""
-    emails = set()
+    emails: set[str] = set()
     offset = 0
     while True:
         r = requests.get(
             mc_url(f"/lists/{MAILCHIMP_LIST_ID}/members"),
             auth=mc_auth(),
-            params={"count": 1000, "offset": offset, "fields": "members.email_address,members.tags"},
+            params={"count": 1000, "offset": offset,
+                    "fields": "members.email_address,members.tags"},
             timeout=30,
         )
         r.raise_for_status()
         members = r.json().get("members", [])
         for m in members:
-            for tag in m.get("tags", []):
-                if tag.get("id") == tag_id:
+            for t in m.get("tags", []):
+                if t.get("id") == tag_id:
                     emails.add(m["email_address"].lower())
                     break
         if len(members) < 1000:
@@ -124,91 +144,75 @@ def get_emails_with_tag(tag_id: int) -> set[str]:
     return emails
 
 
-def get_habit_tag_members(year: int, month: int) -> set[str]:
-    """Return emails of contacts tagged 'Yoga Habit - YYYY-MM'."""
-    tag_name = f"Yoga Habit - {year:04d}-{month:02d}"
-    tag_id = lookup_tag_id(tag_name)
-    if tag_id is None:
-        log.info("Tag '%s' not found — no attendees to process", tag_name)
-        return set()
-    return get_emails_with_tag(tag_id)
-
-
-def get_lifestyle_members(lifestyle_tag_id: int) -> set[str]:
-    """Return emails of all Lifestyle subscribers given tag ID."""
-    return get_emails_with_tag(lifestyle_tag_id)
-
-
-def apply_redeemed_tag(email: str, year: int, month: int) -> None:
-    """Tag a contact with 'Yoga Habit - YYYY-MM - Redeemed'."""
-    tag_name = f"Yoga Habit - {year:04d}-{month:02d} - Redeemed"
-    # Find the contact hash (MD5 of lowercase email)
-    member_hash = hashlib.md5(email.encode()).hexdigest()
-    resp = requests.post(
-        mc_url(f"/lists/{MAILCHIMP_LIST_ID}/members/{member_hash}/tags"),
+def has_redeemed_tag(email: str, redeemed_tag: str) -> bool:
+    h = hashlib.md5(email.lower().encode()).hexdigest()
+    r = requests.get(
+        mc_url(f"/lists/{MAILCHIMP_LIST_ID}/members/{h}"),
         auth=mc_auth(),
-        json={"tags": [{"name": tag_name, "status": "active"}]},
+        params={"fields": "tags"},
         timeout=15,
     )
-    if resp.status_code not in (200, 204):
-        log.error("Failed to tag %s: %s", email, resp.text[:80])
+    if not r.ok:
+        return False
+    tags = [t["name"] for t in r.json().get("tags", [])]
+    return redeemed_tag in tags
 
 
-def main():
-    coupons = get_open_habit_coupons()
+def apply_redeemed_tag(email: str, redeemed_tag: str) -> None:
+    h = hashlib.md5(email.lower().encode()).hexdigest()
+    r = requests.post(
+        mc_url(f"/lists/{MAILCHIMP_LIST_ID}/members/{h}/tags"),
+        auth=mc_auth(),
+        json={"tags": [{"name": redeemed_tag, "status": "active"}]},
+        timeout=15,
+    )
+    if r.status_code not in (200, 204):
+        log.error("failed to tag %s with %s: %s", email, redeemed_tag, r.text[:120])
+
+
+def main() -> None:
+    db = sqlite3.connect(MARVY_DB)
+    db.row_factory = sqlite3.Row
+
+    coupons = get_open_habit_coupons(db)
     if not coupons:
-        log.info("No open HABIT_ coupon windows - nothing to do")
+        log.info("No open HABIT_ coupons - nothing to do")
         return
-
-    # Lookup Lifestyle tag once, reuse for all coupons
-    lifestyle_tag_id = lookup_tag_id(LIFESTYLE_TAG_NAME)
-    if lifestyle_tag_id is None:
-        log.warning("Lifestyle tag '%s' not found - cannot process conversions", LIFESTYLE_TAG_NAME)
-        return
-
-    lifestyle_emails = get_lifestyle_members(lifestyle_tag_id)
-    log.info("Found %d Lifestyle subscribers", len(lifestyle_emails))
 
     for coupon in coupons:
         code = coupon["code"]
-        parsed = parse_habit_tag_month(code)
+        parsed = parse_habit_month(code)
         if not parsed:
-            log.warning("Could not parse month from coupon code %s - skipping", code)
+            log.warning("Cannot parse month from %s - skipping", code)
             continue
-
         year, month = parsed
         redeemed_tag = f"Yoga Habit - {year:04d}-{month:02d} - Redeemed"
 
-        habit_emails = get_habit_tag_members(year, month)
-        log.info("Coupon %s: %d Habit attendees, %d Lifestyle subscribers",
-                 code, len(habit_emails), len(lifestyle_emails))
-
-        converted = habit_emails & lifestyle_emails
-        if not converted:
-            log.info("No conversions found for %s", code)
+        redeemers = find_redeemer_emails(db, coupon)
+        if not redeemers:
+            log.info("%s: 0 candidate redemptions in window", code)
             continue
 
-        # Check which already have the Redeemed tag (idempotent)
-        already_tagged = 0
-        newly_tagged = 0
-        for email in converted:
-            member_hash = hashlib.md5(email.encode()).hexdigest()
-            m_resp = requests.get(
-                mc_url(f"/lists/{MAILCHIMP_LIST_ID}/members/{member_hash}"),
-                auth=mc_auth(),
-                params={"fields": "tags"},
-                timeout=15,
-            )
-            if m_resp.ok:
-                existing_tags = [t["name"] for t in m_resp.json().get("tags", [])]
-                if redeemed_tag in existing_tags:
-                    already_tagged += 1
-                    continue
-            apply_redeemed_tag(email, year, month)
-            newly_tagged += 1
-            log.info("Tagged %s as redeemed for %s", email, code)
+        attendees = get_habit_attendees(year, month)
+        confirmed = redeemers & attendees
+        log.info("%s: %d candidate redemptions, %d attendees, %d confirmed",
+                 code, len(redeemers), len(attendees), len(confirmed))
 
-        log.info("Coupon %s: %d newly tagged, %d already tagged", code, newly_tagged, already_tagged)
+        if not confirmed:
+            continue
+
+        newly = 0
+        already = 0
+        for email in confirmed:
+            if has_redeemed_tag(email, redeemed_tag):
+                already += 1
+                continue
+            apply_redeemed_tag(email, redeemed_tag)
+            log.info("Tagged %s as redeemed for %s", email, code)
+            newly += 1
+        log.info("%s: %d newly tagged, %d already tagged", code, newly, already)
+
+    db.close()
 
 
 if __name__ == "__main__":
