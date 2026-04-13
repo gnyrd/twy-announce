@@ -98,10 +98,15 @@ def get_habit_coupon_url(today: date) -> str:
     expected_code = f"HABIT_{mon}{yyyy}"
     try:
         c = marvy_client()
-        results = c.list_coupons(page=1, search=expected_code).get("results", [])
-        for coupon in results:
-            if coupon["code"] == expected_code:
-                return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={coupon['code']}"
+        page = 1
+        while True:
+            resp = c.list_coupons(page=page)
+            for coupon in resp.get("results", []):
+                if coupon.get("code") == expected_code:
+                    return f"https://studio.tiffanywoodyoga.com/buy/product/{MEMBERSHIP_PRODUCT}?coupon={coupon['code']}"
+            if not resp.get("next"):
+                break
+            page += 1
         log.warning("Coupon %s not found via marvy; using convention", expected_code)
     except (requests.RequestException, KeyError, ValueError) as e:
         log.warning("marvy coupon lookup failed: %s; using convention", e)

@@ -59,9 +59,10 @@ def get_open_habit_coupons() -> list[dict]:
     open_coupons = []
     page = 1
     while True:
-        resp = c.list_coupons(page=page, search="HABIT_")
+        resp = c.list_coupons(page=page)
         for coupon in resp.get("results", []):
-            if coupon.get("redeem_end", "") >= today:
+            code = coupon.get("code") or ""
+            if code.startswith("HABIT_") and coupon.get("redeem_end", "") >= today:
                 open_coupons.append(coupon)
         if not resp.get("next"):
             break
