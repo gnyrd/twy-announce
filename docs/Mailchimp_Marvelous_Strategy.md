@@ -70,7 +70,7 @@ Segments = dynamic filters that define **who you want to talk to now**.
 `[Audience or Focus] - [Condition] - [Source or Timing]`
 
 **Examples**
-- Yoga Lifestyle - Active Members - Marvelous Sync  
+- Lifestyle  
 - Retreat Alumni - 2024 Mexico + Palouse  
 - Newsletter Subscribers - New This Month  
 - Inactive Subscribers - No Opens 6 Months  
@@ -80,7 +80,7 @@ Segments = dynamic filters that define **who you want to talk to now**.
 
 | Segment Name                                     | Definition                                                | Purpose                           |
 | ------------------------------------------------ | --------------------------------------------------------- | --------------------------------- |
-| Yoga Lifestyle - Active Members - Marvelous Sync | Tag = Status - Member + Tag = Membership - Yoga Lifestyle | Weekly content to current members |
+| Lifestyle | Tag = Status - Member + Tag = Membership - Yoga Lifestyle | Weekly content to current members |
 | Retreat Alumni                                   | Tag contains “Retreat” OR “Mexico” OR “Palouse”           | Reunion + advanced offerings      |
 || Newsletter Only                                  | Tag = Status - Lead AND NOT any Membership - * tags       | Lifestyle content & nurture       |
 | Teachers and Graduates                           | Tag contains “Teacher Training” OR “Graduate”             | Continuing education              |
@@ -143,7 +143,7 @@ Blitz - Dec 2025 - Yoga Lifestyle - Responded
 
 1. Create tag: Blitz - Dec 2025 - Yoga Lifestyle  
 2. Export Active Members from Marvelous → import to Mailchimp with that tag.  
-3. Send email series to segment Yoga Lifestyle - Active Members - Marvelous Sync.  
+3. Send email series to segment Lifestyle.  
 4. On purchase: Zapier adds Blitz - Dec 2025 - Yoga Lifestyle - Responded.
 5. After campaign:  
    - Compare opens, clicks, and conversions between tagged groups.  
@@ -156,7 +156,7 @@ Blitz - Dec 2025 - Yoga Lifestyle - Responded
 | Feature           | Represents                                                   | Updates When                  | Example                                          |
 | ----------------- | ------------------------------------------------------------ | ----------------------------- | ------------------------------------------------ |
 | **Tag**           | Identity / static label                                      | Only when applied or removed  | Retreat - Mexico 2025                            |
-| **Segment**       | Dynamic filter / current state                               | Automatically, based on rules | Yoga Lifestyle - Active Members - Marvelous Sync |
+| **Segment**       | Dynamic filter / current state                               | Automatically, based on rules | Lifestyle |
 | **Rule of Thumb** | Tag = Who they are / what they’ve done · Segment = Who’s relevant now |                               |                                                  |
 
 ---
