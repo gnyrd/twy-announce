@@ -64,58 +64,27 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
 
 
 def get_member_count_ago(days: int) -> int:
-    """Approximate active member count N days ago from purchase history."""
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    conn = sqlite3.connect(str(MARVY_DB))
-    result = conn.execute("""
-        SELECT COUNT(*) FROM subscriptions s
-        JOIN products pr ON pr.id = s.product_id
-        JOIN (SELECT DISTINCT customer_id, product_id FROM purchases
-              WHERE amount_paid > 0) paid
-          ON paid.customer_id = s.customer_id AND paid.product_id = s.product_id
-        WHERE pr.product_name != 'The Yoga Lifestyle: On-demand Library'
-          AND s.first_purchase < ?
-          AND (s.subscription_active = 1 OR s.last_time_purchase > ?)
-    """, (cutoff, cutoff)).fetchone()[0]
-    conn.close()
-    return result
+    """Total active recurring-subscription count N days ago.
+
+    Delegates to historical_active_counts.active_count_at, which computes
+    coverage per-purchase (monthly=31d, annual=366d window). Replaces the
+    prior proxy-based query that silently excluded members who churned
+    between the target date and now.
+    """
+    from historical_active_counts import active_count_at
+    return active_count_at(datetime.now() - timedelta(days=days))
 
 
 def get_product_counts_ago(days: int) -> Dict[str, Dict[str, int]]:
-    """Get per-product, per-billing-cycle active subscription counts N days ago from DB."""
-    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    conn = sqlite3.connect(str(MARVY_DB))
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("""
-        SELECT pr.product_name,
-               CASE
-                   WHEN last_pay.amount_paid > pr.price * 3 THEN 'Annual'
-                   ELSE 'Monthly'
-               END as billing_cycle,
-               COUNT(*) as active_count
-        FROM subscriptions s
-        JOIN products pr ON pr.id = s.product_id
-        JOIN (
-            SELECT customer_id, product_id, amount_paid,
-                   ROW_NUMBER() OVER (PARTITION BY customer_id, product_id ORDER BY created DESC) as rn
-            FROM purchases WHERE amount_paid > 0
-        ) last_pay ON last_pay.customer_id = s.customer_id
-                   AND last_pay.product_id = s.product_id
-                   AND last_pay.rn = 1
-        WHERE pr.product_name != 'The Yoga Lifestyle: On-demand Library'
-          AND s.first_purchase < ?
-          AND (s.subscription_active = 1 OR s.last_time_purchase > ?)
-        GROUP BY pr.product_name, billing_cycle
-    """, (cutoff, cutoff)).fetchall()
-    conn.close()
+    """Per-product, per-billing-cycle active subscription counts N days ago.
 
-    counts = {}
-    for row in rows:
-        product = row["product_name"]
-        if product not in counts:
-            counts[product] = {"Monthly": 0, "Annual": 0}
-        counts[product][row["billing_cycle"]] = row["active_count"]
-    return counts
+    Delegates to historical_active_counts.active_at. Billing cycle for each
+    count bucket is taken from the purchase that actually covered the target
+    date (not from the customer's most recent payment ever, which was the
+    prior implementation's bug).
+    """
+    from historical_active_counts import active_at
+    return active_at(datetime.now() - timedelta(days=days))
 
 
 def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
