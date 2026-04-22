@@ -196,28 +196,24 @@ def format_change_highlighted(delta: int) -> str:
 
 
 def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> List[str]:
-    """Format delta lines for a subscriber metric. Only include lines where there's a change."""
-    lines = []
+    """Format delta line for a subscriber metric.
 
-    if week_val is not None:
-        diff = current - week_val
-        if diff != 0:
-            change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   𝚫 week:  {change}")
-
-    if month_val is not None:
-        diff = current - month_val
-        if diff != 0:
-            change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   𝚫 month: {change}")
-
-    if year_val is not None:
-        diff = current - year_val
-        if diff != 0:
-            change = f"+{diff}" if diff > 0 else str(diff)
-            lines.append(f"   𝚫 year:  {change}")
-
-    return lines
+    Returns a single consolidated line with non-zero deltas across week/month/year,
+    or an empty list when nothing changed. Format:
+        "   𝚫  week:  +1  month:  +3  year:  +4"
+    """
+    segments: List[str] = []
+    for label, val in (("week", week_val), ("month", month_val), ("year", year_val)):
+        if val is None:
+            continue
+        diff = current - val
+        if diff == 0:
+            continue
+        change = f"+{diff}" if diff > 0 else str(diff)
+        segments.append(f"{label}:  {change}")
+    if not segments:
+        return []
+    return ["   𝚫  " + "  ".join(segments)]
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
@@ -326,25 +322,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         annual = products[product]["Annual"]
         display_name = simplify_product_name(product)
 
-        # Day-over-day deltas for highlighted arrows
+        # Day-over-day deltas for highlighted arrows beside the current value
         day_monthly = day_counts.get(product, {}).get("Monthly", 0)
         day_annual = day_counts.get(product, {}).get("Annual", 0)
         monthly_delta = monthly - day_monthly
         annual_delta = annual - day_annual
-
-        # Determine max width for delta alignment
-        all_monthly_deltas = [monthly_delta]
-        all_annual_deltas = [annual_delta]
-        for hist in [week_counts, month_counts, year_counts]:
-            if product in hist:
-                all_monthly_deltas.append(monthly - hist[product]["Monthly"])
-                all_annual_deltas.append(annual - hist[product]["Annual"])
-
-        def delta_width(val):
-            return len(f"+{abs(val)}") if val >= 0 else len(str(val))
-
-        max_monthly_width = max(delta_width(v) for v in all_monthly_deltas)
-        max_annual_width = max(delta_width(v) for v in all_annual_deltas)
 
         annual_str = str(annual)
         if annual_delta != 0:
@@ -357,21 +339,31 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         lines.append(f" {display_name}: ")
         lines.append(f"   Annual: {annual_str}")
 
+        annual_segs: List[str] = []
         for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product in hist:
-                a_diff = annual - hist[product]["Annual"]
-                if a_diff != 0:
-                    a_str = f"+{a_diff}" if a_diff >= 0 else str(a_diff)
-                    lines.append(f"   𝚫 {label}:  {a_str:>{max_annual_width}}")
+            if product not in hist:
+                continue
+            diff = annual - hist[product]["Annual"]
+            if diff == 0:
+                continue
+            change = f"+{diff}" if diff > 0 else str(diff)
+            annual_segs.append(f"{label}:  {change}")
+        if annual_segs:
+            lines.append("   𝚫  " + "  ".join(annual_segs))
 
         lines.append(f"   Monthly: {monthly_str}")
 
+        monthly_segs: List[str] = []
         for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product in hist:
-                m_diff = monthly - hist[product]["Monthly"]
-                if m_diff != 0:
-                    m_str = f"+{m_diff}" if m_diff >= 0 else str(m_diff)
-                    lines.append(f"   𝚫 {label}:  {m_str:>{max_monthly_width}}")
+            if product not in hist:
+                continue
+            diff = monthly - hist[product]["Monthly"]
+            if diff == 0:
+                continue
+            change = f"+{diff}" if diff > 0 else str(diff)
+            monthly_segs.append(f"{label}:  {change}")
+        if monthly_segs:
+            lines.append("   𝚫  " + "  ".join(monthly_segs))
 
         lines.append("")
 
