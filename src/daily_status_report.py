@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Post daily status report to Slack with Marvelous subscription data."""
 
+import argparse
 import json
 import os
 import sys
@@ -171,6 +172,8 @@ def simplify_product_name(product: str) -> str:
     """Simplify product names for display."""
     if product == "The Archive":
         return "TWY Archive"
+    if product == "The Yoga Lifestyle Membership":
+        return "The Yoga Lifestyle"
     return product
 
 
@@ -214,7 +217,7 @@ def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: O
         if diff == 0:
             continue
         change = f"+{diff}" if diff > 0 else str(diff)
-        segments.append(f"{label}:  {change}")
+        segments.append(f"{label}: {change}")
     if not segments:
         return []
     return ["   𝚫  " + "  ".join(segments)]
@@ -250,16 +253,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     month_counts = get_product_counts_ago(30)
     year_counts = get_product_counts_ago(365)
 
-    today_formatted = now.strftime("%a, %b %d")
+    lines: list = []
 
-    lines = [
-        f"*TWY Status* {today_formatted}",
-        "",
-    ]
-
-    # Subscribers section
+    # Followers section
     if mc_today_snapshot or ig_today_snapshot or yt_today_snapshot:
-        lines.append("*Subscribers:*")
+        lines.append("Followers:")
 
         if mc_today_snapshot:
             subscriber_count = mc_today_snapshot["subscriber_count"]
@@ -296,15 +294,8 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
 
         lines.append("")
 
-    # Membership section
-    lines.append("*Membership:*")
-    lines.append(f" Active: {current_totals['total_subs']:.0f}")
-
-
-    lines.append("")
-
     # Group current subscriptions by product and billing cycle
-    products = {}
+    products: Dict[str, Dict[str, int]] = {}
     for row in subscriptions:
         product = row["Product Name"]
         if product not in products:
@@ -315,36 +306,27 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         else:
             products[product]["Annual"] += row["# of Active Subscriptions"]
 
-    for product in sorted(products.keys()):
+    # Explicit display order: TYL first, Archive second, anything else alpha.
+    preferred_order = ["The Yoga Lifestyle Membership", "The Archive"]
+    ordered = [p for p in preferred_order if p in products] + \
+              sorted(k for k in products if k not in preferred_order)
+
+    for product in ordered:
         monthly = products[product]["Monthly"]
         annual = products[product]["Annual"]
         display_name = simplify_product_name(product)
 
-        # Day-over-day trend arrows beside the current Annual / Monthly values
+        # Day-over-day trend arrows beside the current Monthly / Yearly values
         day_monthly = day_counts.get(product, {}).get("Monthly", 0)
         day_annual = day_counts.get(product, {}).get("Annual", 0)
-        annual_arrow = format_trend_arrow(annual - day_annual)
         monthly_arrow = format_trend_arrow(monthly - day_monthly)
-        annual_suffix = f" {annual_arrow}" if annual_arrow else ""
+        annual_arrow = format_trend_arrow(annual - day_annual)
         monthly_suffix = f" {monthly_arrow}" if monthly_arrow else ""
+        annual_suffix = f" {annual_arrow}" if annual_arrow else ""
 
-        lines.append(f" {display_name}: ")
-        lines.append(f"   Annual: {annual}{annual_suffix}")
+        lines.append(f"{display_name}:")
 
-        annual_segs: List[str] = []
-        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product not in hist:
-                continue
-            diff = annual - hist[product]["Annual"]
-            if diff == 0:
-                continue
-            change = f"+{diff}" if diff > 0 else str(diff)
-            annual_segs.append(f"{label}:  {change}")
-        if annual_segs:
-            lines.append("   𝚫  " + "  ".join(annual_segs))
-
-        lines.append(f"   Monthly: {monthly}{monthly_suffix}")
-
+        lines.append(f"  Monthly: {monthly}{monthly_suffix}")
         monthly_segs: List[str] = []
         for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
             if product not in hist:
@@ -353,11 +335,28 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             if diff == 0:
                 continue
             change = f"+{diff}" if diff > 0 else str(diff)
-            monthly_segs.append(f"{label}:  {change}")
+            monthly_segs.append(f"{label}: {change}")
         if monthly_segs:
             lines.append("   𝚫  " + "  ".join(monthly_segs))
 
+        lines.append(f"  Yearly: {annual}{annual_suffix}")
+        annual_segs: List[str] = []
+        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
+            if product not in hist:
+                continue
+            diff = annual - hist[product]["Annual"]
+            if diff == 0:
+                continue
+            change = f"+{diff}" if diff > 0 else str(diff)
+            annual_segs.append(f"{label}: {change}")
+        if annual_segs:
+            lines.append("   𝚫  " + "  ".join(annual_segs))
+
         lines.append("")
+
+    # Trim trailing blank line
+    while lines and lines[-1] == "":
+        lines.pop()
 
     return "\n".join(lines)
 
@@ -395,10 +394,10 @@ def post_to_slack(message: str):
         raise ValueError("No Slack credentials found. Set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN in .env")
 
 
-def main():
+def main(dry_run: bool = False):
     """Main entry point."""
     print("=" * 60)
-    print("Daily Status Report")
+    print("Daily Status Report" + (" [DRY RUN]" if dry_run else ""))
     print("=" * 60)
 
     today = datetime.now().strftime("%Y-%m-%d")
@@ -453,7 +452,10 @@ def main():
         print(message)
         print("-" * 60)
 
-        post_to_slack(message)
+        if dry_run:
+            print("\n[DRY RUN] Skipping Slack post")
+        else:
+            post_to_slack(message)
 
         print("\n✓ Daily status report completed successfully")
         return 0
@@ -464,4 +466,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description="TWY daily status report")
+    parser.add_argument("--dry-run", action="store_true", help="Print the report but do not post to Slack")
+    args = parser.parse_args()
+    sys.exit(main(dry_run=args.dry_run))
