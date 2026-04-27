@@ -123,8 +123,8 @@ Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
 Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
-No experience needed. No membership. No commitment.
-Register: https://habit.tiffanywoodyoga.com
+For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
+[Register Here](https://habit.tiffanywoodyoga.com)
 
 Write this as Tiff -- direct, warm, no yoga-speak. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register.
 
