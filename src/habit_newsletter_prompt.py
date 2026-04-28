@@ -124,6 +124,8 @@ Apex pose: {habit_plan.get('apex_pose', '')}
 Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
+
+Include this exact markdown link verbatim. Do NOT paraphrase to "Register here: URL" or any other prose form. The downstream renderer needs the markdown syntax to produce a clickable link:
 [Register Here](https://habit.tiffanywoodyoga.com)
 
 Write this as Tiff -- direct, warm, no yoga-speak. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register.
