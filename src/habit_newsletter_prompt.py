@@ -65,6 +65,12 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
 
+    affirmation   = habit_plan.get('affirmation')      or overview.get('affirmation', '')
+    physical_arc  = habit_plan.get('physical_arc')     or overview.get('physical_arc', '')
+    apex_pose     = habit_plan.get('apex_pose')        or overview.get('apex_pose', '')
+    upas          = habit_plan.get('upas_key_actions') or overview.get('upa', '')
+    teaching_lens = habit_plan.get('teaching_lens', '')
+
     plan_lines = []
     for date_str in sorted(plans.keys()):
         p = plans[date_str]
@@ -82,10 +88,11 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
 Month: {habit_date.strftime('%B %Y')}
 Theme: {overview.get('title', '')} -- {overview.get('teaching_notes', '')}
-Physical arc: {overview.get('physical_arc', '')}
-Apex pose: {overview.get('apex_pose', '')}
-UPAs: {overview.get('upa', '')}
-Member affirmation: "{overview.get('affirmation', '')}"
+Physical arc: {physical_arc}
+Apex pose: {apex_pose}
+UPAs: {upas}
+Member affirmation: "{affirmation}"
+Teaching lens: {teaching_lens}
 
 Tiff is attuned to astrology but does not present herself as a celestially-guided teacher. If astrological energy reinforces the month's theme, reference it as a felt quality only -- no planet names, no specific dates, no events. Example: "there's a natural moment of clarity mid-month." One brief mention max, or none if it doesn't serve the theme.
 
