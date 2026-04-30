@@ -58,6 +58,12 @@ def check_coverage(plans: dict, year: int, month: int) -> None:
         raise ValueError(
             f"no class plan for Yoga Habit date {habit_str}"
         )
+    habit_plan = plans[habit_str]
+    if not (habit_plan.get("affirmation") or "").strip():
+        raise ValueError(
+            f"Yoga Habit class plan {habit_str} is missing the affirmation field "
+            f"(this drives the lifestyle newsletter)"
+        )
 
 
 def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
