@@ -33,15 +33,17 @@ TEMPLATE_ID  = 10576833
 SEGMENTS     = {"lifestyle": 3019143, "non-lifestyle": 3019144}
 LABELS       = {"lifestyle": "Lifestyle", "non-lifestyle": "Non-Lifestyle"}
 
-# Schedule: Tuesday at 8am MT = 14:00 UTC
-# Find next Tuesday on or after today
-def next_tuesday_8am() -> str:
-    today = datetime.now(MOUNTAIN).date()
-    days_ahead = (1 - today.weekday()) % 7  # 1 = Tuesday
-    if days_ahead == 0:
-        days_ahead = 7
-    tuesday = today.replace(day=today.day + days_ahead)
-    return f"{tuesday.isoformat()}T14:00:00+00:00"
+# Schedule: first weekday (Mon-Fri) on/after the 1st of the target month, at 9am MT.
+# Computed in MT then converted to UTC (handles DST automatically via ZoneInfo).
+from datetime import time, timedelta, timezone
+
+def first_weekday_9am_mt_for_month(year: int, month: int) -> str:
+    d = date(year, month, 1)
+    while d.weekday() >= 5:  # 5=Sat, 6=Sun -> push to Monday
+        d += timedelta(days=1)
+    dt_mt = datetime.combine(d, time(9, 0), tzinfo=MOUNTAIN)
+    dt_utc = dt_mt.astimezone(timezone.utc)
+    return dt_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def mc_url(path):
@@ -60,8 +62,21 @@ def main():
         year, month = now.year, now.month
 
     month_label = date(year, month, 1).strftime("%B %Y")
-    send_time = next_tuesday_8am()
+    send_time = first_weekday_9am_mt_for_month(year, month)
     print(f"Running campaigns for {month_label}, schedule: {send_time}")
+
+    # Guard: if computed send_time is in the past, abort before creating campaigns.
+    # Usually means cron fired with a UTC-shifted clock that landed in the prior month MT.
+    send_dt = datetime.strptime(send_time, "%Y-%m-%dT%H:%M:%S%z")
+    if send_dt < datetime.now(timezone.utc):
+        msg = (
+            f"refusing to schedule {month_label}: send_time {send_time} is in the past "
+            f"(now={datetime.now(timezone.utc).isoformat()}). "
+            "Likely cron timezone mismatch. Check that cron fires after the 1st in MT."
+        )
+        print("ERROR:", msg)
+        post_slack(SLACK_STATUS_CHANNEL, f":warning: run_campaigns aborted: {msg}")
+        sys.exit(1)
 
     results = {}
     errors = []
@@ -120,7 +135,7 @@ def main():
         post_slack(SLACK_STATUS_CHANNEL, f":warning: Campaign errors for {month_label}:\n" + "\n".join(errors))
 
     if results:
-        send_display = datetime.strptime(send_time[:10], "%Y-%m-%d").strftime("%A %b %-d") + " 8am MT"
+        send_display = datetime.strptime(send_time[:10], "%Y-%m-%d").strftime("%A %b %-d") + " 9am MT"
         lines = [f":calendar: *{month_label} campaigns scheduled* \u2014 sending {send_display}"]
         for r in results.values():
             lines.append(f"  *{r['label']}* ({r['action']}): {r['archive']}")
