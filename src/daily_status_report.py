@@ -88,6 +88,33 @@ def get_product_counts_ago(days: int) -> Dict[str, Dict[str, int]]:
     return active_at(datetime.now() - timedelta(days=days))
 
 
+def get_next_habit_event() -> Optional[Dict[str, Any]]:
+    """Return the next upcoming Habit class.
+
+    Matches both placeholder rows ('The Yoga Habit') and published titles
+    ('Habit: <theme>'). Excludes cancelled events. Returns None when nothing
+    upcoming is on the calendar.
+    """
+    now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = sqlite3.connect(str(MARVY_DB))
+    row = conn.execute(
+        """
+        SELECT event_start_datetime, number_of_registrations
+        FROM events
+        WHERE (event_name LIKE 'Habit:%' OR event_name = 'The Yoga Habit')
+          AND is_cancelled = 0
+          AND event_start_datetime >= :now
+        ORDER BY event_start_datetime
+        LIMIT 1
+        """,
+        {"now": now_utc},
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"start": row[0], "registrations": row[1]}
+
+
 def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
     """Load Mailchimp snapshot for a specific date."""
     filepath = MAILCHIMP_HISTORY_DIR / f"{date}.json"
@@ -353,6 +380,13 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             lines.append("   𝚫  " + "  ".join(annual_segs))
 
         lines.append("")
+
+    # Next Habit class
+    habit = get_next_habit_event()
+    if habit:
+        start = datetime.fromisoformat(habit["start"].replace("Z", "+00:00"))
+        date_str = f"{start.strftime('%B')} {start.day}"
+        lines.append(f"Habit: {date_str} - {habit['registrations']} registered")
 
     # Trim trailing blank line
     while lines and lines[-1] == "":
