@@ -257,26 +257,74 @@ Hard limit: 200 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body, [link] on its own line, brief closing, sign-off + P.S. No headers or bullets."""
 
 
-def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
-    """Prompt for a brief pre-class reminder to non-openers of the first newsletter."""
+def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for the second-send outreach to people who didn't open the first non-member newsletter."""
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
 
-    return f"""Write a brief pre-class reminder for people who received but did not open the first non-member newsletter for the {habit_str} Yoga Habit class.
+    return f"""Write a brief outreach email for people who received the first non-member newsletter about the {habit_str} Yoga Habit class but did not open it.
 
-This email sends 3-5 days before the class. The reader didn't open the first send — but don't reference that. They don't know we know. Take a different angle from the first email: less "here's why," more "this is happening, last call." Curiosity over explanation.
+These readers have NO prior context about this class. They did not see the first email. DO NOT write as a reminder. DO NOT use phrases like "still time," "last call," "don't forget," "just a reminder," or "Yoga Habit is coming up." Write as if introducing the class to them fresh.
 
-Yoga Habit class details — use ONLY these. Do not invent or embellish:
+The first send opened with: "If your practice has been feeling stuck... this is usually why. You're trying to open without support." Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
+
+Yoga Habit class details — use ONLY these. Do not invent, embellish, or omit:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
 
-Include this exact markdown link verbatim — the downstream renderer needs the markdown to render the button:
-[Save your seat](https://habit.tiffanywoodyoga.com)
+Include this exact markdown link verbatim — the renderer needs the markdown to produce a button:
+[Register Here](https://habit.tiffanywoodyoga.com)
 
-Write this as Tiff — short, warm, slightly different framing than a "here's our class" pitch. One specific concrete image from what the class will teach. One sentence of contemplative depth allowed, not required. Discovered, not delivered. End with the link. Sign Tiff.
+Write this as Tiff — short, warm, accessible, no yoga jargon. Use one specific concrete image grounded in the actual class content above (the apex pose, the physical work). Do not invent class details that aren't listed. One sentence of contemplative depth allowed, not required. Discovered, not delivered. End with the link. Sign Tiff.
 
 Hard limit: 100 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, 1-2 short paragraphs, [Save your seat] link, sign-off. No headers or bullets."""
+Shape: natural, not formulaic. Subject line, 1-2 short paragraphs, [Register Here] link, sign-off. No headers or bullets."""
+
+
+def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for the day-before reminder to people who registered for the Habit class."""
+    habit_date = get_habit_class_date(year, month)
+    habit_str = habit_date.strftime("%B %-d")
+    habit_plan = plans.get(habit_date.isoformat(), {})
+
+    return f"""Write a brief day-before reminder email for people who registered for the {habit_str} Yoga Habit class. The class is tomorrow.
+
+This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT include a register link — they're already registered. Do NOT invite them to bring a friend.
+
+Yoga Habit class details — use ONLY these. Do not invent or embellish:
+Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Title: {habit_plan.get('title', '')}
+Apex pose: {habit_plan.get('apex_pose', '')}
+Bring: yoga mat, 2 blocks, strap, blanket if you use one.
+
+The Zoom link comes from their registration confirmation in Marvelous. Mention they can find it there if needed.
+
+Write this as Tiff — short, warm, anticipating. One concrete image grounded in the class content (the apex pose, the physical work). No teaching essay. Just "here's tomorrow." Sign Tiff.
+
+Hard limit: 80 words. Subject line included, not counted.
+Shape: subject line, 1-2 short paragraphs, sign-off. No headers or bullets."""
+
+
+def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for a soft day-before nudge to openers of the first newsletter who did not register."""
+    habit_date = get_habit_class_date(year, month)
+    habit_str = habit_date.strftime("%B %-d")
+    habit_plan = plans.get(habit_date.isoformat(), {})
+
+    return f"""Write a very brief, soft nudge for people who opened the first non-member newsletter about the {habit_str} Yoga Habit class but did not register. The class is tomorrow.
+
+They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently — in case they meant to register and forgot. If they decided not to come, that is also fine.
+
+Class details — use sparingly, just for context:
+Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+
+Include this exact markdown link verbatim — the renderer needs the markdown to produce a button:
+[Register Here](https://habit.tiffanywoodyoga.com)
+
+Write this as Tiff — short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. End with the link. Sign Tiff.
+
+Hard limit: 60 words. Subject line included, not counted.
+Shape: subject line, 1 short paragraph, [Register Here] link, sign-off. No headers or bullets."""
