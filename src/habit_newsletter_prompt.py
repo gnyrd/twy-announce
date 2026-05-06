@@ -113,11 +113,10 @@ Apex pose: {habit_plan.get('apex_pose', '')}
 Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 
-Write this as Tiff -- her voice, her vernacular, her storytelling. "Here's what's happening this month." Warm, specific, a little irreverent. Not a philosophy essay. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
+Write this as Tiff — her voice, her vernacular, her storytelling. Warm, specific, a little irreverent. Weave the practice into one lived moment — how it meets the day, the body, the line at the grocery store, a hard conversation. Show the depth through experience, don't lecture about it. Non-dual undertone is welcomed; philosophy essay is not. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
 
 Hard limit: 300 words. Subject line included, not counted.
-Structure: subject line, 3-4 short paragraphs, event block with details, sign-off.
-No bullet lists except the event block. No headers."""
+Shape: natural, not formulaic. Subject line, body that flows, event details where they fit, sign-off. No headers, no bullets except the event details if it helps."""
 
 
 def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -141,11 +140,10 @@ For people with an established practice who want to deepen it. Not a beginner cl
 Include this exact markdown link verbatim. Do NOT paraphrase to "Register here: URL" or any other prose form. The downstream renderer needs the markdown syntax to produce a clickable link:
 [Register Here](https://habit.tiffanywoodyoga.com)
 
-Write this as Tiff -- direct, warm, no yoga-speak. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register.
+Write this as Tiff — warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. You can gesture at the deeper why ONCE, briefly — a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
 
 Hard limit: 175 words. Subject line included, not counted.
-Structure: subject line, 2-3 short paragraphs, event details, register link, sign-off.
-No headers. No bullets."""
+Shape: natural, not formulaic. Subject line, body, event details, register link, sign-off. No headers or bullets."""
 
 
 # Reference emails (April 2026, Tiff's voice) — quality bar for prompt templates
@@ -224,7 +222,7 @@ Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
 
 This email sends 24 hours after class ends. The reader just practiced with Tiff for the first time (or returned after a gap). They're in the afterglow.
 
-Goal: warm, personal thank-you that naturally opens into an invitation to continue inside The Yoga Lifestyle. Offer: first month for $49 via the link below. Do not fabricate details about the class — use only what's provided above.
+Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49 via the link below. Do not fabricate details about the class — use only what's provided above.
 
 Leave a literal "[link]" placeholder where the membership offer link goes. Do not invent a URL.
 
@@ -232,8 +230,7 @@ Reference quality (Tiff's voice and tone — match this):
 {_PH1_REFERENCE}
 
 Hard limit: 250 words. Subject line included, not counted.
-Structure: subject line, 3-4 short paragraphs, [link] on its own line, brief closing, sign-off.
-No headers. No bullets."""
+Shape: natural, not formulaic. Subject line, body, [link] on its own line, brief closing, sign-off. No headers or bullets."""
 
 
 def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -251,11 +248,35 @@ Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
 
 This email sends 7 days after class. The offer is still open but closing soon. The reader has had a week to think about it. Tone is gentle, non-pushy. A quiet reminder that the door is still open.
 
-Goal: re-open the invitation to The Yoga Lifestyle. Offer: first month for $49, closes soon. Leave a literal "[link]" placeholder where the membership offer link goes.
+Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave — the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon. Leave a literal "[link]" placeholder where the membership offer link goes.
 
 Reference quality (Tiff's voice and tone — match this):
 {_PH2_REFERENCE}
 
 Hard limit: 200 words. Subject line included, not counted.
-Structure: subject line, 2-3 short paragraphs, [link] on its own line, brief closing, sign-off + P.S.
-No headers. No bullets."""
+Shape: natural, not formulaic. Subject line, body, [link] on its own line, brief closing, sign-off + P.S. No headers or bullets."""
+
+
+def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
+    """Prompt for a brief pre-class reminder to non-openers of the first newsletter."""
+    habit_date = get_habit_class_date(year, month)
+    habit_str = habit_date.strftime("%B %-d")
+    habit_plan = plans.get(habit_date.isoformat(), {})
+
+    return f"""Write a brief pre-class reminder for people who received but did not open the first non-member newsletter for the {habit_str} Yoga Habit class.
+
+This email sends 3-5 days before the class. The reader didn't open the first send — but don't reference that. They don't know we know. Take a different angle from the first email: less "here's why," more "this is happening, last call." Curiosity over explanation.
+
+Yoga Habit class details — use ONLY these. Do not invent or embellish:
+Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Title: {habit_plan.get('title', '')}
+Description: {habit_plan.get('description', '')}
+Apex pose: {habit_plan.get('apex_pose', '')}
+
+Include this exact markdown link verbatim — the downstream renderer needs the markdown to render the button:
+[Save your seat](https://habit.tiffanywoodyoga.com)
+
+Write this as Tiff — short, warm, slightly different framing than a "here's our class" pitch. One specific concrete image from what the class will teach. One sentence of contemplative depth allowed, not required. Discovered, not delivered. End with the link. Sign Tiff.
+
+Hard limit: 100 words. Subject line included, not counted.
+Shape: natural, not formulaic. Subject line, 1-2 short paragraphs, [Save your seat] link, sign-off. No headers or bullets."""

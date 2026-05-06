@@ -24,7 +24,7 @@ load_env()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from newsletter import save_prompt, prompt_path, newsletter_path
-from habit_newsletter_prompt import check_coverage, assemble_lifestyle_prompt, assemble_non_lifestyle_prompt, assemble_ph1_prompt, assemble_ph2_prompt
+from habit_newsletter_prompt import check_coverage, assemble_lifestyle_prompt, assemble_non_lifestyle_prompt, assemble_ph1_prompt, assemble_ph2_prompt, assemble_reminder_prompt
 from slack import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
@@ -64,8 +64,9 @@ def main():
     nl_non_lifestyle = newsletter_path(year, month, "non-lifestyle")
     nl_ph1 = newsletter_path(year, month, "ph1")
     nl_ph2 = newsletter_path(year, month, "ph2")
-    if nl_lifestyle.exists() and nl_non_lifestyle.exists() and nl_ph1.exists() and nl_ph2.exists():
-        print(f"All four newsletters exist for {month_label}, nothing to do")
+    nl_reminder = newsletter_path(year, month, "reminder")
+    if nl_lifestyle.exists() and nl_non_lifestyle.exists() and nl_ph1.exists() and nl_ph2.exists() and nl_reminder.exists():
+        print(f"All five newsletters exist for {month_label}, nothing to do")
         return
 
     # If prompts already exist but newsletters don't, send daily reminder
@@ -73,7 +74,8 @@ def main():
     p_non_lifestyle = prompt_path(year, month, "non-lifestyle")
     p_ph1 = prompt_path(year, month, "ph1")
     p_ph2 = prompt_path(year, month, "ph2")
-    if p_lifestyle.exists() and p_non_lifestyle.exists() and p_ph1.exists() and p_ph2.exists():
+    p_reminder = prompt_path(year, month, "reminder")
+    if p_lifestyle.exists() and p_non_lifestyle.exists() and p_ph1.exists() and p_ph2.exists() and p_reminder.exists():
         msg = (
             f":bell: All prompts ready for {month_label} but content hasn't been generated yet. "
             f"Trigger Tweee: \"Create the {month_label} Yoga Habit content\""
@@ -112,11 +114,13 @@ def main():
     non_lifestyle_prompt = assemble_non_lifestyle_prompt(overview, plans, year, month)
     ph1_prompt = assemble_ph1_prompt(overview, plans, year, month)
     ph2_prompt = assemble_ph2_prompt(overview, plans, year, month)
+    reminder_prompt = assemble_reminder_prompt(overview, plans, year, month)
 
     save_prompt(year, month, "lifestyle", lifestyle_prompt)
     save_prompt(year, month, "non-lifestyle", non_lifestyle_prompt)
     save_prompt(year, month, "ph1", ph1_prompt)
     save_prompt(year, month, "ph2", ph2_prompt)
+    save_prompt(year, month, "reminder", reminder_prompt)
 
     msg = (
         f":memo: All prompts ready for {month_label} (newsletters + follow-ups). "
