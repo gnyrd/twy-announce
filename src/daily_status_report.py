@@ -229,13 +229,8 @@ def format_trend_arrow(delta: int) -> str:
     return ""
 
 
-def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> List[str]:
-    """Format delta line for a subscriber metric.
-
-    Returns a single consolidated line with non-zero deltas across week/month/year,
-    or an empty list when nothing changed. Format:
-        "   𝚫  week:  +1  month:  +3  year:  +4"
-    """
+def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> str:
+    """Format inline delta suffix for a subscriber metric."""
     segments: List[str] = []
     for label, val in (("week", week_val), ("month", month_val), ("year", year_val)):
         if val is None:
@@ -246,8 +241,8 @@ def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: O
         change = f"+{diff}" if diff > 0 else str(diff)
         segments.append(f"{label}: {change}")
     if not segments:
-        return []
-    return ["   𝚫  " + "  ".join(segments)]
+        return ""
+    return "    |    𝚫  " + "  ".join(segments)
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
@@ -290,11 +285,10 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             subscriber_count = mc_today_snapshot["subscriber_count"]
             arrow = format_trend_arrow(changes.get("mailchimp:subscriber_count", 0))
             suffix = f" {arrow}" if arrow else ""
-            lines.append(f" Email: {subscriber_count:,}{suffix}")
             week_val = mc_week_snapshot["subscriber_count"] if mc_week_snapshot else None
             month_val = mc_month_snapshot["subscriber_count"] if mc_month_snapshot else None
             year_val = mc_year_snapshot["subscriber_count"] if mc_year_snapshot else None
-            lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
+            lines.append(f" Email: {subscriber_count:,}{suffix}" + format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
 
         if ig_today_snapshot:
             ig_week_snapshot = load_instagram_snapshot(week_ago_date)
@@ -303,21 +297,19 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             follower_count = ig_today_snapshot["follower_count"]
             arrow = format_trend_arrow(changes.get("instagram:follower_count", 0))
             suffix = f" {arrow}" if arrow else ""
-            lines.append(f" Instagram: {follower_count:,}{suffix}")
             week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
             month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
             year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
-            lines.extend(format_subscriber_deltas(follower_count, week_val, month_val, year_val))
+            lines.append(f" Instagram: {follower_count:,}{suffix}" + format_subscriber_deltas(follower_count, week_val, month_val, year_val))
 
         if yt_today_snapshot:
             subscriber_count = yt_today_snapshot["subscriber_count"]
             arrow = format_trend_arrow(changes.get("youtube:subscriber_count", 0))
             suffix = f" {arrow}" if arrow else ""
-            lines.append(f" YouTube: {subscriber_count:,}{suffix}")
             week_val = yt_week_snapshot["subscriber_count"] if yt_week_snapshot else None
             month_val = yt_month_snapshot["subscriber_count"] if yt_month_snapshot else None
             year_val = yt_year_snapshot["subscriber_count"] if yt_year_snapshot else None
-            lines.extend(format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
+            lines.append(f" YouTube: {subscriber_count:,}{suffix}" + format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
 
         lines.append("")
 
@@ -353,7 +345,6 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
 
         lines.append(f"{display_name}:")
 
-        lines.append(f"  Monthly: {monthly}{monthly_suffix}")
         monthly_segs: List[str] = []
         for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
             if product not in hist:
@@ -363,10 +354,9 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
                 continue
             change = f"+{diff}" if diff > 0 else str(diff)
             monthly_segs.append(f"{label}: {change}")
-        if monthly_segs:
-            lines.append("   𝚫  " + "  ".join(monthly_segs))
+        monthly_delta = "    |    𝚫  " + "  ".join(monthly_segs) if monthly_segs else ""
+        lines.append(f"  Monthly: {monthly}{monthly_suffix}" + monthly_delta)
 
-        lines.append(f"  Yearly: {annual}{annual_suffix}")
         annual_segs: List[str] = []
         for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
             if product not in hist:
@@ -376,8 +366,8 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
                 continue
             change = f"+{diff}" if diff > 0 else str(diff)
             annual_segs.append(f"{label}: {change}")
-        if annual_segs:
-            lines.append("   𝚫  " + "  ".join(annual_segs))
+        annual_delta = "    |    𝚫  " + "  ".join(annual_segs) if annual_segs else ""
+        lines.append(f"  Yearly: {annual}{annual_suffix}" + annual_delta)
 
         lines.append("")
 
