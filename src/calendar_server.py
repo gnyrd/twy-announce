@@ -205,8 +205,8 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None):
             synced_at = None
             uid = f"twy-plan-{plan['id']}@{UID_HOST}"
 
-        # Skip past events
-        if start_dt < now_utc:
+        # Keep classes visible for 74h after start (HM recordings live ~3 days).
+        if start_dt < now_utc - timedelta(hours=74):
             continue
 
         register_url = f"{STUDIO_EVENT_URL}/{mev_int}" if mev_int else None
