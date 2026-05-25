@@ -80,7 +80,7 @@ def main():
     if all(p.exists() for p in p_paths.values()):
         msg = (
             f":bell: All prompts ready for {month_label} but content hasn't been generated yet. "
-            f"Trigger Tweee: \"Create the {month_label} Yoga Habit content\""
+            f"Trigger Tweee: \"Use your Actions: get the {month_label} newsletter prompts and save the newsletter content\""
         )
         post_slack(SLACK_STATUS_CHANNEL, msg)
         print(msg)
@@ -122,7 +122,7 @@ def main():
 
     msg = (
         f":memo: All prompts ready for {month_label} (newsletters + follow-ups). "
-        f"Trigger Tweee: \"Create the {month_label} Yoga Habit content\""
+        f"Trigger Tweee: \"Use your Actions: get the {month_label} newsletter prompts and save the newsletter content\""
     )
     post_slack(SLACK_STATUS_CHANNEL, msg)
     print(msg)
