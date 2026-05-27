@@ -2,6 +2,7 @@
 Prompt assembly for newsletter generation.
 Builds fully populated prompt text for Tweee (members + non-members).
 """
+import re
 import calendar
 from datetime import date
 import sys
@@ -67,181 +68,55 @@ Subject line:
 # May 2026 exemplars (sent campaigns -- Tiff's final edited content).
 # Paired with June refs below so Tweee sees variation across months.
 
-# _REF_RECENT_* slots hold: 2026-06
-_REF_PRIOR_LIFESTYLE = """This month is about opening... without abandoning yourself.
+# References are read DYNAMICALLY from disk at prompt-build time -- see
+# _format_recent_references() below. The .md files in /root/twy/data/newsletters/YYYY-MM/
+# are overwritten with each month's actually-sent content by the diff-loop
+# archival step in generate_newsletter_prompts.py. The assemblers embed the
+# N most recent months' content as voice references.
+
+from pathlib import Path
+from twy_paths import newsletters_dir as _newsletters_dir
+
+_NEWSLETTERS_DIR = _newsletters_dir()
+_MONTH_DIR_RE = re.compile(r'^\d{4}-\d{2}$')
+
+
+def _format_recent_references(audience: str, count: int = 2) -> str:
+    """Read the N most recent sent .md files for this audience from disk and
+    return a formatted reference block ready to interpolate into a prompt.
+
+    Returns empty string if no .md files exist yet.
+    """
+    audience_us = audience.replace('-', '_')
+    refs = []
+    if not _NEWSLETTERS_DIR.exists():
+        return ""
+    for month_dir in sorted(_NEWSLETTERS_DIR.iterdir(), reverse=True):
+        if not month_dir.is_dir() or not _MONTH_DIR_RE.match(month_dir.name):
+            continue
+        md_file = month_dir / f"{audience_us}.md"
+        if not md_file.exists():
+            continue
+        text = md_file.read_text()
+        # Strip the H1 subject line; keep just the body
+        lines = text.split("\n", 2)
+        body = lines[2].strip() if len(lines) > 2 else ""
+        if not body:
+            continue
+        refs.append((month_dir.name, body))
+        if len(refs) >= count:
+            break
+    if not refs:
+        return ""
+    label = "REFERENCE" if len(refs) == 1 else f"REFERENCES ({len(refs)} months)"
+    intro = (
+        f"{label} -- Tiff's actual sent newsletter(s) for this audience from "
+        f"the most recent month(s). Match her VOICE and her VARIETY, NOT the "
+        f"specific content (theme, dates, class title) of any single example:"
+    )
+    blocks = "\n\n".join(f"--- {label} ---\n{body}" for label, body in refs)
+    return f"{intro}\n\n{blocks}"
 
-There's a difference between softening and collapsing. Between receiving and overextending. Most of us learned protection first -- gripping the legs, bracing the front body, holding the heart back just enough to stay "safe."
-
-So when we start to open, the body has questions.
-
-We answer them through structure. Strong legs. Midline integrity. A lift that comes from support, not force. You'll feel it in your quads, your hip flexors, your shoulders -- all the places that guard the heart. And slowly, something shifts. You don't push your way open... you allow it.
-
-There's a quiet clarity that builds this month. Less second-guessing. More knowing.
-
-And yes -- Camel. But in a way that actually lands in your body.
-
-Yoga Habit (Free on Zoom)
-May 16 | 09:00 MT | 60 min
-Open to Camel
-
-This class breaks Camel down so it's clear, strong, and actually feels good. We build step-by-step from the ground up so the heart lifts without compression or confusion.
-
-Bring someone who's ready to deepen. Not dabble.
-
-With love,
-Tiff"""
-
-_REF_PRIOR_NON_LIFESTYLE = """If your practice has been feeling stuck... this is usually why:
-
-You're trying to open without support.
-
-This class changes that.
-
-We break down Camel Pose so you understand how it actually works -- how the legs ground, how the pelvis moves, how the heart lifts because it's supported, not because you forced it.
-
-If you've been practicing for a while and you're ready for things to click, come.
-
-May 16 | 09:00 MT | 60 min | Free on Zoom
-Open to Camel
-
-This Yoga Habits class teaches Camel Pose in a clear, progressive, and accessible way. Students open the quadriceps, hip flexors, shoulders, and upper spine while learning how grounded legs and a forward-moving pelvis create lift through the heart. Bridge variations and upright drills help students understand Camel without compression or confusion.
-
-For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
-
--- Tiff"""
-
-_REF_PRIOR_NON_OPENER = """There's a moment in Camel where the thighs press forward, the legs root down, and suddenly the chest lifts without strain. Not because you forced it -- because the foundation finally made sense.
-
-On May 16 at 9:00 MT, I'm teaching Open to Camel -- a free 60-minute Yoga Habit class on Zoom. We'll work progressively through Bridge variations, upright drills, and clear prep for Ustrasana so the pose feels steady, spacious, and understandable.
-
-Tiff"""
-
-_REF_PRIOR_GENTLE_NUDGE = """Just circling back in case you meant to sign up for tomorrow's 9am Yoga Habit class and it slipped your mind. If not, no worries at all. Either way, hope you're taking good care of yourself this week.
-
-Tiff"""
-
-_REF_PRIOR_PH1 = """Hey love,
-
-I'm curious -- what did you feel?
-
-Not what it looked like. Not whether you "got" the pose.
-
-But what shifted.
-
-For a lot of people, Camel isn't about the backbend. It's about that moment where you realize you don't have to force your way open. That the legs can hold you. That the lift can come from underneath you.
-
-That you're supported.
-
-If something clicked -- even a little -- stay with that. That's the thread.
-
-And if it felt messy or unclear? Good. That means you touched something real. This work unfolds over time, not in one perfect shape.
-
-Either way, I'm really glad you were there.
-
-With you in it,
-Tiff"""
-
-_REF_PRIOR_PH2 = """A week later... this is where it usually fades.
-
-Not because it didn't matter -- but because life gets loud and the body goes back to old patterns.
-
-So here's your reminder:
-
-You don't need to push harder to open.
-
-You need better support.
-
-That's the shift.
-
-If Camel showed you anything, it's that strength and openness aren't opposites. The legs root. The heart lifts. Both happen at the same time.
-
-If you want to keep building this -- this is exactly what we do inside the practice, week after week. Not chasing poses. Refining how they work.
-
-When you're ready for that depth, you know where to find me.
-
-Still with you,
-Tiff"""
-
-# Reference exemplars -- Tiff's actual June 2026 rewrites (after Tweee submission).
-# These show her voice for each audience. Used as quality reference in prompts.
-# Match VOICE, not month-specific content.
-
-_REF_RECENT_LIFESTYLE = """Hi sweethearts,
-
-June feels like a long exhale.
-
-Not because everything is figured out, but because something softer is returning. A little more space in the body. A little more willingness to be seen as we are. A little more trust in what's unfolding instead of trying to force clarity before we move.
-
-This month we're practicing Creative Confidence.
-
-I've been thinking a lot about how confidence changes as we change. It becomes less about certainty and more about relationship -- listening more carefully to the body, trusting our timing, allowing joy and creativity to exist even while life is still imperfect and unfinished.
-
-Our practices this month will explore side-body opening, supported backbending, expansive heart-opening flow, and the steady work of rooting before we radiate. There's a kind of blooming that only happens when the body feels supported enough to open.
-
-There also feels like a subtle shift happening collectively right now. So many people are re-evaluating what matters, what feels honest, and what it means to fully inhabit their lives. I don't think we're being asked to become someone else. I think we're being asked to come into deeper relationship with who we already are.
-
-Our free Yoga Habit class is June 13 at 9am MT on Zoom: Offer Your Light.
-
-Bring your mat, blocks, strap, blanket, and someone you love.
-
-With love,
-Tiff"""
-
-_REF_RECENT_NON_LIFESTYLE = """Hi there,
-
-Lately I've been reflecting on how meaningful joy becomes when it's shared -- when we allow ourselves to participate fully in the moment we're actually living instead of waiting to feel more polished, prepared, or certain.
-
-This month's Yoga Habit class, Offer Your Light, explores the relationship between joy, expression, and embodied participation.
-
-Together we'll move through supported heart opening, expansive flow, grounding actions in the legs and pelvis, and expressive movement practices that encourage connection, generosity, and presence rather than performance.
-
-Purna, the practice of recognizing inherent wholeness, reminds us that we do not need to perfect ourselves before we belong here. We practice by participating. By breathing. By offering our presence sincerely.
-
-Friday, June 13 | 9:00am MT | Free on Zoom
-
-This class is for practitioners with an established practice who want to deepen it. Not a beginner class.
-
-Bring your mat, blocks, strap, blanket, and anything else that helps you feel supported.
-
-I'd love to practice together.
-
-Love,
-Tiff"""
-
-_REF_RECENT_NON_OPENER = """Hi there,
-
-Just sending this back around in case you missed it.
-
-This month's free Yoga Habit class, Offer Your Light, is a supported heart opening practice centered around expressive flow, side-body opening, grounding leg work, and moving in a way that encourages presence, connection, and participation.
-
-Friday, June 13 | 9:00am MT | Free on Zoom
-
-This class is for practitioners with an established practice who want to deepen it. Not a beginner class.
-
-Bring your mat, blocks, strap, blanket, and anything else that helps you feel supported.
-
-I'd love to practice together,
-Tiff"""
-
-_REF_RECENT_REMINDER = """Hi loves,
-
-Looking forward to practicing with you tomorrow for Offer Your Light.
-
-We'll be exploring supported heart opening, fluid movement, and spacious backbending -- the kind that feels nourishing instead of forced.
-
-Bring your mat, 2 blocks, strap, and a blanket if you use one. Your Zoom link is in your Marvelous registration confirmation.
-
-See you tomorrow.
-Tiff"""
-
-_REF_RECENT_GENTLE_NUDGE = """Hi,
-
-Just gently circling back in case Offer Your Light was something you meant to register for.
-
-June 13 | 09:00 MT | Free on Zoom
-
-Love,
-Tiff"""
 
 def get_habit_class_date(year: int, month: int) -> date:
     """Return the Habit class date for the given month by querying the classes API.
@@ -323,6 +198,8 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
     plans_block = "\n".join(plan_lines) if plan_lines else "(no plans yet)"
 
+    recent_refs = _format_recent_references("lifestyle")
+
     return f"""Write a member newsletter for Tiffany Wood Yoga.
 
 {_HARD_RULES}
@@ -359,19 +236,15 @@ OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted
 Hard limit: 300 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body); the canonical Theme provided in this prompt is what should appear in the body. No bullets except for event details.
 
-TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
-
---- PRIOR MONTH ---
-{_REF_PRIOR_LIFESTYLE}
-
---- MOST RECENT MONTH ---
-{_REF_RECENT_LIFESTYLE}"""
+{recent_refs}"""
 
 
 def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
+
+    recent_refs = _format_recent_references("non-lifestyle")
 
     return f"""Write an open-door newsletter for people who aren't Tiffany Wood Yoga members.
 
@@ -402,13 +275,7 @@ Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 Hard limit: 175 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. Canonical Theme from this prompt is what appears in the body. No bullets.
 
-TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
-
---- PRIOR MONTH ---
-{_REF_PRIOR_NON_LIFESTYLE}
-
---- MOST RECENT MONTH ---
-{_REF_RECENT_NON_LIFESTYLE}"""
+{recent_refs}"""
 
 
 # Reference emails (April 2026, Tiff's voice) — quality bar for prompt templates
@@ -478,6 +345,8 @@ def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> s
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
 
+    recent_refs = _format_recent_references("ph1")
+
     return f"""Write a follow-up email to people who attended the Yoga Habit free class on {habit_str}.
 
 {_HARD_RULES}
@@ -493,13 +362,12 @@ This email sends 24 hours after class ends. The reader just practiced with Tiff 
 
 Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49. Do not fabricate details about the class — use only what's provided above.
 
-Reference quality (Tiff's voice and tone -- match this). The template baseline plus Tiff's most recent prior-month sent example -- note her variation:
+Reference quality (Tiff's voice and tone -- match this). The synthetic template baseline plus Tiff's most recent sent examples:
 
 --- TEMPLATE (synthetic baseline) ---
 {_PH1_REFERENCE}
 
---- PRIOR MONTH (actual sent) ---
-{_REF_PRIOR_PH1}
+{recent_refs}
 
 OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the thank-you for the class they just attended). Do NOT write the literal title text.
@@ -517,6 +385,8 @@ def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> s
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
 
+    recent_refs = _format_recent_references("ph2")
+
     return f"""Write a second follow-up email for people who attended the Yoga Habit free class on {habit_str}.
 
 {_HARD_RULES}
@@ -532,13 +402,12 @@ This email sends 7 days after class. The offer is still open but closing soon. T
 
 Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave — the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon.
 
-Reference quality (Tiff's voice and tone -- match this). The template baseline plus Tiff's most recent prior-month sent example -- note her variation:
+Reference quality (Tiff's voice and tone -- match this). The synthetic template baseline plus Tiff's most recent sent examples:
 
 --- TEMPLATE (synthetic baseline) ---
 {_PH2_REFERENCE}
 
---- PRIOR MONTH (actual sent) ---
-{_REF_PRIOR_PH2}
+{recent_refs}
 
 OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the P.S. about the next class, or referencing what they just practiced). Do NOT write the literal title text.
@@ -555,6 +424,8 @@ def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: in
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
+
+    recent_refs = _format_recent_references("non-opener")
 
     return f"""Write a brief outreach email for people who received the first non-member newsletter about the {habit_str} Yoga Habit class but did not open it.
 
@@ -584,13 +455,7 @@ Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 Hard limit: 100 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Resend openers tend to be functional and low-key ("Just sending this back around in case you missed it." is one shape she uses; she also opens with a single concrete somatic moment, e.g. "There's a moment in Camel where the thighs press forward, the legs root down..."). The references below show both. Avoid a fresh hook on a resend -- the original framing already exists. The API will reject any body that begins with `#`. No bullets.
 
-TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
-
---- PRIOR MONTH ---
-{_REF_PRIOR_NON_OPENER}
-
---- MOST RECENT MONTH ---
-{_REF_RECENT_NON_OPENER}"""
+{recent_refs}"""
 
 
 def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -598,6 +463,8 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
+
+    recent_refs = _format_recent_references("reminder")
 
     return f"""Write a brief day-before reminder email for people who registered for the {habit_str} Yoga Habit class. The class is tomorrow.
 
@@ -624,8 +491,7 @@ OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted
 Hard limit: 80 words. Subject line included, not counted.
 Shape: subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), inline `[See you tomorrow]({{CLASS_URL}})` at the end of a sentence, sign-off. Reminder openers tend to be warm and functional -- something like "Looking forward to practicing with you tomorrow for {{CLASS_TITLE}}." The June reference below shows this shape. The API rejects any body beginning with `#`. No bullets. No Register button (this audience has already registered).
 
-REFERENCE -- Tiff's most recent actual rewrite for this audience. Match the VOICE (sentence rhythm, sentence length, anchoring in anatomy + practice, conversational first-person), NOT the specific content (theme, dates, class title) of this example:
-{_REF_RECENT_REMINDER}"""
+{recent_refs}"""
 
 
 def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -633,6 +499,8 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
+
+    recent_refs = _format_recent_references("gentle-nudge")
 
     return f"""Write a very brief, soft nudge for people who opened the first non-member newsletter about the {habit_str} Yoga Habit class but did not register. The class is tomorrow.
 
@@ -658,10 +526,4 @@ Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 Hard limit: 60 words. Subject line included, not counted.
 Shape: subject line, 1 short paragraph (using {{CLASS_TITLE}} if you reference the class title), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Gentle Nudge openers tend to be very low-key and one-paragraph -- "Just gently circling back in case [CLASS_TITLE] was something you meant to register for." and similar. The references below show this. Short. The API rejects any body beginning with `#`. No bullets.
 
-TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
-
---- PRIOR MONTH ---
-{_REF_PRIOR_GENTLE_NUDGE}
-
---- MOST RECENT MONTH ---
-{_REF_RECENT_GENTLE_NUDGE}"""
+{recent_refs}"""

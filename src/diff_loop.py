@@ -177,169 +177,12 @@ def _write_diff_record(
     return path
 
 
-# ----------------------------------------------------------------------------
-# Phase 4: apply diff-derived updates to habit_newsletter_prompt.py
-# ----------------------------------------------------------------------------
-
-ASSEMBLER_PATH = Path(__file__).parent / "habit_newsletter_prompt.py"
-
-
-def _read_assembler_source() -> str:
-    return ASSEMBLER_PATH.read_text()
-
-
-def _write_assembler_source(s: str) -> None:
-    ASSEMBLER_PATH.write_text(s)
-
-
-def _extract_constant_value(source: str, const_name: str) -> str | None:
-    """Extract the body of `<const_name> = \"\"\"...\"\"\"` if present."""
-    m = re.search(
-        rf'{re.escape(const_name)}\s*=\s*"""(.*?)"""',
-        source, re.DOTALL,
-    )
-    return m.group(1) if m else None
-
-
-def _replace_constant_value(source: str, const_name: str, new_value: str) -> tuple[str, bool]:
-    """Replace the body of `<const_name> = \"\"\"...\"\"\"` if present. Returns (new_source, changed)."""
-    pattern = re.compile(
-        rf'({re.escape(const_name)}\s*=\s*""")(.*?)(""")',
-        re.DOTALL,
-    )
-    changed = False
-    def _repl(m):
-        nonlocal changed
-        changed = True
-        return m.group(1) + new_value + m.group(3)
-    new_source = pattern.sub(_repl, source, count=1)
-    return new_source, changed
-
-
-# Marker comment placed in habit_newsletter_prompt.py to track which month
-# currently lives in the _REF_RECENT_* slots. The apply step reads this to
-# refuse rotation if the month being processed is not strictly more recent.
-_RECENT_MONTH_MARKER_RE = re.compile(r"# _REF_RECENT_\* slots hold: (\d{4})-(\d{2})")
-
-
-def _read_recent_month(source: str) -> tuple[int, int] | None:
-    """Return (year, month) currently in _REF_RECENT_* slots, or None if unmarked."""
-    m = _RECENT_MONTH_MARKER_RE.search(source)
-    return (int(m.group(1)), int(m.group(2))) if m else None
-
-
-def _set_recent_month_marker(source: str, year: int, month: int) -> str:
-    """Insert or update the marker comment."""
-    new_marker = f"# _REF_RECENT_* slots hold: {year:04d}-{month:02d}"
-    if _RECENT_MONTH_MARKER_RE.search(source):
-        return _RECENT_MONTH_MARKER_RE.sub(new_marker, source, count=1)
-    # Insert just above the first _REF_ constant definition
-    first_ref = re.search(r"^_REF_", source, re.MULTILINE)
-    if first_ref:
-        idx = first_ref.start()
-        return source[:idx] + new_marker + "\n" + source[idx:]
-    # Fallback: prepend
-    return new_marker + "\n" + source
-
-
-def apply_diff_updates(year: int, month: int) -> dict:
-    """Phase 4: rotate _REF_RECENT_<AUDIENCE> and _REF_PRIOR_<AUDIENCE> slot values
-    in habit_newsletter_prompt.py based on this month's diff records.
-
-    Strategy:
-      - Refuse to rotate if the month being processed is not strictly more recent
-        than the current _REF_RECENT_* contents (per the marker comment in the
-        assembler). This prevents test re-runs or out-of-order cron firings from
-        downgrading the slots.
-      - For each audience with a diff record: set _REF_PRIOR_X := current _REF_RECENT_X,
-        then set _REF_RECENT_X := tiff_sent.body_md from the diff record.
-      - If diff record shows body_changed=False AND subject_changed=False:
-        skip rotation for that audience (no signal). Other audiences still rotate.
-
-    Returns dict {audience: status_string}.
-    """
-    source = _read_assembler_source()
-    results = {}
-
-    # Sequencing guard. Refuse strictly-older months; allow same-month (refresh)
-    # and newer months (full rotation).
-    current_marker = _read_recent_month(source)
-    if current_marker is not None and (year, month) < current_marker:
-        return {
-            "_skipped": (
-                f"refusing to apply: requested {year:04d}-{month:02d} is older than "
-                f"current RECENT {current_marker[0]:04d}-{current_marker[1]:02d}. "
-                f"Apply only the same or next month."
-            )
-        }
-    same_month = current_marker is not None and (year, month) == current_marker
-
-    diffs_dir = NEWSLETTER_DIFFS_DIR / f"{year:04d}-{month:02d}"
-    if not diffs_dir.exists():
-        return {"error": f"no diffs dir: {diffs_dir}"}
-
-    any_changed = False
-    for audience in AUDIENCE_TITLE_MAP:
-        diff_path = diffs_dir / f"{audience}.diff.json"
-        if not diff_path.exists():
-            results[audience] = "no_diff_record"
-            continue
-        with diff_path.open() as f:
-            rec = json.load(f)
-
-        if not rec.get("body_changed") and not rec.get("subject_changed"):
-            results[audience] = "no_change_skipped"
-            continue
-
-        recent_name = f"_REF_RECENT_{audience.upper()}"
-        prior_name = f"_REF_PRIOR_{audience.upper()}"
-        new_value = rec["tiff_sent"]["body_md"]
-        if '"""' in new_value:
-            # Triple-quote in body would break the constant. Replace defensively.
-            new_value = new_value.replace('"""', '“““')
-
-        # Read current RECENT (will become the new PRIOR)
-        old_recent = _extract_constant_value(source, recent_name)
-
-        actions = []
-        if old_recent is not None:
-            if same_month:
-                # Same-month refresh: only update RECENT (e.g. June 25 cron
-                # applies June sent, replacing the June drafts that were in
-                # RECENT). Do NOT touch PRIOR -- we want to keep the actual
-                # prior month's sent content (e.g. May) intact.
-                source, recent_changed = _replace_constant_value(source, recent_name, new_value)
-                if recent_changed:
-                    actions.append(f"{recent_name}<-refreshed_sent")
-                    any_changed = True
-                else:
-                    actions.append(f"{recent_name}_unchanged")
-            else:
-                # Newer-month rotation: PRIOR := old RECENT, RECENT := new sent.
-                source, prior_changed = _replace_constant_value(source, prior_name, old_recent)
-                if prior_changed:
-                    actions.append(f"{prior_name}<-old_recent")
-                    any_changed = True
-                else:
-                    actions.append(f"{prior_name}_not_present")
-                source, recent_changed = _replace_constant_value(source, recent_name, new_value)
-                if recent_changed:
-                    actions.append(f"{recent_name}<-new_sent")
-                    any_changed = True
-        else:
-            # No existing RECENT; can't safely add a new constant via regex without
-            # also updating the assembler to reference it. Flag for manual handling.
-            actions.append(f"{recent_name}_missing_in_assembler")
-
-        results[audience] = " + ".join(actions)
-
-    # Update the marker only if we actually rotated something
-    if any_changed:
-        source = _set_recent_month_marker(source, year, month)
-
-    _write_assembler_source(source)
-    return results
-
+# Phase 4 (slot-rotation auto-apply) was removed in the KISS refactor. The
+# habit_newsletter_prompt assemblers now read recent .md files directly from
+# disk at prompt-build time via _format_recent_references(), so there's
+# nothing to rotate in Python source code anymore. Archival (Phase 1) +
+# diff capture (Phase 2) + pattern extraction (Phase 3) + Slack review post
+# (Phase 3) are still in place.
 
 # ----------------------------------------------------------------------------
 # Phase 3: pattern extraction
@@ -586,7 +429,7 @@ def post_review_candidates(year: int, month: int, slack_post_fn=None) -> str:
         lines.append(f"_({filtered_out} additional removed phrases filtered as noise: signoffs, bare CTAs, class info lines, very short fragments.)_")
         lines.append("")
 
-    lines.append("_References auto-rotated in `habit_newsletter_prompt.py`. To revert: `git checkout HEAD -- announce/src/habit_newsletter_prompt.py` (Hetzner) and re-run the prompt-gen cron with the rotation disabled._")
+    lines.append("_References are read directly from `/root/twy/data/newsletters/YYYY-MM/<audience>.md` at prompt-build time. The archival step above just overwrote those `.md` files with Tiff actually-sent versions; next month's prompts will embed them. The pre-overwrite (Tweee submitted) version is preserved in the diff records under `/root/twy/data/newsletter-diffs/YYYY-MM/<audience>.diff.json` -> `tweee_submitted.body_md`._")
 
     text = "\n".join(lines)
     if slack_post_fn:
