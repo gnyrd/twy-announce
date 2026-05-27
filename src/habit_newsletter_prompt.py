@@ -9,6 +9,239 @@ import requests
 
 CLASSES_API = "http://localhost:5003"
 
+_HARD_RULES = """RULES (mandatory, no exceptions). Read first, follow without exception:
+1. Output ONLY a subject line and a body. NO markdown headers anywhere -- no `#`, no `##`, no decorative title line above or inside the body. The body is flowing prose, not a document with sections. The submission API rejects any body that begins with `#`.
+2. Use the Theme string below EXACTLY as written. Do NOT paraphrase it, layer an interpretive umbrella over it, invent a parallel title, or substitute a different framing. The Theme provided IS the canonical theme. If you feel an urge to write a more poetic umbrella term above the body, do not.
+3. Do NOT introduce outside content -- no CHANI astrology references, no invented season names, no umbrella themes from external sources. The astrology disclaimer (where present below) is the only authorization to mention astrology, and only as a felt quality with no planet names, dates, or events.
+
+These rules apply to ALL output. The submission API will reject violations of rule 1 and you will be asked to resubmit."""
+
+_VOICE_GUARDRAILS = """VOICE NOTES (guidance, not rigid rules):
+
+The reference exemplars at the bottom of this prompt are the strongest signal of Tiff's voice. When this guidance feels in tension with the references, follow the references. The point of these notes is to flag Tweee's specific defaults that Tiff has named; the point of the references is to show the breadth of her actual voice.
+
+Three Tweee defaults Tiff has called out (try to avoid these specific patterns):
+- Performance tropes she said don't sound like her: "tired of performing", "tired of tightening", "tired of waiting to feel ready", "taking up space" (used as a contrast payoff). Her words: "I'm not sure I actually speak this way."
+- Rhetorical-question openers in the "What if X?" / "Have you ever Y?" hook-style shape. Tiff doesn't open this way. Her words: "structurally clickbait even though the intention was thoughtful."
+- Generic somatic-marketing language without anatomical specificity: "the body realizes it doesn't have to force anything", "your body finally trusts itself", "let yourself bloom". When you write a sentence about "the body" abstractly without naming what's actually happening (which body region, which action, which UPA), it tends to land as generic yoga-marketing. Her words: "I'm so tired of this message I could scream."
+
+Patterns Tiff uses (a sampler, not a checklist -- she draws from these and others, varies them across emails and across months):
+
+- DIRECT DECLARATIVE OPENERS (every single email): "June feels like a long exhale." / "Lately I've been reflecting on..." / "Just sending this back around in case you missed it." / "Looking forward to practicing with you tomorrow for..." / "Thank you for being part of..." / "A week later, I'm still thinking about..." / "Just gently circling back in case..." Tiff never opens with abstraction or question.
+
+- FIRST-PERSON REFLECTION: "I've been thinking a lot about how confidence changes as we change." / "I keep thinking about how rare it is to feel supported enough to let ourselves be seen." / "Lately I've been reflecting on how meaningful joy becomes when it's shared." Personal voice grounds the teaching.
+
+- ANATOMICAL / PRACTICE SPECIFICITY (the substance of yoga marketing): "side-body opening, supported backbending, expansive heart-opening flow", "grounding actions in the legs and pelvis", "rooting before we radiate", "supported heart opening, fluid movement, and spacious backbending". Name the practice, name the body region. Body language without this specificity is forbidden (see above).
+
+- PARALLEL STRUCTURE / ANAPHORA: "A little more space in the body. A little more willingness to be seen as we are. A little more trust in what's unfolding..." / "Even when life gets loud again. Even when we forget for a while." / "We practice by participating. By breathing. By offering our presence sincerely." Repetition of an opening phrase across short clauses. Tight, three-beat is common.
+
+- Negation ladder + arrival (one of her moves, used sparingly): "not performing, not pushing, just allowing the body to participate honestly" / "Not perfected. Not 'fixed.' Just present." Two-or-three short negations of specific misframings, landing on one short positive. Used sparingly. Distinct from a contrast pair -- it strips away wrong framings to arrive at one truth, not "A vs B."
+
+- SANSKRIT / PHILOSOPHICAL REFERENCES with a one-sentence gloss: "Purna, the practice of recognizing inherent wholeness, reminds us that we do not need to perfect ourselves before we belong here." Term, definition, ground.
+
+- ONE-LINE PARAGRAPHS and short sentence rhythm. Frequent throughout her writing. Don't pack everything into long paragraphs.
+
+- WARM ADDRESS FORMS: "Hi sweethearts" (members) / "Hi loves" / "Hi there" (non-members) / "Hi" (post-class follow-ups). Sign-offs: "With love, Tiff" / "Love, Tiff" / a simple "Tiff".
+
+The point: VARIETY. Do not lean on any single technique. Do not repeat the same move within an email (e.g. two negation ladders in one body = too much). If a technique is starting to feel like the structural backbone of the email, vary it.
+
+CONTRAST PAIRS specifically ("Not because X, but because Y" / "X instead of Y") -- MINIMIZE. Tiff uses these rarely and tightly. Her June 2026 entire output contained one full "Not because X but because Y" contrast pair (in PH1: "Not because we need to become better versions of ourselves. But because we forget.") and one four-word qualifier ("the kind that feels nourishing instead of forced" in the reminder). Default: do NOT use a contrast pair. If one is genuinely needed: both sides short, grounded in lived specificity, never as the opener, never more than one per email.
+
+PREFERRED voice:
+- Direct, declarative openers. Audience-specific positive opener patterns are baked into each assembler's Shape line. The REFERENCE block at the bottom of this prompt is the most recent example of Tiff's voice for this audience -- match the VOICE, not the specific content. Different month, different theme, same shape.
+- Conversational sentence length. One-line paragraphs are normal and frequent.
+- First-person reflection is welcome ("Lately I've been reflecting on...", "I keep thinking about how...", "I've been thinking a lot about...").
+
+Subject line:
+- Subject is a separate top-level field from the body. The API enforces this (no H1 headers in body).
+- Tiff's subjects tend to be descriptive or declarative -- short, not hook-style. Examples she has written or kept: "June Yoga Lifestyle -- Creative Confidence" (theme-stamped), "Get Ready to Smile: June's Heart Yoga" (descriptive friendly), "Open, but not unprotected" (felt-quality), "A softer way to open" (low-key), "Open to Camel" (functional/specific), "In case you meant to join us" (gentle), "See you tomorrow" (functional), "Thank you for practicing with me" (direct), "How did it land?" (curious-question, conversational), "Your center is still there" (declarative), "Don't lose this" (urgent-direct).
+- One subject style she explicitly rejected: "What if your practice stopped shrinking you?" -- the rhetorical-question hook shape."""
+
+
+
+
+
+
+
+
+# May 2026 exemplars (sent campaigns -- Tiff's final edited content).
+# Paired with June refs below so Tweee sees variation across months.
+
+# _REF_RECENT_* slots hold: 2026-06
+_REF_PRIOR_LIFESTYLE = """This month is about opening... without abandoning yourself.
+
+There's a difference between softening and collapsing. Between receiving and overextending. Most of us learned protection first -- gripping the legs, bracing the front body, holding the heart back just enough to stay "safe."
+
+So when we start to open, the body has questions.
+
+We answer them through structure. Strong legs. Midline integrity. A lift that comes from support, not force. You'll feel it in your quads, your hip flexors, your shoulders -- all the places that guard the heart. And slowly, something shifts. You don't push your way open... you allow it.
+
+There's a quiet clarity that builds this month. Less second-guessing. More knowing.
+
+And yes -- Camel. But in a way that actually lands in your body.
+
+Yoga Habit (Free on Zoom)
+May 16 | 09:00 MT | 60 min
+Open to Camel
+
+This class breaks Camel down so it's clear, strong, and actually feels good. We build step-by-step from the ground up so the heart lifts without compression or confusion.
+
+Bring someone who's ready to deepen. Not dabble.
+
+With love,
+Tiff"""
+
+_REF_PRIOR_NON_LIFESTYLE = """If your practice has been feeling stuck... this is usually why:
+
+You're trying to open without support.
+
+This class changes that.
+
+We break down Camel Pose so you understand how it actually works -- how the legs ground, how the pelvis moves, how the heart lifts because it's supported, not because you forced it.
+
+If you've been practicing for a while and you're ready for things to click, come.
+
+May 16 | 09:00 MT | 60 min | Free on Zoom
+Open to Camel
+
+This Yoga Habits class teaches Camel Pose in a clear, progressive, and accessible way. Students open the quadriceps, hip flexors, shoulders, and upper spine while learning how grounded legs and a forward-moving pelvis create lift through the heart. Bridge variations and upright drills help students understand Camel without compression or confusion.
+
+For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
+
+-- Tiff"""
+
+_REF_PRIOR_NON_OPENER = """There's a moment in Camel where the thighs press forward, the legs root down, and suddenly the chest lifts without strain. Not because you forced it -- because the foundation finally made sense.
+
+On May 16 at 9:00 MT, I'm teaching Open to Camel -- a free 60-minute Yoga Habit class on Zoom. We'll work progressively through Bridge variations, upright drills, and clear prep for Ustrasana so the pose feels steady, spacious, and understandable.
+
+Tiff"""
+
+_REF_PRIOR_GENTLE_NUDGE = """Just circling back in case you meant to sign up for tomorrow's 9am Yoga Habit class and it slipped your mind. If not, no worries at all. Either way, hope you're taking good care of yourself this week.
+
+Tiff"""
+
+_REF_PRIOR_PH1 = """Hey love,
+
+I'm curious -- what did you feel?
+
+Not what it looked like. Not whether you "got" the pose.
+
+But what shifted.
+
+For a lot of people, Camel isn't about the backbend. It's about that moment where you realize you don't have to force your way open. That the legs can hold you. That the lift can come from underneath you.
+
+That you're supported.
+
+If something clicked -- even a little -- stay with that. That's the thread.
+
+And if it felt messy or unclear? Good. That means you touched something real. This work unfolds over time, not in one perfect shape.
+
+Either way, I'm really glad you were there.
+
+With you in it,
+Tiff"""
+
+_REF_PRIOR_PH2 = """A week later... this is where it usually fades.
+
+Not because it didn't matter -- but because life gets loud and the body goes back to old patterns.
+
+So here's your reminder:
+
+You don't need to push harder to open.
+
+You need better support.
+
+That's the shift.
+
+If Camel showed you anything, it's that strength and openness aren't opposites. The legs root. The heart lifts. Both happen at the same time.
+
+If you want to keep building this -- this is exactly what we do inside the practice, week after week. Not chasing poses. Refining how they work.
+
+When you're ready for that depth, you know where to find me.
+
+Still with you,
+Tiff"""
+
+# Reference exemplars -- Tiff's actual June 2026 rewrites (after Tweee submission).
+# These show her voice for each audience. Used as quality reference in prompts.
+# Match VOICE, not month-specific content.
+
+_REF_RECENT_LIFESTYLE = """Hi sweethearts,
+
+June feels like a long exhale.
+
+Not because everything is figured out, but because something softer is returning. A little more space in the body. A little more willingness to be seen as we are. A little more trust in what's unfolding instead of trying to force clarity before we move.
+
+This month we're practicing Creative Confidence.
+
+I've been thinking a lot about how confidence changes as we change. It becomes less about certainty and more about relationship -- listening more carefully to the body, trusting our timing, allowing joy and creativity to exist even while life is still imperfect and unfinished.
+
+Our practices this month will explore side-body opening, supported backbending, expansive heart-opening flow, and the steady work of rooting before we radiate. There's a kind of blooming that only happens when the body feels supported enough to open.
+
+There also feels like a subtle shift happening collectively right now. So many people are re-evaluating what matters, what feels honest, and what it means to fully inhabit their lives. I don't think we're being asked to become someone else. I think we're being asked to come into deeper relationship with who we already are.
+
+Our free Yoga Habit class is June 13 at 9am MT on Zoom: Offer Your Light.
+
+Bring your mat, blocks, strap, blanket, and someone you love.
+
+With love,
+Tiff"""
+
+_REF_RECENT_NON_LIFESTYLE = """Hi there,
+
+Lately I've been reflecting on how meaningful joy becomes when it's shared -- when we allow ourselves to participate fully in the moment we're actually living instead of waiting to feel more polished, prepared, or certain.
+
+This month's Yoga Habit class, Offer Your Light, explores the relationship between joy, expression, and embodied participation.
+
+Together we'll move through supported heart opening, expansive flow, grounding actions in the legs and pelvis, and expressive movement practices that encourage connection, generosity, and presence rather than performance.
+
+Purna, the practice of recognizing inherent wholeness, reminds us that we do not need to perfect ourselves before we belong here. We practice by participating. By breathing. By offering our presence sincerely.
+
+Friday, June 13 | 9:00am MT | Free on Zoom
+
+This class is for practitioners with an established practice who want to deepen it. Not a beginner class.
+
+Bring your mat, blocks, strap, blanket, and anything else that helps you feel supported.
+
+I'd love to practice together.
+
+Love,
+Tiff"""
+
+_REF_RECENT_NON_OPENER = """Hi there,
+
+Just sending this back around in case you missed it.
+
+This month's free Yoga Habit class, Offer Your Light, is a supported heart opening practice centered around expressive flow, side-body opening, grounding leg work, and moving in a way that encourages presence, connection, and participation.
+
+Friday, June 13 | 9:00am MT | Free on Zoom
+
+This class is for practitioners with an established practice who want to deepen it. Not a beginner class.
+
+Bring your mat, blocks, strap, blanket, and anything else that helps you feel supported.
+
+I'd love to practice together,
+Tiff"""
+
+_REF_RECENT_REMINDER = """Hi loves,
+
+Looking forward to practicing with you tomorrow for Offer Your Light.
+
+We'll be exploring supported heart opening, fluid movement, and spacious backbending -- the kind that feels nourishing instead of forced.
+
+Bring your mat, 2 blocks, strap, and a blanket if you use one. Your Zoom link is in your Marvelous registration confirmation.
+
+See you tomorrow.
+Tiff"""
+
+_REF_RECENT_GENTLE_NUDGE = """Hi,
+
+Just gently circling back in case Offer Your Light was something you meant to register for.
+
+June 13 | 09:00 MT | Free on Zoom
+
+Love,
+Tiff"""
 
 def get_habit_class_date(year: int, month: int) -> date:
     """Return the Habit class date for the given month by querying the classes API.
@@ -92,6 +325,10 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
     return f"""Write a member newsletter for Tiffany Wood Yoga.
 
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
+
 Month: {habit_date.strftime('%B %Y')}
 Theme: {overview.get('title', '')} -- {overview.get('teaching_notes', '')}
 Physical arc: {physical_arc}
@@ -115,8 +352,20 @@ Props: {habit_plan.get('props', '')}
 
 Write this as Tiff — her voice, her vernacular, her storytelling. Warm, specific, a little irreverent. Weave the practice into one lived moment — how it meets the day, the body, the line at the grocery store, a hard conversation. Show the depth through experience, don't lecture about it. Non-dual undertone is welcomed; philosophy essay is not. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
 
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class registration page.
+- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
+
 Hard limit: 300 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body that flows, event details where they fit, sign-off. No headers, no bullets except the event details if it helps."""
+Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body); the canonical Theme provided in this prompt is what should appear in the body. No bullets except for event details.
+
+TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
+
+--- PRIOR MONTH ---
+{_REF_PRIOR_LIFESTYLE}
+
+--- MOST RECENT MONTH ---
+{_REF_RECENT_LIFESTYLE}"""
 
 
 def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -125,6 +374,10 @@ def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month:
     habit_plan = plans.get(habit_date.isoformat(), {})
 
     return f"""Write an open-door newsletter for people who aren't Tiffany Wood Yoga members.
+
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
 
 Month theme: {overview.get('title', '')} -- {overview.get('teaching_notes', '')}
 
@@ -137,13 +390,25 @@ Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
 
-Include this exact markdown link verbatim. Do NOT paraphrase to "Register here: URL" or any other prose form. The downstream renderer needs the markdown syntax to produce a clickable link:
-[Register Here](https://habit.tiffanywoodyoga.com)
-
 Write this as Tiff — warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. You can gesture at the deeper why ONCE, briefly — a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
 
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   — place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button. This invites them to subscribe to the Habits-only calendar feed so they never miss a class.
+
+Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
+
 Hard limit: 175 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body, event details, register link, sign-off. No headers or bullets."""
+Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. Canonical Theme from this prompt is what appears in the body. No bullets.
+
+TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
+
+--- PRIOR MONTH ---
+{_REF_PRIOR_NON_LIFESTYLE}
+
+--- MOST RECENT MONTH ---
+{_REF_RECENT_NON_LIFESTYLE}"""
 
 
 # Reference emails (April 2026, Tiff's voice) — quality bar for prompt templates
@@ -215,6 +480,10 @@ def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 
     return f"""Write a follow-up email to people who attended the Yoga Habit free class on {habit_str}.
 
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
+
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
@@ -222,15 +491,24 @@ Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
 
 This email sends 24 hours after class ends. The reader just practiced with Tiff for the first time (or returned after a gap). They're in the afterglow.
 
-Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49 via the link below. Do not fabricate details about the class — use only what's provided above.
+Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49. Do not fabricate details about the class — use only what's provided above.
 
-Leave a literal "[link]" placeholder where the membership offer link goes. Do not invent a URL.
+Reference quality (Tiff's voice and tone -- match this). The template baseline plus Tiff's most recent prior-month sent example -- note her variation:
 
-Reference quality (Tiff's voice and tone — match this):
+--- TEMPLATE (synthetic baseline) ---
 {_PH1_REFERENCE}
 
+--- PRIOR MONTH (actual sent) ---
+{_REF_PRIOR_PH1}
+
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the thank-you for the class they just attended). Do NOT write the literal title text.
+- [link]             — write the offer link as an INLINE text link using markdown: `[Claim your first month for $49]([link])` or `[start your membership]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence — do NOT put it on its own paragraph. Inline placement keeps it a text link; a paragraph alone would render as a button which is not what we want for PH1/PH2.
+
+The literal `[link]` placeholder gets substituted with the coupon checkout URL at send time. Do not invent a URL.
+
 Hard limit: 250 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body, [link] on its own line, brief closing, sign-off. No headers or bullets."""
+Shape: natural, not formulaic. Subject line, body (using {{CLASS_TITLE}} where the title appears and an inline `[…]([link])` markdown link in prose), brief closing, sign-off. PH1 openers tend to be a direct thank-you, sometimes paired with a conversational question or invitation to reflect ("I'm curious -- what did you feel?"). The references show variation. The API rejects any body beginning with `#`. Place the offer link inline (no button-style link on its own paragraph; that's the lifestyle/non-lifestyle shape, not the follow-up shape). No bullets."""
 
 
 def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -241,6 +519,10 @@ def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 
     return f"""Write a second follow-up email for people who attended the Yoga Habit free class on {habit_str}.
 
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
+
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
@@ -248,13 +530,24 @@ Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
 
 This email sends 7 days after class. The offer is still open but closing soon. The reader has had a week to think about it. Tone is gentle, non-pushy. A quiet reminder that the door is still open.
 
-Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave — the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon. Leave a literal "[link]" placeholder where the membership offer link goes.
+Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave — the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon.
 
-Reference quality (Tiff's voice and tone — match this):
+Reference quality (Tiff's voice and tone -- match this). The template baseline plus Tiff's most recent prior-month sent example -- note her variation:
+
+--- TEMPLATE (synthetic baseline) ---
 {_PH2_REFERENCE}
 
+--- PRIOR MONTH (actual sent) ---
+{_REF_PRIOR_PH2}
+
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the P.S. about the next class, or referencing what they just practiced). Do NOT write the literal title text.
+- [link]             — write the offer link as an INLINE text link using markdown: `[start your membership]([link])` or `[claim your first month for $49]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence — do NOT put it on its own paragraph. Inline placement keeps it a text link.
+
+The literal `[link]` placeholder gets substituted with the coupon checkout URL at send time. Do not invent a URL.
+
 Hard limit: 200 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body, [link] on its own line, brief closing, sign-off + P.S. No headers or bullets."""
+Shape: natural, not formulaic. Subject line, body (using {{CLASS_TITLE}} where the title appears and an inline `[…]([link])` markdown link in prose), brief closing, sign-off + P.S. PH2 openers tend to be reflective, opening on the time elapsed and a felt observation ("A week later, I'm still thinking about..." / "A week later... this is where it usually fades."). The references show variation. Inline offer link, no button-style link on its own paragraph. The API rejects any body beginning with `#`. No bullets."""
 
 
 def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -264,6 +557,10 @@ def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: in
     habit_plan = plans.get(habit_date.isoformat(), {})
 
     return f"""Write a brief outreach email for people who received the first non-member newsletter about the {habit_str} Yoga Habit class but did not open it.
+
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
 
 These readers have NO prior context about this class. They did not see the first email. DO NOT write as a reminder. DO NOT use phrases like "still time," "last call," "don't forget," "just a reminder," or "Yoga Habit is coming up." Write as if introducing the class to them fresh.
 
@@ -275,13 +572,25 @@ Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
 
-Include this exact markdown link verbatim — the renderer needs the markdown to produce a button:
-[Register Here](https://habit.tiffanywoodyoga.com)
+Write this as Tiff — short, warm, accessible, no yoga jargon. Use one specific concrete image grounded in the actual class content above (the apex pose, the physical work). Do not invent class details that aren't listed. One sentence of contemplative depth allowed, not required. Discovered, not delivered. Sign Tiff.
 
-Write this as Tiff — short, warm, accessible, no yoga jargon. Use one specific concrete image grounded in the actual class content above (the apex pose, the physical work). Do not invent class details that aren't listed. One sentence of contemplative depth allowed, not required. Discovered, not delivered. End with the link. Sign Tiff.
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   — place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button.
+
+Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
 Hard limit: 100 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, 1-2 short paragraphs, [Register Here] link, sign-off. No headers or bullets."""
+Shape: natural, not formulaic. Subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Resend openers tend to be functional and low-key ("Just sending this back around in case you missed it." is one shape she uses; she also opens with a single concrete somatic moment, e.g. "There's a moment in Camel where the thighs press forward, the legs root down..."). The references below show both. Avoid a fresh hook on a resend -- the original framing already exists. The API will reject any body that begins with `#`. No bullets.
+
+TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
+
+--- PRIOR MONTH ---
+{_REF_PRIOR_NON_OPENER}
+
+--- MOST RECENT MONTH ---
+{_REF_RECENT_NON_OPENER}"""
 
 
 def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -292,7 +601,11 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
 
     return f"""Write a brief day-before reminder email for people who registered for the {habit_str} Yoga Habit class. The class is tomorrow.
 
-This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT include a register link — they're already registered. Do NOT invite them to bring a friend.
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
+
+This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT invite them to bring a friend. Do NOT include a Register CTA button — they are already registered.
 
 Yoga Habit class details — use ONLY these. Do not invent or embellish:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
@@ -304,8 +617,15 @@ The Zoom link comes from their registration confirmation in Marvelous. Mention t
 
 Write this as Tiff — short, warm, anticipating. One concrete image grounded in the class content (the apex pose, the physical work). No teaching essay. Just "here's tomorrow." Sign Tiff.
 
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class page (they are registered, so this goes direct to the class).
+- {{CLASS_URL}}      — write inline within a sentence as part of a markdown link, e.g. `[See you tomorrow]({{CLASS_URL}})`. Substitutes to the class URL. INLINE placement is required — do NOT put the resulting markdown link on its own paragraph (that would make it a button; we want a text link).
+
 Hard limit: 80 words. Subject line included, not counted.
-Shape: subject line, 1-2 short paragraphs, sign-off. No headers or bullets."""
+Shape: subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), inline `[See you tomorrow]({{CLASS_URL}})` at the end of a sentence, sign-off. Reminder openers tend to be warm and functional -- something like "Looking forward to practicing with you tomorrow for {{CLASS_TITLE}}." The June reference below shows this shape. The API rejects any body beginning with `#`. No bullets. No Register button (this audience has already registered).
+
+REFERENCE -- Tiff's most recent actual rewrite for this audience. Match the VOICE (sentence rhythm, sentence length, anchoring in anatomy + practice, conversational first-person), NOT the specific content (theme, dates, class title) of this example:
+{_REF_RECENT_REMINDER}"""
 
 
 def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -316,15 +636,32 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
 
     return f"""Write a very brief, soft nudge for people who opened the first non-member newsletter about the {habit_str} Yoga Habit class but did not register. The class is tomorrow.
 
+{_HARD_RULES}
+
+{_VOICE_GUARDRAILS}
+
 They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently — in case they meant to register and forgot. If they decided not to come, that is also fine.
 
 Class details — use sparingly, just for context:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Title: {habit_plan.get('title', '')}
 
-Include this exact markdown link verbatim — the renderer needs the markdown to produce a button:
-[Register Here](https://habit.tiffanywoodyoga.com)
+Write this as Tiff — short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. Sign Tiff.
 
-Write this as Tiff — short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. End with the link. Sign Tiff.
+OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) at the end. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   — place on its own paragraph after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button (gentle alternative if they cannot make it this time).
+
+Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
 Hard limit: 60 words. Subject line included, not counted.
-Shape: subject line, 1 short paragraph, [Register Here] link, sign-off. No headers or bullets."""
+Shape: subject line, 1 short paragraph (using {{CLASS_TITLE}} if you reference the class title), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Gentle Nudge openers tend to be very low-key and one-paragraph -- "Just gently circling back in case [CLASS_TITLE] was something you meant to register for." and similar. The references below show this. Short. The API rejects any body beginning with `#`. No bullets.
+
+TWO REFERENCES -- Tiff's actual rewrites for this audience from the two most recent months. Note how she varies the rhetorical moves across months -- different opener shapes, different rhythms, different mixes of techniques. Match her VOICE and her VARIETY, NOT the specific content (theme, dates, class title) of either example.
+
+--- PRIOR MONTH ---
+{_REF_PRIOR_GENTLE_NUDGE}
+
+--- MOST RECENT MONTH ---
+{_REF_RECENT_GENTLE_NUDGE}"""

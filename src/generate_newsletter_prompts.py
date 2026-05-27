@@ -24,16 +24,8 @@ load_env()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from newsletter import save_prompt, prompt_path, newsletter_path
-from habit_newsletter_prompt import (
-    check_coverage,
-    assemble_lifestyle_prompt,
-    assemble_non_lifestyle_prompt,
-    assemble_non_opener_prompt,
-    assemble_reminder_prompt,
-    assemble_gentle_nudge_prompt,
-    assemble_ph1_prompt,
-    assemble_ph2_prompt,
-)
+import habit_newsletter_prompt as hnp
+from habit_newsletter_prompt import check_coverage
 from slack import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
@@ -91,6 +83,28 @@ def main():
         print(f"{today}: before 25th, skipping prompt generation")
         return
 
+    # Diff loop (Phases 1-3): archive prior month's sent campaigns, capture diffs,
+    # extract patterns, post review candidates to #review-newsletters.
+    # The month that just wrapped is today.year/today.month (we generate prompts
+    # for next_month()). By the 25th, all of prior-month's sends are complete:
+    # main on the 1st, PH1 ~+1d after Habit class (2nd Saturday), PH2 +7d.
+    from diff_loop import archive_prior_month_sent, extract_patterns_for_month, apply_diff_updates, post_review_candidates
+    prior_year, prior_month = today.year, today.month
+    archive_results = archive_prior_month_sent(year=prior_year, month=prior_month)
+    archived = sum(1 for v in archive_results.values() if v == "archived")
+    print(f"diff-loop archival ({prior_year}-{prior_month:02d}): {archived}/{len(archive_results)} archived. Detail: {archive_results}")
+    extract_patterns_for_month(prior_year, prior_month)
+    # Phase 4: auto-apply reference rotation to habit_newsletter_prompt.py
+    apply_results = apply_diff_updates(prior_year, prior_month)
+    print(f"diff-loop apply ({prior_year}-{prior_month:02d}): {apply_results}")
+    # Reload habit_newsletter_prompt module so subsequent hnp.assemble_* calls
+    # pick up the freshly-rotated reference constants.
+    import importlib
+    importlib.reload(hnp)
+    review_channel = os.getenv("SLACK_REVIEW_CHANNEL", "#review-newsletters")
+    post_review_candidates(prior_year, prior_month, slack_post_fn=lambda t: post_slack(review_channel, t))
+    print(f"diff-loop review post sent to {review_channel}")
+
     # Load overview
     overview = load_month_overview(month)
     if not overview:
@@ -112,13 +126,13 @@ def main():
         sys.exit(1)
 
     # Assemble and save prompts
-    save_prompt(year, month, "lifestyle", assemble_lifestyle_prompt(overview, plans, year, month))
-    save_prompt(year, month, "non-lifestyle", assemble_non_lifestyle_prompt(overview, plans, year, month))
-    save_prompt(year, month, "non-opener", assemble_non_opener_prompt(overview, plans, year, month))
-    save_prompt(year, month, "reminder", assemble_reminder_prompt(overview, plans, year, month))
-    save_prompt(year, month, "gentle-nudge", assemble_gentle_nudge_prompt(overview, plans, year, month))
-    save_prompt(year, month, "ph1", assemble_ph1_prompt(overview, plans, year, month))
-    save_prompt(year, month, "ph2", assemble_ph2_prompt(overview, plans, year, month))
+    save_prompt(year, month, "lifestyle", hnp.assemble_lifestyle_prompt(overview, plans, year, month))
+    save_prompt(year, month, "non-lifestyle", hnp.assemble_non_lifestyle_prompt(overview, plans, year, month))
+    save_prompt(year, month, "non-opener", hnp.assemble_non_opener_prompt(overview, plans, year, month))
+    save_prompt(year, month, "reminder", hnp.assemble_reminder_prompt(overview, plans, year, month))
+    save_prompt(year, month, "gentle-nudge", hnp.assemble_gentle_nudge_prompt(overview, plans, year, month))
+    save_prompt(year, month, "ph1", hnp.assemble_ph1_prompt(overview, plans, year, month))
+    save_prompt(year, month, "ph2", hnp.assemble_ph2_prompt(overview, plans, year, month))
 
     msg = (
         f":memo: All prompts ready for {month_label} (newsletters + follow-ups). "
