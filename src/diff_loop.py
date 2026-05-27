@@ -261,16 +261,18 @@ def apply_diff_updates(year: int, month: int) -> dict:
     source = _read_assembler_source()
     results = {}
 
-    # Sequencing guard
+    # Sequencing guard. Refuse strictly-older months; allow same-month (refresh)
+    # and newer months (full rotation).
     current_marker = _read_recent_month(source)
-    if current_marker is not None and (year, month) <= current_marker:
+    if current_marker is not None and (year, month) < current_marker:
         return {
             "_skipped": (
-                f"refusing to rotate: _REF_RECENT_* already holds "
-                f"{current_marker[0]:04d}-{current_marker[1]:02d}, which is >= "
-                f"requested {year:04d}-{month:02d}. Apply only the most-recent prior month."
+                f"refusing to apply: requested {year:04d}-{month:02d} is older than "
+                f"current RECENT {current_marker[0]:04d}-{current_marker[1]:02d}. "
+                f"Apply only the same or next month."
             )
         }
+    same_month = current_marker is not None and (year, month) == current_marker
 
     diffs_dir = NEWSLETTER_DIFFS_DIR / f"{year:04d}-{month:02d}"
     if not diffs_dir.exists():
@@ -301,19 +303,29 @@ def apply_diff_updates(year: int, month: int) -> dict:
 
         actions = []
         if old_recent is not None:
-            # Rotate: PRIOR := old RECENT
-            source, prior_changed = _replace_constant_value(source, prior_name, old_recent)
-            if prior_changed:
-                actions.append(f"{prior_name}<-old_recent")
-                any_changed = True
+            if same_month:
+                # Same-month refresh: only update RECENT (e.g. June 25 cron
+                # applies June sent, replacing the June drafts that were in
+                # RECENT). Do NOT touch PRIOR -- we want to keep the actual
+                # prior month's sent content (e.g. May) intact.
+                source, recent_changed = _replace_constant_value(source, recent_name, new_value)
+                if recent_changed:
+                    actions.append(f"{recent_name}<-refreshed_sent")
+                    any_changed = True
+                else:
+                    actions.append(f"{recent_name}_unchanged")
             else:
-                actions.append(f"{prior_name}_not_present")
-
-            # RECENT := new tiff_sent
-            source, recent_changed = _replace_constant_value(source, recent_name, new_value)
-            if recent_changed:
-                actions.append(f"{recent_name}<-new_sent")
-                any_changed = True
+                # Newer-month rotation: PRIOR := old RECENT, RECENT := new sent.
+                source, prior_changed = _replace_constant_value(source, prior_name, old_recent)
+                if prior_changed:
+                    actions.append(f"{prior_name}<-old_recent")
+                    any_changed = True
+                else:
+                    actions.append(f"{prior_name}_not_present")
+                source, recent_changed = _replace_constant_value(source, recent_name, new_value)
+                if recent_changed:
+                    actions.append(f"{recent_name}<-new_sent")
+                    any_changed = True
         else:
             # No existing RECENT; can't safely add a new constant via regex without
             # also updating the assembler to reference it. Flag for manual handling.
