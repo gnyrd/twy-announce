@@ -9,10 +9,10 @@ import sys
 import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-from dotenv import load_dotenv
+from twy_paths import load_env
 
 # Load environment variables
-load_dotenv()
+load_env()
 
 # Configuration from environment
 TWY_USERNAME = os.getenv("MARVELOUS_TWY_USERNAME")

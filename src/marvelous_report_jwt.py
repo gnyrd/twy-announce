@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
-from dotenv import load_dotenv
+from twy_paths import load_env
 
 PROJECT_ROOT = Path(__file__).parent.parent
 JWT_CACHE_FILE = PROJECT_ROOT / ".jwt_cache.json"
@@ -145,7 +145,7 @@ def refresh_report_jwt(
     cache_file: Path = JWT_CACHE_FILE,
 ) -> str:
     """Login with Playwright, open report page, extract embed JWT, and cache it."""
-    load_dotenv(PROJECT_ROOT / '.env')
+    load_env()
 
     username = os.getenv('MARVELOUS_TWY_USERNAME')
     password = os.getenv('MARVELOUS_TWY_PASSWORD')

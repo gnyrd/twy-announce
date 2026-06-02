@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 from twy_paths import load_env, classes_dir
 from twy_classplan import load_plan as _load_plan
 

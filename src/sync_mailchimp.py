@@ -582,11 +582,9 @@ def normalize_canceled_contacts(
 
 
 def main() -> None:
-    env_file = ANNOUNCE_DIR / '.env'
-    if env_file.exists():
-        from dotenv import load_dotenv
-        load_dotenv(env_file)
-        logger.info(f"Loaded environment from {env_file}")
+    from twy_paths import load_env
+    load_env()
+    logger.info("Loaded environment via twy_paths.load_env")
 
     mailchimp_key = os.getenv('MAILCHIMP_API_KEY')
     audience_id = os.getenv('MAILCHIMP_AUDIENCE_ID')

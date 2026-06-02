@@ -7,11 +7,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
+from twy_paths import load_env
 from mailchimp3 import MailChimp
 
 # Load environment variables
-load_dotenv()
+load_env()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent

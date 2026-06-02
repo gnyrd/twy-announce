@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
+from twy_paths import load_env
 import requests
 
 # Determine repo root from script location
@@ -15,7 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 
 # Load environment variables
-load_dotenv(REPO_ROOT / ".env")
+load_env()
 
 # Configuration (with env var overrides)
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
