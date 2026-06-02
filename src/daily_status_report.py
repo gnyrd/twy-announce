@@ -11,12 +11,12 @@ from typing import List, Dict, Any, Optional, Tuple
 
 import sqlite3
 import requests
-from dotenv import load_dotenv
+from twy_paths import load_env
 
 # Load environment variables
 from twy_paths import load_env, marvy_db_path
 load_env()
-load_dotenv(override=False)
+load_env()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -195,15 +195,6 @@ def calculate_totals(subscriptions: List[Dict[str, Any]]) -> Dict[str, float]:
     }
 
 
-def simplify_product_name(product: str) -> str:
-    """Simplify product names for display."""
-    if product == "The Archive":
-        return "TWY Archive"
-    if product == "The Yoga Lifestyle Membership":
-        return "The Yoga Lifestyle"
-    return product
-
-
 def format_change(current: float, previous: float) -> str:
     """Format change with sign."""
     diff = current - previous
@@ -215,22 +206,8 @@ def format_change(current: float, previous: float) -> str:
         return "0"
 
 
-def format_trend_arrow(delta: int) -> str:
-    """Return a plain trend arrow for a day-over-day change. No numeral, no bold.
-
-    Used as an inline glyph beside a current value to express direction only:
-    up arrow when the value rose since yesterday, down arrow when it fell,
-    empty string otherwise (caller omits the separator).
-    """
-    if delta > 0:
-        return "↑"
-    if delta < 0:
-        return "↓"
-    return ""
-
-
-def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> str:
-    """Format inline delta suffix for a subscriber metric."""
+def format_delta_line(current: int, week_val: Optional[int], month_val: Optional[int], year_val: Optional[int]) -> str:
+    """Return a delta line like '   𝚫 week: -4  |  month: -8', or '' if all deltas zero/missing."""
     segments: List[str] = []
     for label, val in (("week", week_val), ("month", month_val), ("year", year_val)):
         if val is None:
@@ -242,78 +219,54 @@ def format_subscriber_deltas(current: int, week_val: Optional[int], month_val: O
         segments.append(f"{label}: {change}")
     if not segments:
         return ""
-    return "    |    𝚫  " + "  ".join(segments)
+    return "   𝚫 " + "  |  ".join(segments)
+
+
+def format_product_delta_line(product: str, cycle: str, current: int,
+                              week_counts: Dict[str, Dict[str, int]],
+                              month_counts: Dict[str, Dict[str, int]],
+                              year_counts: Dict[str, Dict[str, int]]) -> str:
+    """Return a delta line for a product/cycle against historical counts, or '' if no deltas."""
+    segments: List[str] = []
+    for label, hist in (("week", week_counts), ("month", month_counts), ("year", year_counts)):
+        if product not in hist:
+            continue
+        diff = current - hist[product][cycle]
+        if diff == 0:
+            continue
+        change = f"+{diff}" if diff > 0 else str(diff)
+        segments.append(f"{label}: {change}")
+    if not segments:
+        return ""
+    return "   𝚫 " + "  |  ".join(segments)
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
     """Format subscription data into Slack message with historical comparisons."""
-    current_totals = calculate_totals(subscriptions)
-
     now = datetime.now()
     week_ago_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     month_ago_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     year_ago_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
 
-    # Load Mailchimp data
-    mc_today_snapshot = load_mailchimp_snapshot(today)
-    mc_week_snapshot = load_mailchimp_snapshot(week_ago_date)
-    mc_month_snapshot = load_mailchimp_snapshot(month_ago_date)
-    mc_year_snapshot = load_mailchimp_snapshot(year_ago_date)
+    mc_today_snap = load_mailchimp_snapshot(today)
+    mc_week_snap = load_mailchimp_snapshot(week_ago_date)
+    mc_month_snap = load_mailchimp_snapshot(month_ago_date)
+    mc_year_snap = load_mailchimp_snapshot(year_ago_date)
 
-    # Load Instagram data
-    ig_today_snapshot = load_instagram_snapshot(today)
+    ig_today_snap = load_instagram_snapshot(today)
+    ig_week_snap = load_instagram_snapshot(week_ago_date)
+    ig_month_snap = load_instagram_snapshot(month_ago_date)
+    ig_year_snap = load_instagram_snapshot(year_ago_date)
 
-    # Load YouTube data
-    yt_today_snapshot = load_youtube_snapshot(today)
-    yt_week_snapshot = load_youtube_snapshot(week_ago_date)
-    yt_month_snapshot = load_youtube_snapshot(month_ago_date)
-    yt_year_snapshot = load_youtube_snapshot(year_ago_date)
+    yt_today_snap = load_youtube_snapshot(today)
+    yt_week_snap = load_youtube_snapshot(week_ago_date)
+    yt_month_snap = load_youtube_snapshot(month_ago_date)
+    yt_year_snap = load_youtube_snapshot(year_ago_date)
 
-    # HM historical product counts from DB
-    day_counts = get_product_counts_ago(1)
     week_counts = get_product_counts_ago(7)
     month_counts = get_product_counts_ago(30)
     year_counts = get_product_counts_ago(365)
 
-    lines: list = []
-
-    # Followers section
-    if mc_today_snapshot or ig_today_snapshot or yt_today_snapshot:
-        lines.append("Followers:")
-
-        if mc_today_snapshot:
-            subscriber_count = mc_today_snapshot["subscriber_count"]
-            arrow = format_trend_arrow(changes.get("mailchimp:subscriber_count", 0))
-            suffix = f" {arrow}" if arrow else ""
-            week_val = mc_week_snapshot["subscriber_count"] if mc_week_snapshot else None
-            month_val = mc_month_snapshot["subscriber_count"] if mc_month_snapshot else None
-            year_val = mc_year_snapshot["subscriber_count"] if mc_year_snapshot else None
-            lines.append(f" Email: {subscriber_count:,}{suffix}" + format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
-
-        if ig_today_snapshot:
-            ig_week_snapshot = load_instagram_snapshot(week_ago_date)
-            ig_month_snapshot = load_instagram_snapshot(month_ago_date)
-            ig_year_snapshot = load_instagram_snapshot(year_ago_date)
-            follower_count = ig_today_snapshot["follower_count"]
-            arrow = format_trend_arrow(changes.get("instagram:follower_count", 0))
-            suffix = f" {arrow}" if arrow else ""
-            week_val = ig_week_snapshot["follower_count"] if ig_week_snapshot else None
-            month_val = ig_month_snapshot["follower_count"] if ig_month_snapshot else None
-            year_val = ig_year_snapshot["follower_count"] if ig_year_snapshot else None
-            lines.append(f" Instagram: {follower_count:,}{suffix}" + format_subscriber_deltas(follower_count, week_val, month_val, year_val))
-
-        if yt_today_snapshot:
-            subscriber_count = yt_today_snapshot["subscriber_count"]
-            arrow = format_trend_arrow(changes.get("youtube:subscriber_count", 0))
-            suffix = f" {arrow}" if arrow else ""
-            week_val = yt_week_snapshot["subscriber_count"] if yt_week_snapshot else None
-            month_val = yt_month_snapshot["subscriber_count"] if yt_month_snapshot else None
-            year_val = yt_year_snapshot["subscriber_count"] if yt_year_snapshot else None
-            lines.append(f" YouTube: {subscriber_count:,}{suffix}" + format_subscriber_deltas(subscriber_count, week_val, month_val, year_val))
-
-        lines.append("")
-
-    # Group current subscriptions by product and billing cycle
     products: Dict[str, Dict[str, int]] = {}
     for row in subscriptions:
         product = row["Product Name"]
@@ -325,64 +278,64 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         else:
             products[product]["Annual"] += row["# of Active Subscriptions"]
 
-    # Explicit display order: TYL first, Archive second, anything else alpha.
-    preferred_order = ["The Yoga Lifestyle Membership", "The Archive"]
-    ordered = [p for p in preferred_order if p in products] + \
-              sorted(k for k in products if k not in preferred_order)
+    groups: List[List[str]] = []
 
-    for product in ordered:
-        monthly = products[product]["Monthly"]
-        annual = products[product]["Annual"]
-        display_name = simplify_product_name(product)
+    # Followers (Email / Instagram / YouTube)
+    followers: List[str] = []
+    for label, today_snap, week_snap, month_snap, year_snap, key in (
+        ("Email", mc_today_snap, mc_week_snap, mc_month_snap, mc_year_snap, "subscriber_count"),
+        ("Instagram", ig_today_snap, ig_week_snap, ig_month_snap, ig_year_snap, "follower_count"),
+        ("YouTube", yt_today_snap, yt_week_snap, yt_month_snap, yt_year_snap, "subscriber_count"),
+    ):
+        if not today_snap:
+            continue
+        current = today_snap[key]
+        followers.append(f"*{label}*: {current:,}")
+        week_val = week_snap[key] if week_snap else None
+        month_val = month_snap[key] if month_snap else None
+        year_val = year_snap[key] if year_snap else None
+        delta = format_delta_line(current, week_val, month_val, year_val)
+        if delta:
+            followers.append(delta)
+    if followers:
+        groups.append(followers)
 
-        # Day-over-day trend arrows beside the current Monthly / Yearly values
-        day_monthly = day_counts.get(product, {}).get("Monthly", 0)
-        day_annual = day_counts.get(product, {}).get("Annual", 0)
-        monthly_arrow = format_trend_arrow(monthly - day_monthly)
-        annual_arrow = format_trend_arrow(annual - day_annual)
-        monthly_suffix = f" {monthly_arrow}" if monthly_arrow else ""
-        annual_suffix = f" {annual_arrow}" if annual_arrow else ""
-
-        lines.append(f"{display_name}:")
-
-        monthly_segs: List[str] = []
-        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product not in hist:
+    # TYL (The Yoga Lifestyle Membership)
+    tyl_product = "The Yoga Lifestyle Membership"
+    tyl_lines: List[str] = []
+    if tyl_product in products:
+        for cycle, display_cycle in (("Monthly", "Month"), ("Annual", "Annual")):
+            count = products[tyl_product][cycle]
+            if count == 0:
                 continue
-            diff = monthly - hist[product]["Monthly"]
-            if diff == 0:
-                continue
-            change = f"+{diff}" if diff > 0 else str(diff)
-            monthly_segs.append(f"{label}: {change}")
-        monthly_delta = "    |    𝚫  " + "  ".join(monthly_segs) if monthly_segs else ""
-        lines.append(f"  Monthly: {monthly}{monthly_suffix}" + monthly_delta)
+            tyl_lines.append(f"*TYL {display_cycle}*: {count}")
+            delta = format_product_delta_line(tyl_product, cycle, count, week_counts, month_counts, year_counts)
+            if delta:
+                tyl_lines.append(delta)
+    if tyl_lines:
+        groups.append(tyl_lines)
 
-        annual_segs: List[str] = []
-        for label, hist in [("week", week_counts), ("month", month_counts), ("year", year_counts)]:
-            if product not in hist:
-                continue
-            diff = annual - hist[product]["Annual"]
-            if diff == 0:
-                continue
-            change = f"+{diff}" if diff > 0 else str(diff)
-            annual_segs.append(f"{label}: {change}")
-        annual_delta = "    |    𝚫  " + "  ".join(annual_segs) if annual_segs else ""
-        lines.append(f"  Yearly: {annual}{annual_suffix}" + annual_delta)
+    # TWA (The Archive, yearly only)
+    twa_product = "The Archive"
+    twa_lines: List[str] = []
+    if twa_product in products:
+        count = products[twa_product]["Annual"]
+        if count > 0:
+            twa_lines.append(f"*TWA Yearly*: {count}")
+            delta = format_product_delta_line(twa_product, "Annual", count, week_counts, month_counts, year_counts)
+            if delta:
+                twa_lines.append(delta)
+    if twa_lines:
+        groups.append(twa_lines)
 
-        lines.append("")
-
-    # Next Habit class
+    # Habit
     habit = get_next_habit_event()
     if habit:
         start = datetime.fromisoformat(habit["start"].replace("Z", "+00:00"))
         date_str = f"{start.strftime('%B')} {start.day}"
-        lines.append(f"Habit: {date_str} - {habit['registrations']} registered")
+        groups.append([f"*Habit*: {date_str} - {habit['registrations']} registered"])
 
-    # Trim trailing blank line
-    while lines and lines[-1] == "":
-        lines.pop()
-
-    return "\n".join(lines)
+    return "\n\n".join("\n".join(g) for g in groups)
 
 
 def post_to_slack(message: str):
