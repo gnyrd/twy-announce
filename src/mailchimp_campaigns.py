@@ -157,18 +157,16 @@ def create_or_update_draft(
     prev_send_time = None
 
     if existing:
+        # Tiff's edits in MC are the source of truth. Never re-PATCH settings
+        # or re-PUT body from the .md once a draft exists — unschedule only,
+        # so the caller can reschedule (idempotent). To force a content refresh
+        # from the .md, delete the campaign in MC first.
         campaign_id = existing["id"]
         web_id      = existing.get("web_id", "")
         if existing.get("status") == "schedule":
             prev_send_time = existing.get("send_time")
             requests.post(_mc_url(f"/campaigns/{campaign_id}/actions/unschedule"),
                           auth=_mc_auth(), timeout=15)
-        requests.patch(
-            _mc_url(f"/campaigns/{campaign_id}"),
-            auth=_mc_auth(),
-            json={"recipients": recipients, "settings": settings},
-            timeout=15,
-        )
         action = "updated"
     else:
         resp = requests.post(
@@ -187,13 +185,15 @@ def create_or_update_draft(
         web_id      = campaign.get("web_id", "")
         action      = "created"
 
-    resp2 = requests.put(
-        _mc_url(f"/campaigns/{campaign_id}/content"),
-        auth=_mc_auth(),
-        json={"template": {"id": template_id, "sections": {"main_content": body_html}}},
-        timeout=15,
-    )
-    resp2.raise_for_status()
+        # Initial content push only on creation. Never overwrite existing
+        # campaigns to preserve Tiff's edits.
+        resp2 = requests.put(
+            _mc_url(f"/campaigns/{campaign_id}/content"),
+            auth=_mc_auth(),
+            json={"template": {"id": template_id, "sections": {"main_content": body_html}}},
+            timeout=15,
+        )
+        resp2.raise_for_status()
 
     rescheduled = False
     if prev_send_time:
