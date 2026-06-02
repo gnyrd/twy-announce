@@ -154,7 +154,7 @@ def _description_for(plan, instructors, register_url=None):
     return "\n\n".join(parts)
 
 
-def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None):
+def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None, summary_prefix=None):
     """Build VCALENDAR. Optional class_type_filter limits to plans whose
     plan.class_type matches exactly (e.g. "Habit" for the Habit-only feed).
     """
@@ -194,13 +194,20 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None):
             end_dt = datetime.fromisoformat(end_z.replace("Z", "+00:00")) if end_z else start_dt
             status = "CANCELLED" if is_cancelled else "CONFIRMED"
             summary = event_name
+            # If the calendar is filtered to a single class_type and the HM event_name redundantly leads with it, strip it
+            if class_type_filter and summary.startswith(f"{class_type_filter}: "):
+                summary = summary[len(class_type_filter) + 2:]
             uid = f"heymarvelous-event-{event_id}@{UID_HOST}"
         else:
             start_dt, end_dt = _plan_to_utc(date_str, plan)
             status = "CONFIRMED"
             class_type = (plan.get("class_type") or "").strip()
             title = plan.get("title") or "Class"
-            summary = f"{class_type}: {title}" if class_type else title
+            # If the calendar is filtered to a single class_type, that class_type is already conveyed by the calendar/summary_prefix; do not repeat it per event
+            if class_type and not class_type_filter:
+                summary = f"{class_type}: {title}"
+            else:
+                summary = title
             instructors = "Tiffany Wood"
             synced_at = None
             uid = f"twy-plan-{plan['id']}@{UID_HOST}"
@@ -217,7 +224,8 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None):
         lines.append(f"DTSTAMP:{now_stamp}")
         lines.append(f"DTSTART:{start_dt.strftime('%Y%m%dT%H%M%SZ')}")
         lines.append(f"DTEND:{end_dt.strftime('%Y%m%dT%H%M%SZ')}")
-        lines.append(f"SUMMARY:{_esc(summary)}")
+        prefixed_summary = f"{summary_prefix}{summary}" if summary_prefix else summary
+        lines.append(f"SUMMARY:{_esc(prefixed_summary)}")
         if description:
             lines.append(f"DESCRIPTION:{_esc(description)}")
         if register_url:
@@ -300,7 +308,7 @@ def _render_subscribe(page_title, h1, lead, note, webcal_url, https_url):
 @app.route("/classes.ics")
 def classes_ics():
     return Response(
-        _build_ics(),
+        _build_ics(summary_prefix="TWY: "),
         mimetype="text/calendar",
         headers={
             "Cache-Control": "public, max-age=3600",
@@ -331,6 +339,7 @@ def habit_ics():
             class_type_filter="Habit",
             cal_name="Tiffany Wood Yoga - Yoga Habit",
             cal_desc="Upcoming free Yoga Habit classes with Tiffany Wood. Open to everyone.",
+            summary_prefix="Yoga Habit: ",
         ),
         mimetype="text/calendar",
         headers={
