@@ -227,12 +227,14 @@ def main():
         ("ph2", "Post-Class 2", ph2_send),
     ]:
         subject, body = get_followup_copy(year, month, audience)
-        body_with_link = body.replace("[link]", coupon_url)
+        # NOTE: body on disk already has [link] substituted at Tweee-submit time
+        # by classes/dashboard/api.py:_inject_coupon. coupon_url is kept for the
+        # Slack post below (it references the coupon code).
         campaign_title = f"{year:04d}-{month:02d} — Yoga Habit — {label}"
 
         result = create_or_update_draft(
             subject=subject,
-            body_md=body_with_link,
+            body_md=body,
             list_id=MAILCHIMP_LIST_ID,
             segment_id=segment_id,
             campaign_title=campaign_title,
