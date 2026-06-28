@@ -6,22 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from twy_paths import newsletters_dir
+from twy_paths import newsletter_path, newsletter_prompt_path as prompt_path
 
-NEWSLETTERS_DIR = newsletters_dir()
 MOUNTAIN = ZoneInfo("America/Denver")
-
-
-def prompt_path(year: int, month: int, audience: str) -> Path:
-    """Path to prompt file. Audience is normalized to underscores (filenames never use hyphens)."""
-    a = audience.replace('-', '_')
-    return NEWSLETTERS_DIR / f"{year:04d}-{month:02d}" / f"prompt_{a}.txt"
-
-
-def newsletter_path(year: int, month: int, audience: str) -> Path:
-    """Path to authored newsletter file. Audience is normalized to underscores (filenames never use hyphens)."""
-    a = audience.replace('-', '_')
-    return NEWSLETTERS_DIR / f"{year:04d}-{month:02d}" / f"{a}.md"
 
 
 def load_prompt(year: int, month: int, audience: str) -> str | None:
