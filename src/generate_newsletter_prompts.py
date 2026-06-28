@@ -60,6 +60,13 @@ def main():
     year, month = next_month(today.year, today.month)
     month_label = date(year, month, 1).strftime("%B %Y")
 
+    # One-off: July 2026 has no Habit class (cancelled), so only the two monthly prompts
+    # apply and they are hand-built. Skip auto-generation for July 2026 so it does not
+    # red-X on the missing Habit plan or expect the follow-up prompts. Remove after 2026-07.
+    if (year, month) == (2026, 7):
+        print(f"{today}: July 2026 handled manually (no Habit class) -- skipping auto prompt generation.")
+        return
+
     # If newsletters already exist for next month, nothing to do
     AUDIENCES = ("lifestyle", "non-lifestyle", "non-opener", "reminder", "gentle-nudge", "ph1", "ph2")
     nl_paths = {a: newsletter_path(year, month, a) for a in AUDIENCES}
