@@ -19,6 +19,12 @@ from flask import Flask, Response
 from twy_classplan.plans import load_plans_for_month
 from twy_paths import marvy_db_path
 
+# .ics display labels (mirror of the dashboard CLASS_TYPE_DISPLAY)
+_CLASS_TYPE_DISPLAY = {
+    "Breath": "Breath Awareness",
+    "Pranayama": "Breath Awareness",
+}
+
 app = Flask(__name__)
 
 TZ_MT = ZoneInfo("America/Denver")
@@ -205,7 +211,7 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None, summary_pre
             title = plan.get("title") or "Class"
             # If the calendar is filtered to a single class_type, that class_type is already conveyed by the calendar/summary_prefix; do not repeat it per event
             if class_type and not class_type_filter:
-                summary = f"{class_type}: {title}"
+                summary = f"{_CLASS_TYPE_DISPLAY.get(class_type, class_type)}: {title}"
             else:
                 summary = title
             instructors = "Tiffany Wood"
