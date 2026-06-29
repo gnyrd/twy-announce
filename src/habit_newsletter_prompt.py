@@ -10,9 +10,14 @@ import requests
 
 CLASSES_API = "http://localhost:5003"
 
+_PERSPECTIVE = """PERSPECTIVE (governs everything below):
+Never write from the curriculum. Always write from the student's lived experience. The curriculum informs the email but should rarely be described directly. Introduce the month's philosophy through relatable life experiences before connecting it to the practices students will explore in class.
+
+Answer "why does this matter in my life?", never "what is Tiffany teaching?" The overview, teaching notes, UPAs, apex pose, and teaching lens are TEACHER'S NOTES: they tell you what the month is about so you can write from the student's lived experience. Never quote, transcribe, or describe them as curriculum in the body."""
+
 _HARD_RULES = """RULES (mandatory, no exceptions). Read first, follow without exception:
 1. Output ONLY a subject line and a body. NO markdown headers anywhere -- no `#`, no `##`, no decorative title line above or inside the body. The body is flowing prose, not a document with sections. The submission API rejects any body that begins with `#`.
-2. Use the Theme string below EXACTLY as written. Do NOT paraphrase it, layer an interpretive umbrella over it, invent a parallel title, or substitute a different framing. The Theme provided IS the canonical theme. If you feel an urge to write a more poetic umbrella term above the body, do not.
+2. The Theme title below is the canonical theme. Use it EXACTLY in the SUBJECT line. Do NOT invent a different theme name, layer a poetic umbrella over it, or substitute a parallel framing. In the body the theme is the silent throughline, not a stated heading and not a described topic.
 3. Do NOT introduce outside content -- no CHANI astrology references, no invented season names, no umbrella themes from external sources. The astrology disclaimer (where present below) is the only authorization to mention astrology, and only as a felt quality with no planet names, dates, or events.
 
 These rules apply to ALL output. The submission API will reject violations of rule 1 and you will be asked to resubmit."""
@@ -21,10 +26,11 @@ _VOICE_GUARDRAILS = """VOICE NOTES (guidance, not rigid rules):
 
 The reference exemplars at the bottom of this prompt are the strongest signal of Tiff's voice. When this guidance feels in tension with the references, follow the references. The point of these notes is to flag Tweee's specific defaults that Tiff has named; the point of the references is to show the breadth of her actual voice.
 
-Three Tweee defaults Tiff has called out (try to avoid these specific patterns):
+Four Tweee defaults Tiff has called out (try to avoid these specific patterns):
 - Performance tropes she said don't sound like her: "tired of performing", "tired of tightening", "tired of waiting to feel ready", "taking up space" (used as a contrast payoff). Her words: "I'm not sure I actually speak this way."
 - Rhetorical-question openers in the "What if X?" / "Have you ever Y?" hook-style shape. Tiff doesn't open this way. Her words: "structurally clickbait even though the intention was thoughtful."
 - Generic somatic-marketing language without anatomical specificity: "the body realizes it doesn't have to force anything", "your body finally trusts itself", "let yourself bloom". When you write a sentence about "the body" abstractly without naming what's actually happening (which body region, which action, which UPA), it tends to land as generic yoga-marketing. Her words: "I'm so tired of this message I could scream."
+- Curriculum / teacher-training language lifted from the lesson plan: naming UPAs, "loops", "Muscular and Organic Energy", apex poses, or Sanskrit principles as the email's subject matter (e.g. "Teach the loops as living relationships", "Every relationship is an expression of Spanda"). Wonderful inside a class, wrong in a newsletter. The teaching notes inform the email. Their vocabulary never appears in it. Her words: "It sounds like teacher training... they want to know: why should I be excited to come to class this month?"
 
 Patterns Tiff uses (a sampler, not a checklist -- she draws from these and others, varies them across emails and across months):
 
@@ -47,6 +53,8 @@ Patterns Tiff uses (a sampler, not a checklist -- she draws from these and other
 The point: VARIETY. Do not lean on any single technique. Do not repeat the same move within an email (e.g. two negation ladders in one body = too much). If a technique is starting to feel like the structural backbone of the email, vary it.
 
 CONTRAST PAIRS specifically ("Not because X, but because Y" / "X instead of Y") -- MINIMIZE. Tiff uses these rarely and tightly. Her June 2026 entire output contained one full "Not because X but because Y" contrast pair (in PH1: "Not because we need to become better versions of ourselves. But because we forget.") and one four-word qualifier ("the kind that feels nourishing instead of forced" in the reminder). Default: do NOT use a contrast pair. If one is genuinely needed: both sides short, grounded in lived specificity, never as the opener, never more than one per email.
+
+LOGISTICS AND ANNOUNCEMENTS: weave any practical note (a class pause, a schedule change, a new offering) into the conversation in Tiff's voice. Never drop it as a bare customer-service line. "There's no free Yoga Habit class this month" reads like a service desk. "I'm taking a little pause from Yoga Habit in July, and we'll be back together in August" is Tiff. A genuinely exciting new offering earns a warm featured paragraph that makes people want to come, not a tacked-on mention.
 
 PREFERRED voice:
 - Direct, declarative openers. Audience-specific positive opener patterns are baked into each assembler's Shape line. The REFERENCE block at the bottom of this prompt is the most recent example of Tiff's voice for this audience -- match the VOICE, not the specific content. Different month, different theme, same shape.
@@ -202,17 +210,22 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
     return f"""Write a member newsletter for Tiffany Wood Yoga.
 
+{_PERSPECTIVE}
+
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
 
 Month: {habit_date.strftime('%B %Y')}
-Theme: {overview.get('title', '')} -- {overview.get('teaching_notes', '')}
-Physical arc: {physical_arc}
-Apex pose: {apex_pose}
-UPAs: {upas}
-Member affirmation: "{affirmation}"
-Teaching lens: {teaching_lens}
+Theme title (SUBJECT line only, silent throughline in the body): {overview.get('title', '')}
+
+TEACHER'S NOTES (write FROM these, never quote or describe them in the body):
+- What the month is about: {overview.get('teaching_notes', '')}
+- Physical arc: {physical_arc}
+- Apex pose: {apex_pose}
+- UPAs: {upas}
+- Member affirmation: "{affirmation}"
+- Teaching lens: {teaching_lens}
 
 Tiff is attuned to astrology but does not present herself as a celestially-guided teacher. If astrological energy reinforces the month's theme, reference it as a felt quality only -- no planet names, no specific dates, no events. Example: "there's a natural moment of clarity mid-month." One brief mention max, or none if it doesn't serve the theme.
 
@@ -229,12 +242,14 @@ Props: {habit_plan.get('props', '')}
 
 Write this as Tiff — her voice, her vernacular, her storytelling. Warm, specific, a little irreverent. Weave the practice into one lived moment — how it meets the day, the body, the line at the grocery store, a hard conversation. Show the depth through experience, don't lecture about it. Non-dual undertone is welcomed; philosophy essay is not. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
 
+Arc (the shape Tiff's best lifestyle emails follow): open from a moment of ordinary life the reader recognizes, name the recognition, offer a short personal reflection or observation, only THEN connect it to the practice and the month, and close with the invitation. Life, then recognition, then story, then yoga, then invitation. Lead from life. The yoga arrives once they already feel why it matters.
+
 OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class registration page.
 - {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
 
 Hard limit: 300 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body); the canonical Theme provided in this prompt is what should appear in the body. No bullets except for event details.
+Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body). The theme name belongs in the subject line, not as a line in the body. No bullets except for event details.
 
 {recent_refs}"""
 
@@ -248,11 +263,15 @@ def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month:
 
     return f"""Write an open-door newsletter for people who aren't Tiffany Wood Yoga members.
 
+{_PERSPECTIVE}
+
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
 
-Month theme: {overview.get('title', '')} -- {overview.get('teaching_notes', '')}
+Theme title (SUBJECT line only, silent throughline in the body): {overview.get('title', '')}
+
+TEACHER'S NOTES (write FROM these, never quote or describe them in the body): {overview.get('teaching_notes', '')}
 
 Yoga Habit class -- this is what you're inviting them to. Use ONLY these details. Do not invent or embellish:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
@@ -263,7 +282,7 @@ Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
 
-Write this as Tiff — warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. You can gesture at the deeper why ONCE, briefly — a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
+Write this as Tiff — warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. Even in this short form, open from something they recognize in their own life before you name the class. Life, then recognition, then invitation. You can gesture at the deeper why ONCE, briefly — a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
 
 OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
@@ -273,7 +292,7 @@ OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
 Hard limit: 175 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. Canonical Theme from this prompt is what appears in the body. No bullets.
+Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. The theme name belongs in the subject line, not as a line in the body. No bullets.
 
 {recent_refs}"""
 
@@ -349,6 +368,8 @@ def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 
     return f"""Write a follow-up email to people who attended the Yoga Habit free class on {habit_str}.
 
+{_PERSPECTIVE}
+
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
@@ -388,6 +409,8 @@ def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> s
     recent_refs = _format_recent_references("ph2")
 
     return f"""Write a second follow-up email for people who attended the Yoga Habit free class on {habit_str}.
+
+{_PERSPECTIVE}
 
 {_HARD_RULES}
 
@@ -429,6 +452,8 @@ def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: in
 
     return f"""Write a brief outreach email for people who received the first non-member newsletter about the {habit_str} Yoga Habit class but did not open it.
 
+{_PERSPECTIVE}
+
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
@@ -468,6 +493,8 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
 
     return f"""Write a brief day-before reminder email for people who registered for the {habit_str} Yoga Habit class. The class is tomorrow.
 
+{_PERSPECTIVE}
+
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
@@ -503,6 +530,8 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
     recent_refs = _format_recent_references("gentle-nudge")
 
     return f"""Write a very brief, soft nudge for people who opened the first non-member newsletter about the {habit_str} Yoga Habit class but did not register. The class is tomorrow.
+
+{_PERSPECTIVE}
 
 {_HARD_RULES}
 
