@@ -20,6 +20,8 @@ _HARD_RULES = """RULES (mandatory, no exceptions). Read first, follow without ex
 2. The Theme title below is the canonical theme. Use it EXACTLY in the SUBJECT line. Do NOT invent a different theme name, layer a poetic umbrella over it, or substitute a parallel framing. In the body the theme is the silent throughline, not a stated heading and not a described topic.
 3. Do NOT introduce outside content -- no CHANI astrology references, no invented season names, no umbrella themes from external sources. The astrology disclaimer (where present below) is the only authorization to mention astrology, and only as a felt quality with no planet names, dates, or events.
 
+4. No em-dashes, no en-dashes, and no semicolons anywhere in your output, in the subject or the body. They are banned from TWY copy, even when the reference exemplars below use them. Replace each with a period and a new sentence, a comma, parentheses, or a reworded phrase. A plain hyphen joining words is fine. The long em-dash and medium en-dash characters and the semicolon are not.
+
 These rules apply to ALL output. The submission API will reject violations of rule 1 and you will be asked to resubmit."""
 
 _VOICE_GUARDRAILS = """VOICE NOTES (guidance, not rigid rules):
