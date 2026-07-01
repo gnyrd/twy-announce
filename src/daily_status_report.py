@@ -154,6 +154,57 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+ZERNIO_BASE_URL = os.getenv("ZERNIO_BASE_URL", "https://zernio.com/api/v1").rstrip("/")
+
+
+def fetch_instagram_follower_count() -> Optional[int]:
+    """Fetch current Instagram follower count from Zernio.
+
+    Zernio holds an official Instagram Graph API connection (OAuth,
+    Business account), so this can run from Hetzner directly -- unlike
+    the old instaloader-based fetch, which Instagram blocks from
+    datacenter IPs and had to run on the Mac mini + scp over Tailscale.
+    """
+    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
+    if not api_key:
+        print("Warning: ZERNIO_API_KEY not set, skipping Instagram snapshot")
+        return None
+    try:
+        resp = requests.get(
+            f"{ZERNIO_BASE_URL}/accounts",
+            params={"platform": "instagram"},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        accounts = resp.json().get("accounts", [])
+        if not accounts:
+            print("Warning: Zernio returned no Instagram accounts")
+            return None
+        return accounts[0]["metadata"]["profileData"]["followersCount"]
+    except Exception as e:
+        print(f"Warning: Could not fetch Instagram follower count from Zernio: {e}")
+        return None
+
+
+def ensure_instagram_snapshot(date: str) -> None:
+    """Write today's Instagram snapshot from Zernio if it doesn't already exist."""
+    filepath = INSTAGRAM_HISTORY_DIR / f"{date}.json"
+    if filepath.exists():
+        return
+    follower_count = fetch_instagram_follower_count()
+    if follower_count is None:
+        return
+    INSTAGRAM_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w") as f:
+        json.dump({
+            "date": date,
+            "timestamp": datetime.now().isoformat(),
+            "follower_count": follower_count,
+        }, f, indent=2)
+    print(f"✓ Wrote Instagram snapshot for {date}: {follower_count} followers (via Zernio)")
+
+
 def extract_subscriber_counts(
     mailchimp: Optional[Dict[str, Any]],
     instagram: Optional[Dict[str, Any]],
@@ -381,6 +432,8 @@ def main(dry_run: bool = False):
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     try:
+        ensure_instagram_snapshot(today)
+
         subscriptions = get_marvelous_data()
 
         # Load today's subscriber snapshots (email/social only)
