@@ -20,6 +20,7 @@ from twy_paths import load_env
 load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
+from mailchimp_campaigns import monthly_campaign_title
 from slack import post_slack
 
 MAILCHIMP_API_KEY    = os.environ["MAILCHIMP_API_KEY"]
@@ -57,7 +58,7 @@ def find_draft(year: int, month: int, audience_label: str) -> dict | None:
     None if no campaign with that title exists in any of: save / sending / sent /
     schedule. Read-only — never mutates.
     """
-    title = f"{year:04d}-{month:02d} — {audience_label} — Yoga Habit"
+    title = monthly_campaign_title(year, month, audience_label)
     for status in ("save", "sending", "sent", "schedule"):
         offset = 0
         while True:

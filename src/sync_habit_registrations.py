@@ -55,8 +55,15 @@ def _email_hash(email):
 
 
 def upcoming_habit_events(today):
-    """Find Habit events scheduled within REGISTRATION_WINDOW_DAYS."""
+    """Find Habit events scheduled within REGISTRATION_WINDOW_DAYS.
+
+    Returns (events, api_failures). events is a list of (date, event_id).
+    api_failures lists the months whose classes-API fetch failed (connection
+    error or non-2xx): a clean empty plan list is a CONFIRMED no-event month,
+    a failed fetch is not, and the caller must fail loud on it (audit F09).
+    """
     out = []
+    api_failures = []
     for offset in range(2):  # this month and next
         y = today.year
         m = today.month + offset
@@ -71,6 +78,7 @@ def upcoming_habit_events(today):
                 timeout=10,
             )
             if not r.ok:
+                api_failures.append(f"{y:04d}-{m:02d}: HTTP {r.status_code}")
                 continue
             for plan in r.json():
                 if plan.get("class_type") != "Habit":
@@ -87,7 +95,8 @@ def upcoming_habit_events(today):
                     out.append((plan_date, event_id))
         except requests.RequestException as e:
             log.warning("classes API unreachable for %s-%02d: %s", y, m, e)
-    return out
+            api_failures.append(f"{y:04d}-{m:02d}: {e}")
+    return out, api_failures
 
 
 def get_registrant_emails(client, event_id):
@@ -179,8 +188,15 @@ def sync_event(client, event_date, event_id):
 
 def main():
     today = datetime.now().date()
-    events = upcoming_habit_events(today)
+    events, api_failures = upcoming_habit_events(today)
     if not events:
+        if api_failures:
+            log.error(
+                "ABORT: could not reach the classes API (%s); cannot confirm there are "
+                "no upcoming Habit events, exiting 1 so the run wrapper alerts",
+                "; ".join(api_failures),
+            )
+            sys.exit(1)
         log.info("no upcoming Habit events within %d days", REGISTRATION_WINDOW_DAYS)
         return
     client = Client(auth_token=get_token())
@@ -189,6 +205,13 @@ def main():
             sync_event(client, event_date, event_id)
         except Exception as e:
             log.error("sync failed for event %s: %s", event_id, e)
+    if api_failures:
+        log.error(
+            "PARTIAL: classes API fetch failed for %s; synced the %d event(s) that were "
+            "visible, exiting 1 so the run wrapper alerts",
+            "; ".join(api_failures), len(events),
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -23,8 +23,12 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(__file__))
 from newsletter import newsletter_path
-from mailchimp_campaigns import find_campaign_by_title, _mc_url, _mc_auth
+from mailchimp_campaigns import (
+    find_campaign_by_title, followup_campaign_title, monthly_campaign_title,
+    _mc_url, _mc_auth,
+)
 from twy_paths import newsletters_dir
+from twy_platform import locked_write
 
 MOUNTAIN = ZoneInfo("America/Denver")
 
@@ -50,9 +54,9 @@ AUDIENCE_TITLE_MAP = {
 def _campaign_title(year: int, month: int, audience: str) -> str:
     label, position = AUDIENCE_TITLE_MAP[audience]
     if position == "prefix":
-        return f"{year:04d}-{month:02d} — {label} — Yoga Habit"
+        return monthly_campaign_title(year, month, label)
     else:
-        return f"{year:04d}-{month:02d} — Yoga Habit — {label}"
+        return followup_campaign_title(year, month, label)
 
 
 def _strip_mc_tokens(html: str) -> str:
@@ -521,8 +525,7 @@ def archive_prior_month_sent(year: int, month: int) -> dict:
         )
 
         # Phase 1: overwrite .md with Tiff's sent version
-        nl_path.parent.mkdir(parents=True, exist_ok=True)
-        nl_path.write_text(f"# {tiff_subject}\n\n{tiff_body}\n")
+        locked_write(nl_path, f"# {tiff_subject}\n\n{tiff_body}\n")
 
         results[audience] = "archived"
 
@@ -571,8 +574,7 @@ def archive_with_explicit_titles(year: int, month: int, titles: dict) -> dict:
             tiff_subject, tiff_body,
         )
 
-        nl_path.parent.mkdir(parents=True, exist_ok=True)
-        nl_path.write_text(f"# {tiff_subject}\n\n{tiff_body}\n")
+        locked_write(nl_path, f"# {tiff_subject}\n\n{tiff_body}\n")
 
         results[audience] = "archived"
 

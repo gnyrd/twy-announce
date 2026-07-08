@@ -25,7 +25,7 @@ load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
 from newsletter import newsletter_path
-from mailchimp_campaigns import create_or_update_draft
+from mailchimp_campaigns import create_or_update_draft, followup_campaign_title
 from slack import post_slack
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -63,16 +63,29 @@ def marvy_client():
     return Client(auth_token=resp.json()["key"])
 
 
+class ClassesApiUnavailable(Exception):
+    """Raised when the classes API cannot confirm whether a Habit class runs today."""
+
+
 def is_habit_class_today(today: date) -> bool:
-    """Check the classes API for a Habit class plan today."""
+    """Check the classes API for a Habit class plan today.
+
+    True/False are CONFIRMED answers (404 = no plan exists for today).
+    A connection failure or unexpected HTTP status raises ClassesApiUnavailable
+    so the caller fails loud instead of treating an API outage as "no class
+    today" (audit F09).
+    """
+    url = f"{CLASSES_API}/api/plans/{today.isoformat()}"
     try:
-        resp = requests.get(f"{CLASSES_API}/api/plans/{today.isoformat()}", timeout=10)
+        resp = requests.get(url, timeout=10)
         if resp.ok:
             plan = resp.json()
             return plan.get("class_type") == "Habit"
     except requests.RequestException as e:
-        log.error("Failed to check classes API: %s", e)
-    return False
+        raise ClassesApiUnavailable(f"classes API unreachable at {url}: {e}") from e
+    if resp.status_code == 404:
+        return False  # confirmed: no plan for today
+    raise ClassesApiUnavailable(f"classes API returned HTTP {resp.status_code} for {url}")
 
 
 def find_existing_campaign(title: str) -> dict | None:
@@ -197,13 +210,19 @@ def main():
     year, month = today.year, today.month
     month_label = today.strftime("%B %Y")
 
-    if not is_habit_class_today(today):
+    try:
+        habit_today = is_habit_class_today(today)
+    except ClassesApiUnavailable as e:
+        log.error("ABORT: could not reach the classes API to confirm today's class (%s); exiting 1 so the run wrapper alerts", e)
+        sys.exit(1)
+
+    if not habit_today:
         log.info("%s: no Habit class today, nothing to do", today)
         return
 
     # Short-circuit: if ph1 campaign for this month already exists AND is scheduled or sent,
     # assume the workflow has already run successfully today.
-    existing_ph1_title = f"{year:04d}-{month:02d} — Yoga Habit — Post-Class 1"
+    existing_ph1_title = followup_campaign_title(year, month, "Post-Class 1")
     existing = find_existing_campaign(existing_ph1_title)
     if existing and existing.get("status") in ("schedule", "sending", "sent"):
         log.info("PH1 campaign already %s (id=%s) — skipping follow-up workflow", existing["status"], existing["id"])
@@ -230,7 +249,7 @@ def main():
         # NOTE: body on disk already has [link] substituted at Tweee-submit time
         # by classes/dashboard/api.py:_inject_coupon. coupon_url is kept for the
         # Slack post below (it references the coupon code).
-        campaign_title = f"{year:04d}-{month:02d} — Yoga Habit — {label}"
+        campaign_title = followup_campaign_title(year, month, label)
 
         result = create_or_update_draft(
             subject=subject,

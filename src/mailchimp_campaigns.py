@@ -64,6 +64,25 @@ _CTA_LINK_RE = re.compile(
 )
 
 
+# ----------------------------------------------------------------------------
+# Campaign title builders (audit F08). The campaign title is the sole dedup
+# key in MC (find_draft / find_campaign_by_title match on it), so callers must
+# build titles through these two functions instead of hand-building f-strings.
+# The separator is space + em-dash (U+2014) + space. That em-dash is DATA:
+# it must stay byte-identical to the titles already in MailChimp, so never
+# normalize it to a hyphen. Written as an escape to keep this source ASCII.
+# ----------------------------------------------------------------------------
+
+def monthly_campaign_title(year: int, month: int, label: str) -> str:
+    """Title for the monthly-newsletter family: 'YYYY-MM (em-dash) <Label> (em-dash) Yoga Habit'."""
+    return f"{year}-{month:02d} \u2014 {label} \u2014 Yoga Habit"
+
+
+def followup_campaign_title(year: int, month: int, label: str) -> str:
+    """Title for the post-class follow-up family: 'YYYY-MM (em-dash) Yoga Habit (em-dash) <Label>'."""
+    return f"{year:04d}-{month:02d} \u2014 Yoga Habit \u2014 {label}"
+
+
 def _mc_url(path: str) -> str:
     return f"https://{os.getenv('MAILCHIMP_SERVER_PREFIX')}.api.mailchimp.com/3.0{path}"
 

@@ -20,7 +20,7 @@ load_env()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from newsletter import newsletter_path
-from mailchimp_campaigns import create_or_update_draft
+from mailchimp_campaigns import create_or_update_draft, monthly_campaign_title
 from slack import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
@@ -94,7 +94,7 @@ def main():
         body_md = lines[2].strip() if len(lines) > 2 else ""
 
         label = LABELS[audience]
-        campaign_title = f"{year}-{month:02d} \u2014 {label} \u2014 Yoga Habit"
+        campaign_title = monthly_campaign_title(year, month, label)
 
         try:
             result = create_or_update_draft(

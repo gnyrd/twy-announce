@@ -7,6 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from twy_paths import newsletter_path, newsletter_prompt_path as prompt_path
+from twy_platform import locked_write
 
 MOUNTAIN = ZoneInfo("America/Denver")
 
@@ -22,17 +23,15 @@ def load_prompt(year: int, month: int, audience: str) -> str | None:
 def save_newsletter(year: int, month: int, audience: str, subject: str, body: str) -> Path:
     """Save authored newsletter to disk. Returns the path."""
     p = newsletter_path(year, month, audience)
-    p.parent.mkdir(parents=True, exist_ok=True)
     content = f"# {subject}\n\n{body}"
-    p.write_text(content)
+    locked_write(p, content)
     return p
 
 
 def save_prompt(year: int, month: int, audience: str, text: str) -> Path:
     """Save prompt text to disk. Returns the path."""
     p = prompt_path(year, month, audience)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    locked_write(p, text)
     return p
 
 

@@ -40,6 +40,7 @@ load_env()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from newsletter import newsletter_path  # noqa: E402
 from mailchimp_campaigns import _mc_auth, _mc_url  # noqa: E402
+from twy_platform import locked_write  # noqa: E402
 
 
 def _list_campaigns_cached(statuses: list[str]) -> list[dict]:
@@ -228,7 +229,7 @@ def sync_audience(year: int, month: int, audience: str, *, dry_run: bool) -> dic
     if md_path.exists():
         bak = md_path.with_suffix(md_path.suffix + f".bak.{datetime.now():%Y%m%dT%H%M%S}")
         bak.write_text(current)
-    md_path.write_text(new_md)
+    locked_write(md_path, new_md)
     return {"audience": audience, "month": f"{year}-{month:02d}",
             "status": "updated", "campaign_id": campaign_id,
             "diff_lines": diff.count("\n") + 1}

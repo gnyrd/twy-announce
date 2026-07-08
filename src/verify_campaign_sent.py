@@ -21,6 +21,9 @@ from twy_paths import load_env  # noqa: E402
 
 load_env()
 
+sys.path.insert(0, str(Path(__file__).parent))
+from mailchimp_campaigns import followup_campaign_title, monthly_campaign_title  # noqa: E402
+
 MAILCHIMP_API_KEY = os.environ['MAILCHIMP_API_KEY']
 MAILCHIMP_DC = MAILCHIMP_API_KEY.split('-')[-1]
 WATCH_TITLE_FRAGMENTS = ['Yoga Habit']
@@ -32,6 +35,27 @@ def mc_url(path):
 
 def mc_auth():
     return ('any', MAILCHIMP_API_KEY)
+
+
+def title_family(title: str) -> str:
+    """Classify a campaign title as 'monthly' or 'followup' via the shared builders.
+
+    Parses 'YYYY-MM <sep> A <sep> B' (sep = the em-dash separator the builders
+    emit) and checks whether the builders reproduce the title exactly.
+    Returns 'unknown' for anything neither builder produces.
+    """
+    parts = title.split(' \u2014 ')
+    if len(parts) != 3:
+        return 'unknown'
+    try:
+        year, month = int(parts[0][:4]), int(parts[0][5:7])
+    except ValueError:
+        return 'unknown'
+    if title == monthly_campaign_title(year, month, parts[1]):
+        return 'monthly'
+    if title == followup_campaign_title(year, month, parts[2]):
+        return 'followup'
+    return 'unknown'
 
 
 def find_stuck_campaigns(window_hours: int = 24):
@@ -77,7 +101,7 @@ def main() -> int:
 
     print('STUCK Yoga Habit campaigns (expected sent within last 24h):')
     for c in stuck:
-        print(f"  {c['title']}: status={c['status']}  scheduled_for={c['send_time']}")
+        print(f"  {c['title']} [family={title_family(c['title'])}]: status={c['status']}  scheduled_for={c['send_time']}")
         if c.get('web_id'):
             print(f"    https://admin.mailchimp.com/campaigns/show?id={c['web_id']}")
     return 1
