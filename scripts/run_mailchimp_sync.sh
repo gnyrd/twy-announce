@@ -30,6 +30,6 @@ echo "Log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
 echo "========================================" | tee -a "$LOG_FILE"
 
 # Keep only last 30 days of logs
-find "$LOG_DIR" -name "mailchimp_sync_*.log" -mtime +30 -delete
+# PAUSED pending JP deletion-approval regime (2026-07-08): find "$LOG_DIR" -name "mailchimp_sync_*.log" -mtime +30 -delete
 
 exit $EXIT_CODE
