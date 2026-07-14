@@ -2,6 +2,7 @@
 """Post daily status report to Slack with Marvelous subscription data."""
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -23,6 +24,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
+REPORTS_DIR = PROJECT_ROOT / "data/reports"
 MARVY_DB = marvy_db_path()
 
 
@@ -62,6 +64,75 @@ def get_marvelous_data() -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
+
+
+
+def hm_customer_link(email: str, name: str, db_path: Path = None) -> str:
+    """Slack-linked name pointing at the HM customer page; plain name if unknown."""
+    try:
+        conn = sqlite3.connect(str(db_path or MARVY_DB))
+        row = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = ?", (email.strip().lower(),)
+        ).fetchone()
+        conn.close()
+        if row:
+            return f"<https://app.heymarvelous.com/customers/{row[0]}|{name}>"
+    except Exception as e:
+        print(f"  (customer link lookup failed for {email}: {e})")
+    return name
+
+
+def _latest_two(reports_dir: Path, prefix: str) -> List[Path]:
+    return sorted(reports_dir.glob(f"{prefix}_*.csv"))[-2:]
+
+
+def _rows_by_email(path: Path) -> Dict[str, Dict[str, str]]:
+    with open(path, newline="") as f:
+        return {r["email"].strip().lower() if "email" in r else r["Email"].strip().lower(): r
+                for r in csv.DictReader(f)}
+
+
+def _short_date(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime("%b %-d")
+    except ValueError:
+        return iso
+
+
+def get_member_movement(reports_dir: Path = None, db_path: Path = None) -> Tuple[List[str], List[str]]:
+    """Names joined / canceled since the previous nightly HM report snapshots.
+
+    Joins = emails newly present in the actives report (dated by signup `Created`).
+    Cancels = emails newly present in the canceled report (dated by `canceled_at`,
+    with access-until). Names link to the HM customer page. Needs two snapshots
+    of each report; returns ([], []) when history is missing.
+    """
+    reports_dir = reports_dir or REPORTS_DIR
+    joins: List[str] = []
+    cancels: List[str] = []
+
+    actives = _latest_two(reports_dir, "active_subscriptions")
+    if len(actives) == 2:
+        prev, cur = (_rows_by_email(x) for x in actives)
+        for email in sorted(set(cur) - set(prev)):
+            r = cur[email]
+            name = f"{r['First Name']} {r['Last Name']}".strip() or email
+            joined = _short_date(r.get("Created", ""))
+            joins.append(f"{hm_customer_link(email, name, db_path)} (signed up {joined})")
+
+    canceled = _latest_two(reports_dir, "canceled_subscriptions")
+    if len(canceled) == 2:
+        prev, cur = (_rows_by_email(x) for x in canceled)
+        for email in sorted(set(cur) - set(prev)):
+            r = cur[email]
+            if r.get("product_name") == "The Yoga Lifestyle: On-demand Library":
+                continue
+            name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip() or email
+            when = _short_date(r.get("canceled_at", ""))
+            until = _short_date(r.get("subscription_active_until", ""))
+            cancels.append(f"{hm_customer_link(email, name, db_path)} (canceled {when}, access until {until})")
+
+    return joins, cancels
 
 
 def get_member_count_ago(days: int) -> int:
@@ -422,6 +493,17 @@ def post_to_slack(message: str):
         raise ValueError("No Slack credentials found. Set SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN in .env")
 
 
+def format_movement_post(movement: Tuple[List[str], List[str]]) -> str:
+    """Standalone Slack post for member joins/cancels. Empty string when none."""
+    joins, cancels = movement
+    lines: List[str] = []
+    for line in joins:
+        lines.append(f"*Joined*: {line}")
+    for line in cancels:
+        lines.append(f"*Canceled*: {line}")
+    return "\n".join(lines)
+
+
 def main(dry_run: bool = False):
     """Main entry point."""
     print("=" * 60)
@@ -450,6 +532,13 @@ def main(dry_run: bool = False):
         yesterday_counts = extract_subscriber_counts(mc_yesterday, ig_yesterday, yt_yesterday)
         changes = compare_counts(today_counts, yesterday_counts)
 
+        # Member movement from the nightly HM report snapshots (fail-soft)
+        try:
+            movement = get_member_movement()
+        except Exception as e:
+            print(f"  (member movement unavailable: {e})")
+            movement = ([], [])
+
         # Check HM membership change (DB query, no snapshot needed)
         current_total = int(calculate_totals(subscriptions)["total_subs"])
         hm_yesterday_total = get_member_count_ago(1)
@@ -472,20 +561,32 @@ def main(dry_run: bool = False):
 
         print(f"\nSend decision: {'YES' if should_send else 'NO'} - {send_reason}")
 
-        if not should_send:
-            print("\n✓ Skipping report (no changes)")
-            return 0
-
-        message = format_report(subscriptions, today, changes)
-        print("\nReport preview:")
-        print("-" * 60)
-        print(message)
-        print("-" * 60)
-
-        if dry_run:
-            print("\n[DRY RUN] Skipping Slack post")
+        if should_send:
+            message = format_report(subscriptions, today, changes)
+            print("\nReport preview:")
+            print("-" * 60)
+            print(message)
+            print("-" * 60)
+            if dry_run:
+                print("\n[DRY RUN] Skipping Slack post")
+            else:
+                post_to_slack(message)
         else:
-            post_to_slack(message)
+            print("\n✓ Skipping report (no changes)")
+
+        # Member movement goes out as its own post, only when there is any --
+        # independent of the report's send decision (a cancel can be
+        # count-neutral for weeks while access runs out).
+        movement_msg = format_movement_post(movement)
+        if movement_msg:
+            print("\nMember movement post:")
+            print("-" * 60)
+            print(movement_msg)
+            print("-" * 60)
+            if dry_run:
+                print("\n[DRY RUN] Skipping movement post")
+            else:
+                post_to_slack(movement_msg)
 
         print("\n✓ Daily status report completed successfully")
         return 0
