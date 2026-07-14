@@ -591,7 +591,13 @@ def main(dry_run: bool = False):
             if dry_run:
                 print("\n[DRY RUN] Skipping movement post")
             else:
-                post_to_slack(movement_msg, channel=MOVEMENT_CHANNEL)
+                # TWY Reporter app (twy_platform token) is the member of the
+                # movement channel; the SLACK_BOT_TOKEN app is not.
+                from twy_platform.slack import slack as reporter_slack
+                if reporter_slack(movement_msg, channel=MOVEMENT_CHANNEL):
+                    print("✓ Movement post sent")
+                else:
+                    print("✗ Movement post NOT confirmed (see twy_platform.slack log)")
 
         print("\n✓ Daily status report completed successfully")
         return 0
