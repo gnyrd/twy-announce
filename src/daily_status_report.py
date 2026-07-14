@@ -25,6 +25,7 @@ MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
 REPORTS_DIR = PROJECT_ROOT / "data/reports"
+MOVEMENT_CHANNEL = os.getenv("SLACK_MOVEMENT_CHANNEL", "C0BH3142LNP")
 MARVY_DB = marvy_db_path()
 
 
@@ -460,11 +461,15 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     return "\n\n".join("\n".join(g) for g in groups)
 
 
-def post_to_slack(message: str):
-    """Post message to Slack."""
+def post_to_slack(message: str, channel: str = None):
+    """Post message to Slack. An explicit channel uses the bot token
+    (the webhook is bound to its own channel and cannot be redirected)."""
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
     bot_token = os.getenv("SLACK_BOT_TOKEN")
-    channel = os.getenv("SLACK_CHANNEL", "#twy-status")
+    if channel is None:
+        channel = os.getenv("SLACK_CHANNEL", "#twy-status")
+    else:
+        webhook_url = None  # explicit channel -> bot-token path only
 
     if webhook_url:
         print("Posting to Slack via webhook...")
@@ -586,7 +591,7 @@ def main(dry_run: bool = False):
             if dry_run:
                 print("\n[DRY RUN] Skipping movement post")
             else:
-                post_to_slack(movement_msg)
+                post_to_slack(movement_msg, channel=MOVEMENT_CHANNEL)
 
         print("\n✓ Daily status report completed successfully")
         return 0
