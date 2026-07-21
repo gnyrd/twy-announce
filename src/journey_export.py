@@ -144,14 +144,24 @@ def export_journey(journey: dict, out_root: Path, *, dry_run: bool) -> dict:
     """Export one journey. Returns its manifest row."""
     jid = journey["id"]
     name = journey.get("journey_name") or "(unnamed)"
-    # A journey that was never built has no steps resource at all and 404s.
-    # That is an empty draft, not a failure, so it exports as a zero-step record.
-    steps_missing = False
+    # Some journeys 404 on their steps resource. This is NOT evidence the journey
+    # is empty, and an earlier version of this file wrongly recorded it that way.
+    # Measured 2026-07-21: every draft created before 2026 404s (2745, 2925,
+    # 3491, 4659, 6036), every draft created in 2026 returns steps (6174, 6126).
+    # The builder UI reads the old ones fine and the 2026-07-06 inventory shows
+    # four of those five carrying 4 to 10 emails, so the content exists and this
+    # API will not serve it.
+    #
+    # The consequence that matters: those journeys are NOT backed up by this
+    # tool, because their emails are never fetched. Calling that a benign empty
+    # draft would report a backup that does not exist, so it is flagged loudly
+    # and it fails the run.
+    steps_unavailable = False
     try:
         steps = (_get(f"customer-journeys/journeys/{jid}/steps") or {}).get("steps", [])
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
-            steps, steps_missing = [], True
+            steps, steps_unavailable = [], True
         else:
             raise
     list_id = journey.get("list_id") or os.getenv("MAILCHIMP_AUDIENCE_ID", "")
@@ -208,7 +218,8 @@ def export_journey(journey: dict, out_root: Path, *, dry_run: bool) -> dict:
         "created_at": journey.get("created_at"),
         "updated_at": journey.get("updated_at"),
         "step_count": len(steps),
-        "steps_missing": steps_missing,
+        "steps_unavailable": steps_unavailable,
+        "backup_complete": not steps_unavailable,
         "email_count": len(emails),
         "trigger": trigger,
         "emails": emails,
@@ -289,6 +300,11 @@ def render_readme(rows: list[dict], stamp: str) -> str:
         "read-only, so this directory is the only backup of these flows that "
         "exists. Keep it before retiring or deleting anything.",
         "",
+        "**Rows marked NOT BACKED UP are not in this snapshot.** Their steps "
+        "resource 404s, so their emails were never fetched. That is an API "
+        "limitation, not an empty journey: the builder UI reads them fine. Never "
+        "delete one of those on the strength of this export.",
+        "",
         "| Journey | id | Status | Emails | Trigger | Started | Last enrollment |",
         "|---|---|---|---|---|---|---|",
     ]
@@ -300,8 +316,11 @@ def render_readme(rows: list[dict], stamp: str) -> str:
             trig = f"{t['resolved_name']} ({t['resolved_member_count']})"
         else:
             trig = t.get("display_text") or "none"
+        name_cell = f"[{r['name']}]({r['dir']}/flow.md)"
+        if r.get("steps_unavailable"):
+            name_cell += " **NOT BACKED UP**"
         lines.append(
-            f"| [{r['name']}]({r['dir']}/flow.md) | {r['id']} | {r['status']} | "
+            f"| {name_cell} | {r['id']} | {r['status']} | "
             f"{r['email_count']} | {trig} | {r['stats'].get('started')} | "
             f"{(r['last_started_at'] or '')[:10] or 'never'} |")
     lines.append("")
@@ -338,8 +357,8 @@ def main() -> int:
             continue
         rows.append(row)
         flag = "  DANGLING TRIGGER" if row["trigger"].get("dangling") else ""
-        if row.get("steps_missing"):
-            flag += "  (empty draft, no steps)"
+        if row.get("steps_unavailable"):
+            flag += "  ** STEPS UNAVAILABLE, NOT BACKED UP **"
         print(f"  {row['id']:<6} {row['status']:<8} {row['email_count']:>2} emails  "
               f"{row['name']}{flag}")
 
@@ -352,9 +371,15 @@ def main() -> int:
         (out_root / "README.md").write_text(render_readme(rows, stamp), encoding="utf-8")
 
     dangling = [r["id"] for r in rows if r["trigger"].get("dangling")]
-    print(f"done: {len(rows)} exported, {len(failed)} failed"
+    unbacked = [r["id"] for r in rows if r.get("steps_unavailable")]
+    backed = len(rows) - len(unbacked)
+    print(f"done: {len(rows)} processed, {backed} backed up, {len(failed)} failed"
           f"{', dangling triggers: ' + str(dangling) if dangling else ''}")
-    return 1 if failed else 0
+    if unbacked:
+        print("NOT BACKED UP (steps resource 404s; the content exists but this "
+              "API will not serve it, read them in the builder UI): "
+              + str(unbacked), file=sys.stderr)
+    return 1 if (failed or unbacked) else 0
 
 
 if __name__ == "__main__":
