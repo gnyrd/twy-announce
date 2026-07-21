@@ -29,42 +29,103 @@ MOVEMENT_CHANNEL = os.getenv("SLACK_MOVEMENT_CHANNEL", "C0BH3142LNP")
 MARVY_DB = marvy_db_path()
 
 
+ANNUAL_SPLIT = "1year"
+ONDEMAND_PRODUCT = "The Yoga Lifestyle: On-demand Library"
+
+
+def _latest_report(reports_dir: Path = None) -> Optional[Path]:
+    """Newest HM Active Subscriptions CSV, or None if none exist."""
+    reports_dir = reports_dir or REPORTS_DIR
+    hits = sorted(reports_dir.glob("active_subscriptions_*.csv"))
+    return hits[-1] if hits else None
+
+
+def _report_on_or_before(target: datetime, reports_dir: Path = None) -> Optional[Path]:
+    """Newest HM Active Subscriptions CSV dated on or before `target`.
+
+    Returns None for dates earlier than the first snapshot (2026-03-19), which
+    is the caller's signal to fall back to reconstruction.
+    """
+    reports_dir = reports_dir or REPORTS_DIR
+    stamp = target.strftime("%Y%m%d")
+    hits = sorted(p for p in reports_dir.glob("active_subscriptions_*.csv")
+                  if p.name[len("active_subscriptions_"):len("active_subscriptions_") + 8] <= stamp)
+    return hits[-1] if hits else None
+
+
+def counts_from_report(path: Path) -> Dict[str, Dict[str, int]]:
+    """{product: {"Monthly": n, "Annual": n}} from an HM report CSV.
+
+    Billing cycle comes from the report's REAL `split_part` column
+    ('1year' = annual, 'month'/'1month' = monthly). Never infer it from the
+    amount paid: `amount_paid > price * 3` invents an annual tier that does
+    not exist and misfiled a $545 payment against a $99 monthly price as
+    annual, posting TYL 25/3 where the truth was 26/2 (2026-07-21).
+    """
+    out: Dict[str, Dict[str, int]] = {}
+    with open(path, newline="") as fh:
+        for r in csv.DictReader(fh):
+            if r.get("Status") != "Active":
+                continue
+            product = (r.get("Product Name") or "").strip()
+            if not product or product == ONDEMAND_PRODUCT:
+                continue
+            cycle = "Annual" if r.get("split_part") == ANNUAL_SPLIT else "Monthly"
+            out.setdefault(product, {"Monthly": 0, "Annual": 0})
+            out[product][cycle] += 1
+    return out
+
+
+def _revenue_from_report(path: Path) -> Dict[str, Dict[str, float]]:
+    """{product: {cycle: summed recurring Price}} from an HM report CSV."""
+    out: Dict[str, Dict[str, float]] = {}
+    with open(path, newline="") as fh:
+        for r in csv.DictReader(fh):
+            if r.get("Status") != "Active":
+                continue
+            product = (r.get("Product Name") or "").strip()
+            if not product or product == ONDEMAND_PRODUCT:
+                continue
+            cycle = "Annual" if r.get("split_part") == ANNUAL_SPLIT else "Monthly"
+            try:
+                price = float(r.get("Price") or 0)
+            except ValueError:
+                price = 0.0
+            out.setdefault(product, {"Monthly": 0.0, "Annual": 0.0})
+            out[product][cycle] += price
+    return out
+
+
 def get_marvelous_data() -> List[Dict[str, Any]]:
-    """Read active subscription data from local SQLite database."""
-    conn = sqlite3.connect(str(MARVY_DB))
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("""
-        SELECT pr.product_name,
-               CASE
-                   WHEN last_pay.amount_paid > pr.price * 3 THEN 'Annual'
-                   ELSE 'Monthly'
-               END as billing_cycle,
-               COUNT(*) as active_count,
-               COALESCE(SUM(last_pay.amount_paid), 0) as revenue_per_cycle
-        FROM subscriptions s
-        JOIN products pr ON pr.id = s.product_id
-        JOIN (
-            SELECT customer_id, product_id, amount_paid,
-                   ROW_NUMBER() OVER (PARTITION BY customer_id, product_id ORDER BY created DESC) as rn
-            FROM purchases WHERE amount_paid > 0
-        ) last_pay ON last_pay.customer_id = s.customer_id
-                   AND last_pay.product_id = s.product_id
-                   AND last_pay.rn = 1
-        WHERE s.subscription_active = 1
-          AND pr.product_name != 'The Yoga Lifestyle: On-demand Library'
-        GROUP BY pr.product_name, billing_cycle
-        ORDER BY pr.product_name, billing_cycle
-    """).fetchall()
-    conn.close()
-    return [
-        {
-            "Product Name": r["product_name"],
-            "Billing Cycle": r["billing_cycle"],
-            "# of Active Subscriptions": r["active_count"],
-            "Revenue per Cycle": r["revenue_per_cycle"],
-        }
-        for r in rows
-    ]
+    """Active subscription counts per product and billing cycle.
+
+    Source of truth is the nightly HM Active Subscriptions report, whose
+    `split_part` column carries the real billing cycle. Fails loudly rather
+    than falling back to marvy.db: the old query inferred the cycle from
+    `amount_paid > price * 3`, and posting a wrong split is worse than
+    posting nothing.
+    """
+    path = _latest_report()
+    if path is None:
+        raise RuntimeError(
+            f"No HM Active Subscriptions report found in {REPORTS_DIR}. "
+            "Cannot determine billing cycles; refusing to report a guess."
+        )
+    counts = counts_from_report(path)
+    revenue = _revenue_from_report(path)
+    rows: List[Dict[str, Any]] = []
+    for product in sorted(counts):
+        for cycle in ("Annual", "Monthly"):
+            n = counts[product][cycle]
+            if n == 0:
+                continue
+            rows.append({
+                "Product Name": product,
+                "Billing Cycle": cycle,
+                "# of Active Subscriptions": n,
+                "Revenue per Cycle": revenue.get(product, {}).get(cycle, 0.0),
+            })
+    return rows
 
 
 
@@ -139,25 +200,51 @@ def get_member_movement(reports_dir: Path = None, db_path: Path = None) -> Tuple
 def get_member_count_ago(days: int) -> int:
     """Total active recurring-subscription count N days ago.
 
-    Delegates to historical_active_counts.active_count_at, which computes
-    coverage per-purchase (monthly=31d, annual=366d window). Replaces the
-    prior proxy-based query that silently excluded members who churned
-    between the target date and now.
+    Prefers the HM Active Subscriptions snapshot for that date, which is an
+    exact count. This also keeps the send-decision comparison apples-to-apples:
+    the current total now comes from the newest snapshot, so both sides of
+    `current_total != hm_yesterday_total` share one source instead of pitting
+    a marvy.db query against a reconstruction.
+
+    Falls back to historical_active_counts.active_count_at only for dates
+    before the first snapshot (2026-03-19). That path picks its per-purchase
+    coverage window (31d vs 366d) by classifying the billing cycle from the
+    amount paid, the same unreliable rule this module was fixed to stop using,
+    so it is deliberately off the hot path.
     """
+    target = datetime.now() - timedelta(days=days)
+    path = _report_on_or_before(target)
+    if path is not None:
+        counts = counts_from_report(path)
+        return sum(c["Monthly"] + c["Annual"] for c in counts.values())
     from historical_active_counts import active_count_at
-    return active_count_at(datetime.now() - timedelta(days=days))
+    return active_count_at(target)
 
 
 def get_product_counts_ago(days: int) -> Dict[str, Dict[str, int]]:
     """Per-product, per-billing-cycle active subscription counts N days ago.
 
-    Delegates to historical_active_counts.active_at. Billing cycle for each
-    count bucket is taken from the purchase that actually covered the target
-    date (not from the customer's most recent payment ever, which was the
-    prior implementation's bug).
+    Prefers the HM Active Subscriptions snapshot for that date, which carries
+    the real `split_part` billing cycle, so the week and month deltas are
+    exact. Only for dates before the first snapshot (2026-03-19) does it fall
+    back to historical_active_counts.active_at, whose cycle split is inferred
+    from amount paid and is therefore approximate. In practice that fallback
+    only affects the year delta.
     """
-    from historical_active_counts import active_at
-    return active_at(datetime.now() - timedelta(days=days))
+    target = datetime.now() - timedelta(days=days)
+    path = _report_on_or_before(target)
+    if path is not None:
+        return counts_from_report(path)
+    # No snapshot that far back (before 2026-03-19). Fall back to the same
+    # reconstruction that backs the verified TYL chart: a 31-day purchase
+    # window for the monthly count, and the annual count taken from the
+    # known-annuals list rather than an amount-paid guess. Accurate to about
+    # +/-1 on monthly. Deliberately NOT historical_active_counts.active_at,
+    # whose amount-paid classification is the defect this function was fixed
+    # to stop repeating.
+    from membership_history import known_annuals, from_purchase_window
+    monthly, annual, _total = from_purchase_window(target, known_annuals())
+    return {"The Yoga Lifestyle Membership": {"Monthly": monthly, "Annual": annual}}
 
 
 def get_next_habit_event() -> Optional[Dict[str, Any]]:
