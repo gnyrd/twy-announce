@@ -8,3 +8,4 @@ twy-paths @ file:///root/twy/paths
 twy-classplan @ file:///root/twy/classplan
 markdown
 python-dotenv
+markdownify
