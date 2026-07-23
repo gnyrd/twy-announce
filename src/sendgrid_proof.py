@@ -313,41 +313,79 @@ class ProofRunner:
             },
         )
 
-    def export(self) -> ProofManifest:
-        list_id = self.manifest.object_ids["list_id"]
-        started = self.api.start_contact_export([list_id])
-        ready = self.api.wait_contact_export(started["id"])
+    def _archive_contact_export(
+        self,
+        *,
+        object_key: str,
+        list_ids: list[str] | None,
+        directory: str,
+    ) -> dict:
+        export_id = self.manifest.object_ids.get(object_key)
+        if export_id:
+            started = {"id": export_id, "reused": True}
+        else:
+            started = self.api.start_contact_export(list_ids)
+            export_id = started["id"]
+            self._save(
+                phase="export",
+                object_ids={object_key: export_id},
+            )
+        ready = self.api.wait_contact_export(export_id)
         files = []
         for index, url in enumerate(ready.get("urls") or [], start=1):
             payload = self.api.download_contact_export(url)
-            relative_path = f"contacts/contact_export_{index:02d}.csv"
+            relative_path = (
+                f"contacts/{directory}/contact_export_{index:02d}.csv"
+            )
             self.store.write_bytes(relative_path, payload)
             files.append({
                 "path": relative_path,
                 "bytes": len(payload),
                 "sha256": hashlib.sha256(payload).hexdigest(),
             })
-        self.store.write_json("contact_export.json", {
+        return {
             "started": started,
             "ready": ready,
             "files": files,
+        }
+
+    def export(self) -> ProofManifest:
+        list_id = self.manifest.object_ids["list_id"]
+        deliverable = self._archive_contact_export(
+            object_key="contact_export",
+            list_ids=[list_id],
+            directory="deliverable",
+        )
+        all_contacts = self._archive_contact_export(
+            object_key="contact_export_all",
+            list_ids=None,
+            directory="all_contacts",
+        )
+        self.store.write_json("contact_export.json", {
+            "deliverable": deliverable,
+            "all_contacts": all_contacts,
         })
+        all_files = deliverable["files"] + all_contacts["files"]
         return self._save(
             phase="export",
-            object_ids={"contact_export": started["id"]},
             capabilities={
                 "contact_export": CapabilityResult(
                     status=(
                         "proven"
-                        if ready.get("status") == "ready" and files
+                        if (
+                            deliverable["ready"].get("status") == "ready"
+                            and all_contacts["ready"].get("status") == "ready"
+                            and deliverable["files"]
+                            and all_contacts["files"]
+                        )
                         else "unknown"
                     ),
                     evidence=("contact_export.json",),
                     detail=(
-                        "Contact export job reached ready state and every CSV "
-                        "artifact was stored with a SHA-256 digest."
-                        if files
-                        else "Contact export job returned no downloadable files."
+                        "Deliverable-list and account-wide contact exports reached "
+                        "ready state; every CSV was stored with a SHA-256 digest."
+                        if all_files
+                        else "A contact export job returned no downloadable files."
                     ),
                 )
             },

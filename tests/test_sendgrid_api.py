@@ -176,6 +176,15 @@ def test_contact_export_start_and_ready_status():
     assert api.wait_contact_export("export-1", timeout_s=1)["status"] == "ready"
 
 
+def test_account_wide_contact_export_omits_list_filter():
+    api, fake = make_api(FakeResponse(202, {"id": "export-all"}))
+    assert api.start_contact_export(None)["id"] == "export-all"
+    assert fake.calls[0]["json"] == {
+        "file_type": "csv",
+        "notifications": {"email": False},
+    }
+
+
 def test_contact_export_download_omits_sendgrid_authorization():
     api, fake = make_api(FakeResponse(
         200,

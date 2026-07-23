@@ -25,6 +25,7 @@ class FakeAPI:
         self.global_unsubscribes = []
         self.single_sends = {}
         self.schedules = []
+        self.contact_export_requests = []
         self.list_members = [
             {"email": "admin@tiffanywoodyoga.com"},
             {"email": "jpgan6@gmail.com"},
@@ -93,12 +94,26 @@ class FakeAPI:
         return {"results": [{"id": single_send_id, "stats": {"requests": 2}}]}
 
     def start_contact_export(self, list_ids):
-        return {"id": "export-1"}
+        self.contact_export_requests.append(list_ids)
+        return {"id": f"export-{len(self.contact_export_requests)}"}
 
     def wait_contact_export(self, export_id, timeout_s=180):
-        return {"id": export_id, "status": "ready", "urls": ["https://signed?token=x"]}
+        return {
+            "id": export_id,
+            "status": "ready",
+            "urls": [f"https://signed/{export_id}.csv?token=x"],
+        }
 
     def download_contact_export(self, url):
+        if "export-2" in url:
+            return (
+                b"email\n"
+                b"admin@tiffanywoodyoga.com\n"
+                b"jpgan6@gmail.com\n"
+                b"cleaned@twy-sendgrid-proof.invalid\n"
+                b"subscribed@twy-sendgrid-proof.invalid\n"
+                b"unsubscribed@twy-sendgrid-proof.invalid\n"
+            )
         return (
             b"email\n"
             b"admin@tiffanywoodyoga.com\n"
@@ -247,7 +262,15 @@ def test_collect_export_and_report_cover_created_state(tmp_path):
     assert "cleaned_mapping" in report
     assert (tmp_path / "stats.json").exists()
     assert (tmp_path / "contact_export.json").exists()
-    assert (tmp_path / "contacts" / "contact_export_01.csv").exists()
+    assert (
+        tmp_path / "contacts" / "deliverable" / "contact_export_01.csv"
+    ).exists()
+    assert (
+        tmp_path / "contacts" / "all_contacts" / "contact_export_01.csv"
+    ).exists()
+    assert runner.api.contact_export_requests == [["list-1"], None]
+    assert runner.manifest.object_ids["contact_export"] == "export-1"
+    assert runner.manifest.object_ids["contact_export_all"] == "export-2"
     export_evidence = (tmp_path / "contact_export.json").read_text()
     assert "sha256" in export_evidence
     assert "X-Amz-Signature" not in export_evidence

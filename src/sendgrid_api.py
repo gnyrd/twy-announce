@@ -191,15 +191,17 @@ class SendGridAPI:
             allow_not_found=True,
         )
 
-    def start_contact_export(self, list_ids: list[str]) -> dict:
+    def start_contact_export(self, list_ids: list[str] | None) -> dict:
+        payload = {
+            "file_type": "csv",
+            "notifications": {"email": False},
+        }
+        if list_ids is not None:
+            payload["list_ids"] = list_ids
         return self._request(
             "POST",
             "/marketing/contacts/exports",
-            json={
-                "list_ids": list_ids,
-                "file_type": "csv",
-                "notifications": {"email": False},
-            },
+            json=payload,
         )
 
     def wait_contact_export(self, export_id: str, timeout_s: int = 180) -> dict:
