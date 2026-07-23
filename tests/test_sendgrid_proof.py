@@ -131,8 +131,17 @@ def test_seed_keeps_synthetic_contacts_out_of_deliverable_list(tmp_path):
         "admin@tiffanywoodyoga.com",
         "jpgan6@gmail.com",
     }
+    assert api.upserts[0][1] == [
+        {"email": "admin@tiffanywoodyoga.com"},
+        {"email": "jpgan6@gmail.com"},
+    ]
     assert api.upserts[1][0] == []
     assert all(contact["email"].endswith(".invalid") for contact in api.upserts[1][1])
+    assert api.upserts[1][1] == [
+        {"email": "cleaned@twy-sendgrid-proof.invalid"},
+        {"email": "subscribed@twy-sendgrid-proof.invalid"},
+        {"email": "unsubscribed@twy-sendgrid-proof.invalid"},
+    ]
     assert api.global_unsubscribes == ["unsubscribed@twy-sendgrid-proof.invalid"]
     assert manifest.capabilities["cleaned_mapping"].status == "unavailable"
 

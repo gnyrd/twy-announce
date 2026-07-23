@@ -130,16 +130,11 @@ class ProofRunner:
             list_id = created["id"]
 
         deliverable_contacts = [
-            {"email": email, "custom_fields": {"proof_state": "subscribed"}}
+            {"email": email}
             for email in sorted(self.config.deliverable_addresses)
         ]
         synthetic_contacts = [
-            {
-                "email": email,
-                "custom_fields": {
-                    "proof_state": email.split("@", 1)[0],
-                },
-            }
+            {"email": email}
             for email in sorted(self.config.synthetic_addresses)
         ]
         deliverable_job = self.api.upsert_contacts([list_id], deliverable_contacts)
