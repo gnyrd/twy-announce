@@ -435,8 +435,31 @@ class ProofRunner:
             for name, result in sorted(self.manifest.capabilities.items())
         }
         self.store.write_json("capabilities.json", capabilities)
+        def deletion_operation(kind: str, identifier: str) -> str:
+            if kind == "list_id":
+                return f"DELETE /v3/marketing/lists/{identifier}"
+            if kind.startswith("single_send_"):
+                return f"DELETE /v3/marketing/singlesends/{identifier}"
+            if kind == "design_id":
+                return f"DELETE /v3/designs/{identifier}"
+            if kind == "suppression_group_id":
+                return f"DELETE /v3/asm/groups/{identifier}"
+            if kind == "sender_id":
+                return f"DELETE /v3/verified_senders/{identifier}"
+            if kind == "authenticated_domain_id":
+                return f"DELETE /v3/whitelabel/domains/{identifier}"
+            if kind == "link_brand_id":
+                return f"DELETE /v3/whitelabel/links/{identifier}"
+            if kind == "api_key_id":
+                return f"DELETE /v3/api_keys/{identifier}"
+            return "no documented delete for completed job metadata"
+
         objects = [
-            {"kind": key, "id": value, "delete": "approval required"}
+            {
+                "kind": key,
+                "id": value,
+                "delete": deletion_operation(key, value),
+            }
             for key, value in sorted(self.manifest.object_ids.items())
         ]
         objects.append({
@@ -444,7 +467,91 @@ class ProofRunner:
             "id": "scoped proof key",
             "delete": "revoke in SendGrid UI after explicit approval",
         })
-        self.store.write_json("teardown_inventory.json", {"objects": objects})
+        contacts = [
+            {
+                "email": email,
+                "deliverable": email in self.config.deliverable_addresses,
+                "delete": "DELETE /v3/marketing/contacts",
+            }
+            for email in sorted(
+                self.config.deliverable_addresses
+                | self.config.synthetic_addresses
+            )
+        ]
+        suppressions = [
+            {
+                "kind": "global_unsubscribe",
+                "email": "unsubscribed@twy-sendgrid-proof.invalid",
+                "delete": (
+                    "DELETE /v3/asm/suppressions/global/"
+                    "unsubscribed%40twy-sendgrid-proof.invalid"
+                ),
+            }
+        ]
+        teardown = {
+            "objects": objects,
+            "contacts": contacts,
+            "suppressions": suppressions,
+        }
+        self.store.write_json("teardown_inventory.json", teardown)
+
+        def markdown_cell(value: object) -> str:
+            return str(value).replace("|", "\\|").replace("\n", " ")
+
+        lines = [
+            f"# TWY SendGrid Migration Proof {self.run_id}",
+            "",
+            "## Capability matrix",
+            "",
+            "| Capability | Status | Evidence | Detail |",
+            "|---|---|---|---|",
+        ]
+        for name, result in sorted(capabilities.items()):
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        markdown_cell(name),
+                        markdown_cell(result["status"]),
+                        markdown_cell(", ".join(result["evidence"])),
+                        markdown_cell(result["detail"]),
+                    )
+                )
+                + " |"
+            )
+        lines.extend(
+            (
+                "",
+                "## Created-object inventory",
+                "",
+                "| Kind | Identifier | Deletion |",
+                "|---|---|---|",
+            )
+        )
+        for item in objects:
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        markdown_cell(item["kind"]),
+                        markdown_cell(item["id"]),
+                        markdown_cell(item["delete"]),
+                    )
+                )
+                + " |"
+            )
+        lines.extend(
+            (
+                "",
+                "Contacts and suppressions are enumerated in "
+                "`teardown_inventory.json`.",
+                "",
+            )
+        )
+        self.store.write_bytes(
+            "report.md",
+            "\n".join(lines).encode("utf-8"),
+        )
         self._save(phase="report")
         return capabilities
 

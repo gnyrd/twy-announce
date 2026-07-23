@@ -288,6 +288,15 @@ def test_collect_export_and_report_cover_created_state(tmp_path):
     assert "list-1" in teardown
     assert "ss-1" in teardown
     assert "api_key" in teardown
+    assert "admin@tiffanywoodyoga.com" in teardown
+    assert "unsubscribed@twy-sendgrid-proof.invalid" in teardown
+    assert "DELETE /v3/marketing/lists/list-1" in teardown
+    assert "DELETE /v3/marketing/singlesends/ss-1" in teardown
+    markdown_report = (tmp_path / "report.md").read_text()
+    assert markdown_report.startswith("# TWY SendGrid Migration Proof")
+    assert "| Capability | Status | Evidence | Detail |" in markdown_report
+    assert "| cleaned_mapping | unavailable | seed.json |" in markdown_report
+    assert "## Created-object inventory" in markdown_report
 
 
 def test_collect_records_stats_materialization_latency_as_unknown(tmp_path):
