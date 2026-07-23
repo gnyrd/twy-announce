@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 import re
 
+from bs4 import BeautifulSoup
 import markdown as md
-from markdownify import markdownify
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,27 @@ def _render_html(body_md: str) -> str:
     )
 
 
+def _render_plain_text(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    for link in soup.find_all("a"):
+        label = link.get_text(" ", strip=True)
+        href = link.get("href", "").strip()
+        replacement = f"{label} ({href})" if href else label
+        link.replace_with(replacement)
+    for line_break in soup.find_all("br"):
+        line_break.replace_with("\n")
+    lines = []
+    for element in soup.contents:
+        text = (
+            element.get_text(" ", strip=True)
+            if hasattr(element, "get_text")
+            else str(element).strip()
+        )
+        lines.append(re.sub(r"[ \t]+", " ", text).strip())
+    return "\n".join(line for line in lines if line) + "\n"
+
+
 def render_newsletter(body_md: str) -> RenderedNewsletter:
     html = _render_html(body_md)
-    plain_text = markdownify(html, heading_style="ATX").strip() + "\n"
+    plain_text = _render_plain_text(html)
     return RenderedNewsletter(html=html, plain_text=plain_text)

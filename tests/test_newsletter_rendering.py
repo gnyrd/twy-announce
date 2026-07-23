@@ -44,6 +44,16 @@ def test_render_newsletter_text_contains_no_html():
     assert "<" not in render_newsletter(BODY).plain_text
 
 
+def test_render_newsletter_plain_text_removes_markdown_syntax():
+    rendered = render_newsletter(
+        "# Heading\n\n**Bold** and [a class](https://example.com/class)\n"
+    )
+    assert rendered.plain_text == (
+        "Heading\n"
+        "Bold and a class (https://example.com/class)\n"
+    )
+
+
 def test_real_newsletter_corpus_preserves_mailchimp_html():
     for filename, expected_hash in CORPUS_HASHES.items():
         body = Path(filename).read_text()

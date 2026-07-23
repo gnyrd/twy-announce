@@ -7,5 +7,6 @@ mailchimp3
 twy-paths @ file:///root/twy/paths
 twy-classplan @ file:///root/twy/classplan
 markdown
+beautifulsoup4
 python-dotenv
 markdownify
