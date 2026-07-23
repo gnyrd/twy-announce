@@ -175,6 +175,11 @@ def test_contact_export_start_and_ready_status():
     assert api.wait_contact_export("export-1", timeout_s=1)["status"] == "ready"
 
 
+def test_single_send_stats_are_absent_until_sendgrid_materializes_them():
+    api, _ = make_api(FakeResponse(404, None))
+    assert api.single_send_stats("ss-1", "2026-07-23") is None
+
+
 def test_429_retries_using_retry_after():
     slept = []
     session = FakeSession([

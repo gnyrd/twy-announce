@@ -246,6 +246,18 @@ def test_collect_export_and_report_cover_created_state(tmp_path):
     assert "api_key" in teardown
 
 
+def test_collect_records_stats_materialization_latency_as_unknown(tmp_path):
+    api = FakeAPI()
+    runner = make_runner(tmp_path, api)
+    runner.preflight()
+    runner.seed()
+    runner.send("immediate", BODY)
+    api.single_send_stats = lambda single_send_id, start_date: None
+    manifest = runner.collect()
+    assert manifest.capabilities["single_send_stats"].status == "unknown"
+    assert '"stats": null' in (tmp_path / "stats.json").read_text()
+
+
 def test_all_phase_runs_in_safe_order():
     calls = []
 

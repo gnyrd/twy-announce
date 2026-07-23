@@ -290,14 +290,24 @@ class ProofRunner:
                     self.now_fn().date().isoformat(),
                 ),
             }
+        stats_materialized = bool(stats) and all(
+            item["stats"] is not None for item in stats.values()
+        )
         self.store.write_json("stats.json", stats)
         return self._save(
             phase="collect",
             capabilities={
                 "single_send_stats": CapabilityResult(
-                    status="proven" if stats else "unknown",
+                    status="proven" if stats_materialized else "unknown",
                     evidence=("stats.json",),
-                    detail="Per-Single-Send definitions and statistics were retrieved.",
+                    detail=(
+                        "Per-Single-Send definitions and statistics were retrieved."
+                        if stats_materialized
+                        else (
+                            "Single Send definitions were retrieved, but SendGrid "
+                            "has not materialized every statistics object yet."
+                        )
+                    ),
                 )
             },
         )

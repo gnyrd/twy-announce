@@ -179,11 +179,16 @@ class SendGridAPI:
             json={"send_at": send_at},
         )
 
-    def single_send_stats(self, single_send_id: str, start_date: str) -> dict:
+    def single_send_stats(
+        self,
+        single_send_id: str,
+        start_date: str,
+    ) -> dict | None:
         return self._request(
             "GET",
             f"/marketing/stats/singlesends/{single_send_id}",
             params={"aggregated_by": "total", "start_date": start_date},
+            allow_not_found=True,
         )
 
     def start_contact_export(self, list_ids: list[str]) -> dict:
