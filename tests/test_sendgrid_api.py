@@ -11,11 +11,12 @@ from sendgrid_api import (
 
 
 class FakeResponse:
-    def __init__(self, status_code, body=None, headers=None):
+    def __init__(self, status_code, body=None, headers=None, content=None):
         self.status_code = status_code
         self._body = body
         self.headers = headers or {}
         self.text = "" if body is None else str(body)
+        self.content = content if content is not None else self.text.encode()
 
     def json(self):
         return self._body
@@ -173,6 +174,18 @@ def test_contact_export_start_and_ready_status():
         "notifications": {"email": False},
     }
     assert api.wait_contact_export("export-1", timeout_s=1)["status"] == "ready"
+
+
+def test_contact_export_download_omits_sendgrid_authorization():
+    api, fake = make_api(FakeResponse(
+        200,
+        content=b"email\nproof@example.com\n",
+    ))
+    payload = api.download_contact_export(
+        "https://storage.example/export.csv?X-Amz-Signature=secret"
+    )
+    assert payload == b"email\nproof@example.com\n"
+    assert "headers" not in fake.calls[0]
 
 
 def test_single_send_stats_are_absent_until_sendgrid_materializes_them():

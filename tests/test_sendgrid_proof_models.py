@@ -80,6 +80,14 @@ def test_evidence_store_writes_redacted_json_atomically(tmp_path):
     assert list(tmp_path.glob("*.tmp")) == []
 
 
+def test_evidence_store_writes_binary_artifact_atomically(tmp_path):
+    store = EvidenceStore(tmp_path)
+    path = store.write_bytes("contacts/export.csv", b"email\nproof@example.com\n")
+    assert path == tmp_path / "contacts/export.csv"
+    assert path.read_bytes() == b"email\nproof@example.com\n"
+    assert list((tmp_path / "contacts").glob("*.tmp")) == []
+
+
 def test_manifest_round_trips_for_resume(tmp_path):
     store = EvidenceStore(tmp_path)
     manifest = ProofManifest(run_id="run-1", phase="seed", object_ids={"list": "l1"})

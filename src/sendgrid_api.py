@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -214,6 +214,18 @@ class SendGridAPI:
             if time.monotonic() >= deadline:
                 raise SendGridJobTimeout(f"SendGrid contact export {export_id} timed out")
             self._sleep(1.0)
+
+    def download_contact_export(self, url: str) -> bytes:
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("SendGrid contact export URL must be HTTPS")
+        response = self._session.request("GET", url, timeout=30)
+        if not 200 <= response.status_code < 300:
+            raise SendGridAPIError(
+                "SendGrid contact export download returned "
+                f"{response.status_code}"
+            )
+        return response.content
 
     def snapshot(self, endpoint: str) -> Any:
         return self._request("GET", endpoint)

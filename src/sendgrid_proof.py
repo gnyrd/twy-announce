@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -316,18 +317,38 @@ class ProofRunner:
         list_id = self.manifest.object_ids["list_id"]
         started = self.api.start_contact_export([list_id])
         ready = self.api.wait_contact_export(started["id"])
+        files = []
+        for index, url in enumerate(ready.get("urls") or [], start=1):
+            payload = self.api.download_contact_export(url)
+            relative_path = f"contacts/contact_export_{index:02d}.csv"
+            self.store.write_bytes(relative_path, payload)
+            files.append({
+                "path": relative_path,
+                "bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            })
         self.store.write_json("contact_export.json", {
             "started": started,
             "ready": ready,
+            "files": files,
         })
         return self._save(
             phase="export",
             object_ids={"contact_export": started["id"]},
             capabilities={
                 "contact_export": CapabilityResult(
-                    status="proven" if ready.get("status") == "ready" else "unknown",
+                    status=(
+                        "proven"
+                        if ready.get("status") == "ready" and files
+                        else "unknown"
+                    ),
                     evidence=("contact_export.json",),
-                    detail="Contact export job reached ready state.",
+                    detail=(
+                        "Contact export job reached ready state and every CSV "
+                        "artifact was stored with a SHA-256 digest."
+                        if files
+                        else "Contact export job returned no downloadable files."
+                    ),
                 )
             },
         )

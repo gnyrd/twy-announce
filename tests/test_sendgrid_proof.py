@@ -98,6 +98,13 @@ class FakeAPI:
     def wait_contact_export(self, export_id, timeout_s=180):
         return {"id": export_id, "status": "ready", "urls": ["https://signed?token=x"]}
 
+    def download_contact_export(self, url):
+        return (
+            b"email\n"
+            b"admin@tiffanywoodyoga.com\n"
+            b"jpgan6@gmail.com\n"
+        )
+
 
 def make_runner(tmp_path, api=None):
     return ProofRunner(
@@ -240,6 +247,10 @@ def test_collect_export_and_report_cover_created_state(tmp_path):
     assert "cleaned_mapping" in report
     assert (tmp_path / "stats.json").exists()
     assert (tmp_path / "contact_export.json").exists()
+    assert (tmp_path / "contacts" / "contact_export_01.csv").exists()
+    export_evidence = (tmp_path / "contact_export.json").read_text()
+    assert "sha256" in export_evidence
+    assert "X-Amz-Signature" not in export_evidence
     teardown = (tmp_path / "teardown_inventory.json").read_text()
     assert "list-1" in teardown
     assert "ss-1" in teardown

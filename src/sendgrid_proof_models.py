@@ -143,6 +143,17 @@ class EvidenceStore:
         os.replace(temporary, destination)
         return destination
 
+    def write_bytes(self, relative_path: str, value: bytes) -> Path:
+        destination = self.root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+        with temporary.open("wb") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        return destination
+
     def write_manifest(self, manifest: ProofManifest) -> Path:
         return self.write_json("manifest.json", asdict(manifest))
 
