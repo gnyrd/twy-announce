@@ -2,7 +2,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sendgrid_proof import ProofRunner, run_phase, validate_recipient_copy
+from sendgrid_proof import (
+    ProofRunner,
+    normalize_recipient_copy,
+    run_phase,
+    validate_recipient_copy,
+)
 from sendgrid_proof_models import EvidenceStore, ProofConfig, RecipientSafetyError
 
 
@@ -122,6 +127,13 @@ def test_recipient_copy_validation_rejects_non_ascii_and_semicolons():
     validate_recipient_copy(BODY)
 
 
+def test_recipient_copy_normalizes_typographic_punctuation():
+    source = "Tiffany\u2019s\u00a0newsletter \u2014 proof"
+    normalized = normalize_recipient_copy(source)
+    assert normalized == "Tiffany's newsletter - proof"
+    validate_recipient_copy(normalized)
+
+
 def test_seed_keeps_synthetic_contacts_out_of_deliverable_list(tmp_path):
     api = FakeAPI()
     manifest = make_runner(tmp_path, api).seed()
@@ -159,6 +171,7 @@ def test_immediate_send_rechecks_live_list_membership(tmp_path):
     assert config["generate_plain_content"] is False
     assert config["sender_id"] == 7
     assert config["suppression_group_id"] == 42
+    assert config["subject"] == "TWY SendGrid Migration Proof - Immediate"
 
 
 def test_send_aborts_if_live_membership_drifted(tmp_path):
@@ -177,8 +190,9 @@ def test_scheduled_send_is_exactly_600_seconds_in_future(tmp_path):
     runner = make_runner(tmp_path, api)
     runner.preflight()
     runner.seed()
-    runner.send("scheduled", BODY)
+    sent = runner.send("scheduled", BODY)
     assert api.schedules == [("ss-1", "2026-07-23T18:10:00Z")]
+    assert sent["email_config"]["subject"] == "TWY SendGrid Migration Proof - Scheduled"
 
 
 def test_existing_deterministic_send_is_reused_after_crash(tmp_path):

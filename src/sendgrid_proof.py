@@ -20,6 +20,17 @@ from sendgrid_proof_models import (
 )
 
 
+_RECIPIENT_COPY_TRANSLATIONS = str.maketrans({
+    0x00A0: " ",
+    0x2014: "-",
+    0x2019: "'",
+})
+
+
+def normalize_recipient_copy(text: str) -> str:
+    return text.translate(_RECIPIENT_COPY_TRANSLATIONS)
+
+
 def validate_recipient_copy(text: str) -> None:
     if not text.isascii():
         raise ValueError("SendGrid proof recipient copy must be ASCII")
@@ -207,6 +218,7 @@ class ProofRunner:
     def send(self, kind: str, body_md: str) -> dict:
         if kind not in {"immediate", "scheduled"}:
             raise ValueError("kind must be immediate or scheduled")
+        body_md = normalize_recipient_copy(body_md)
         validate_recipient_copy(body_md)
         list_id = self.manifest.object_ids["list_id"]
         resolved = self.api.list_contacts(list_id)
@@ -222,7 +234,9 @@ class ProofRunner:
                 "name": name,
                 "send_to": {"list_ids": [list_id], "all": False},
                 "email_config": {
-                    "subject": "TWY SendGrid Migration Proof",
+                    "subject": (
+                        f"TWY SendGrid Migration Proof - {kind.title()}"
+                    ),
                     "html_content": rendered.html,
                     "plain_content": rendered.plain_text,
                     "generate_plain_content": False,
