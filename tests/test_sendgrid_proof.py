@@ -42,6 +42,13 @@ class FakeAPI:
             ]}
         if endpoint == "/asm/groups":
             return [{"id": 42, "name": "TWY Proof"}]
+        if endpoint.startswith("/suppression/unsubscribes"):
+            return [{
+                "email": "unsubscribed@twy-sendgrid-proof.invalid",
+                "created": 1,
+            }]
+        if endpoint.startswith("/suppression/"):
+            return []
         return {}
 
     def create_list(self, name):
@@ -261,6 +268,9 @@ def test_collect_export_and_report_cover_created_state(tmp_path):
     report = runner.report()
     assert "cleaned_mapping" in report
     assert (tmp_path / "stats.json").exists()
+    assert (tmp_path / "suppressions.json").exists()
+    suppressions = (tmp_path / "suppressions.json").read_text()
+    assert "unsubscribed@twy-sendgrid-proof.invalid" in suppressions
     assert (tmp_path / "contact_export.json").exists()
     assert (
         tmp_path / "contacts" / "deliverable" / "contact_export_01.csv"

@@ -295,6 +295,30 @@ class ProofRunner:
             item["stats"] is not None for item in stats.values()
         )
         self.store.write_json("stats.json", stats)
+        suppressions = {
+            "global_unsubscribes": self.api.snapshot(
+                "/suppression/unsubscribes?limit=500&offset=0"
+            ),
+            "bounces": self.api.snapshot(
+                "/suppression/bounces?limit=500&offset=0"
+            ),
+            "blocks": self.api.snapshot(
+                "/suppression/blocks?limit=500&offset=0"
+            ),
+            "invalid_emails": self.api.snapshot(
+                "/suppression/invalid_emails?limit=500&offset=0"
+            ),
+            "spam_reports": self.api.snapshot(
+                "/suppression/spam_reports?limit=500&offset=0"
+            ),
+            "unsubscribe_groups": self.api.snapshot("/asm/groups"),
+        }
+        self.store.write_json("suppressions.json", suppressions)
+        synthetic_unsubscribe = "unsubscribed@twy-sendgrid-proof.invalid"
+        global_unsubscribe_proven = any(
+            item.get("email", "").lower() == synthetic_unsubscribe
+            for item in suppressions["global_unsubscribes"]
+        )
         return self._save(
             phase="collect",
             capabilities={
@@ -309,7 +333,17 @@ class ProofRunner:
                             "has not materialized every statistics object yet."
                         )
                     ),
-                )
+                ),
+                "suppression_snapshot": CapabilityResult(
+                    status=(
+                        "proven" if global_unsubscribe_proven else "unknown"
+                    ),
+                    evidence=("suppressions.json",),
+                    detail=(
+                        "Global unsubscribes, bounces, blocks, invalid emails, "
+                        "spam reports, and unsubscribe groups were retrieved."
+                    ),
+                ),
             },
         )
 
