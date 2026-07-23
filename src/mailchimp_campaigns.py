@@ -13,11 +13,10 @@ rendered template HTML lives at /root/twy/data/newsletters/twy_newsletter_templa
 -- splice body into its mc:edit="main_content" section and PUT raw html instead.
 """
 import os
-import re
 import time
-import markdown as md
 import requests
 
+from newsletter_rendering import render_newsletter
 
 def _mc_post_with_retry(path: str, *, json: dict | None = None, timeout: int = 60, attempts: int = 4):
     """POST to MC with retry on 429 (rate limit). Returns the final Response."""
@@ -38,30 +37,6 @@ def _mc_post_with_retry(path: str, *, json: dict | None = None, timeout: int = 6
         time.sleep(backoff)
         backoff *= 2
     return last
-
-
-# Email-safe button (table-based, Outlook-compatible). Wraps any paragraph that
-# contains only a link to habit.* / studio.* / calendar.* (the three action-URL
-# hosts) so the CTA reads as a button instead of a phrase. Idempotent: matches
-# the simple <p><a></a></p> pattern produced by markdown lib, not styled
-# <table> output.
-_CTA_BUTTON_HTML = (
-    '<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center"'
-    ' style="margin:24px auto;border-collapse:collapse;">'
-    '<tr><td bgcolor="#5d8399"'
-    ' style="background-color:#5d8399;border-radius:6px;padding:14px 32px;text-align:center;">'
-    '<a href="{href}" target="_blank"'
-    ' style="color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;'
-    'font-size:17px;font-weight:600;letter-spacing:0.3px;display:inline-block;">'
-    '<span style="color:#ffffff;">{text}</span>'
-    '</a></td></tr></table>'
-)
-
-_CTA_LINK_RE = re.compile(
-    r'<p[^>]*>\s*<a\s+[^>]*?href="(?P<href>[^"]*(?:habit\.tiffanywoodyoga\.com|'
-    r'studio\.tiffanywoodyoga\.com|calendar\.tiffanywoodyoga\.com)[^"]*)"[^>]*>(?P<text>[^<]+)</a>\s*</p>',
-    re.IGNORECASE,
-)
 
 
 # ----------------------------------------------------------------------------
@@ -100,13 +75,7 @@ def _template_id() -> int:
 
 def _md_to_html(body_md: str) -> str:
     """Convert markdown to email-safe HTML with proper paragraph spacing."""
-    html = md.markdown(body_md, extensions=["extra", "nl2br", "sane_lists"])
-    html = html.replace("<p>", '<p style="margin-bottom:1em">')
-    html = _CTA_LINK_RE.sub(
-        lambda m: _CTA_BUTTON_HTML.format(href=m.group("href"), text=m.group("text").strip()),
-        html,
-    )
-    return html
+    return render_newsletter(body_md).html
 
 
 def find_draft(title_contains: str, statuses: list[str] | None = None) -> dict | None:
