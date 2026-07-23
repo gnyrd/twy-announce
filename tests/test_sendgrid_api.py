@@ -152,6 +152,14 @@ def test_find_single_send_by_exact_name_follows_pages():
     assert api.find_single_send_by_name("Proof Immediate")["id"] == "ss-1"
 
 
+def test_find_single_send_handles_live_empty_null_result():
+    api, _ = make_api(FakeResponse(200, {
+        "result": None,
+        "_metadata": {"count": 0},
+    }))
+    assert api.find_single_send_by_name("Proof Immediate") is None
+
+
 def test_contact_export_start_and_ready_status():
     api, fake = make_api(
         FakeResponse(202, {"id": "export-1"}),

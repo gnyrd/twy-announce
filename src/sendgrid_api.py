@@ -166,7 +166,7 @@ class SendGridAPI:
         path = "/marketing/singlesends?page_size=100"
         while path:
             payload = self._request("GET", path)
-            for single_send in payload.get("result", []):
+            for single_send in payload.get("result") or []:
                 if single_send.get("name") == name:
                     return single_send
             path = payload.get("_metadata", {}).get("next")
