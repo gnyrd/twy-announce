@@ -39,6 +39,12 @@ INACTIVE_KEYS = {
     "reason",
     "source_status",
 }
+DELIVERABLE_KEYS = {
+    "email",
+    "custom_fields",
+    "proposed_lists",
+    "reasons",
+}
 
 
 class WriterSafetyError(RuntimeError):
@@ -95,7 +101,13 @@ def load_completed_evidence(path: Path) -> dict[str, Any]:
         emails = [_normalized_email(row.get("email")) for row in rows]
         if len(set(emails)) != len(emails):
             raise WriterSafetyError(f"{name} contains duplicate identities")
-        if name != "deliverable_contacts":
+        if name == "deliverable_contacts":
+            for row in rows:
+                if set(row) != DELIVERABLE_KEYS:
+                    raise WriterSafetyError(
+                        "deliverable contact has unexpected fields"
+                    )
+        else:
             for row in rows:
                 if set(row) != INACTIVE_KEYS:
                     raise WriterSafetyError(
@@ -375,6 +387,9 @@ def apply_operation_plan(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    report_root = Path(report_dir)
+    if (report_root / "COMPLETE").exists():
+        raise WriterSafetyError("apply report is already complete")
     fresh_plan = build_operation_plan(evidence_dir)
     if fresh_plan != plan:
         raise WriterSafetyError("operation plan differs from current evidence")
@@ -385,7 +400,7 @@ def apply_operation_plan(
     if api.user_email() != plan["target_account_email"]:
         raise WriterSafetyError("SendGrid target account does not match approval")
 
-    store = EvidenceStore(Path(report_dir))
+    store = EvidenceStore(report_root)
     store.write_json("started.json", {
         "operation_digest": plan["operation_digest"],
         "source_digest": plan["source_digest"],

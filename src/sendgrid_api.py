@@ -179,6 +179,19 @@ class SendGridAPI:
         ) or []
         return {str(email).strip().lower() for email in found}
 
+    def remove_group_suppression(
+        self,
+        group_id: int,
+        email: str,
+    ) -> None:
+        self._request(
+            "DELETE",
+            (
+                f"/asm/groups/{int(group_id)}/suppressions/"
+                f"{quote(email, safe='')}"
+            ),
+        )
+
     def contacts_by_emails(self, emails: list[str]) -> dict[str, dict]:
         payload = self._request(
             "POST",

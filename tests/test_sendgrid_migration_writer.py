@@ -13,6 +13,7 @@ from sendgrid_migration_writer import (
     build_parser,
     build_operation_plan,
     load_completed_evidence,
+    main,
     validate_approval,
 )
 
@@ -126,6 +127,15 @@ def test_completed_evidence_rejects_profile_data_in_inactive_shape(tmp_path):
     suppressed[0]["first_name"] = "Must not survive"
     _write_json(root / "marketing_suppressions.json", suppressed)
     with pytest.raises(WriterSafetyError, match="inactive"):
+        load_completed_evidence(root)
+
+
+def test_completed_evidence_rejects_unexpected_deliverable_fields(tmp_path):
+    root = completed_evidence(tmp_path)
+    deliverable = json.loads((root / "deliverable_contacts.json").read_text())
+    deliverable[0]["phone_number"] = "+15555550123"
+    _write_json(root / "deliverable_contacts.json", deliverable)
+    with pytest.raises(WriterSafetyError, match="deliverable"):
         load_completed_evidence(root)
 
 
@@ -460,6 +470,68 @@ def test_apply_orders_suppression_and_denylist_before_contact_upsert(tmp_path):
     assert (tmp_path / "apply_report" / "COMPLETE").exists()
 
 
+def test_apply_can_repeat_with_existing_resources_and_matching_denylist(tmp_path):
+    api = FakeWriterAPI()
+    evidence = completed_evidence(tmp_path)
+    plan = build_operation_plan(evidence)
+    now = datetime(2026, 7, 24, 19, 0, tzinfo=timezone.utc)
+    approval = valid_approval(plan, now)
+    denylist = tmp_path / "cleaned_denylist.json"
+    apply_operation_plan(
+        api,
+        plan,
+        approval,
+        evidence,
+        denylist,
+        tmp_path / "apply_report_1",
+        now=now,
+    )
+    api.calls.clear()
+
+    result = apply_operation_plan(
+        api,
+        plan,
+        approval,
+        evidence,
+        denylist,
+        tmp_path / "apply_report_2",
+        now=now,
+    )
+
+    assert not any(
+        call[0] in {
+            "create_list",
+            "create_field_definition",
+            "create_suppression_group",
+        }
+        for call in api.calls
+    )
+    assert result["postconditions"]["contacts_verified"] == 1
+    assert (tmp_path / "apply_report_2" / "COMPLETE").exists()
+
+
+def test_apply_rejects_reused_completed_report_before_provider_access(tmp_path):
+    api = FakeWriterAPI()
+    evidence = completed_evidence(tmp_path)
+    plan = build_operation_plan(evidence)
+    now = datetime(2026, 7, 24, 19, 0, tzinfo=timezone.utc)
+    report = tmp_path / "apply_report"
+    report.mkdir()
+    (report / "COMPLETE").write_text("complete\n")
+
+    with pytest.raises(WriterSafetyError, match="apply report.*complete"):
+        apply_operation_plan(
+            api,
+            plan,
+            valid_approval(plan, now),
+            evidence,
+            tmp_path / "cleaned_denylist.json",
+            report,
+            now=now,
+        )
+    assert api.calls == []
+
+
 def test_apply_rejects_missing_suppression_postcondition_before_upsert(tmp_path):
     api = FakeWriterAPI()
     api.search_group_suppressions = lambda group_id, emails: set()
@@ -520,6 +592,69 @@ def test_cli_plan_has_no_apply_or_send_side_effect_options():
     }
     assert "--approval-file" not in options
     assert "--send" not in options
+
+
+def test_cli_main_rejects_expected_digest_mismatch(tmp_path, capsys):
+    evidence = completed_evidence(tmp_path)
+    plan = build_operation_plan(evidence)
+    operation_plan = tmp_path / "operation-plan.json"
+    approval_file = tmp_path / "approval.json"
+    _write_json(operation_plan, plan)
+    _write_json(
+        approval_file,
+        valid_approval(
+            plan,
+            datetime(2026, 7, 24, 19, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    result = main([
+        "apply",
+        "--evidence-dir", str(evidence),
+        "--operation-plan", str(operation_plan),
+        "--approval-file", str(approval_file),
+        "--expected-plan-digest", "0" * 64,
+        "--apply-id", "apply_20260724T190000Z",
+    ])
+
+    assert result == 3
+    assert "expected plan digest" in capsys.readouterr().err
+
+
+def test_cli_main_missing_key_fails_before_api_construction(
+    tmp_path, monkeypatch, capsys
+):
+    evidence = completed_evidence(tmp_path)
+    plan = build_operation_plan(evidence)
+    operation_plan = tmp_path / "operation-plan.json"
+    approval_file = tmp_path / "approval.json"
+    _write_json(operation_plan, plan)
+    _write_json(
+        approval_file,
+        valid_approval(
+            plan,
+            datetime(2026, 7, 24, 19, 0, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr("twy_paths.load_env", lambda: None)
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
+
+    class MustNotConstruct:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("SendGridAPI constructed without an API key")
+
+    monkeypatch.setattr("sendgrid_api.SendGridAPI", MustNotConstruct)
+    result = main([
+        "apply",
+        "--evidence-dir", str(evidence),
+        "--operation-plan", str(operation_plan),
+        "--approval-file", str(approval_file),
+        "--expected-plan-digest", plan["operation_digest"],
+        "--apply-id", "apply_20260724T190000Z",
+    ])
+
+    assert result == 2
+    assert "missing required configuration" in capsys.readouterr().err
 
 
 def test_writer_source_has_no_global_suppression_send_or_delete_endpoint():

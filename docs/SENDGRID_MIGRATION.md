@@ -101,32 +101,72 @@ addresses to a deleted or nonexistent unsubscribe group can place them on the
 global suppression list. The writer always verifies the exact group by ID
 before adding group-specific suppressions.
 
+`TWY Newsletters` is intentionally the account's default unsubscribe group
+because it is TWY's only production unsubscribe group. SendGrid still requires
+each send to identify the enforcing group with `asm.group_id` (or the
+equivalent Single Send field). The default flag controls which group appears
+on the recipient preferences page when `groups_to_display` is omitted; it does
+not make an untagged send honor this group automatically.
+
 `first_name` and `last_name` use SendGrid reserved contact fields.
 `twy_status` and `twy_role` resolve to exact custom-field IDs at apply time.
 Unsubscribed, cleaned, and archived records never become Marketing Contacts.
+Cleaned/bounced state is deliberately not converted into an unsubscribe-group
+suppression. It is retained in the private local cleaned denylist instead.
+Every future TWY contact importer must read that denylist before constructing
+provider writes.
 
 Any partial apply remains incomplete. The writer does not delete or roll back
 provider objects automatically. A retry requires a fresh read-only
-reconciliation and a new approval.
+reconciliation, a distinct apply ID, and a new approval. A completed apply ID
+is immutable and cannot be reused.
 
 No production apply has been approved or run.
 
 ## Suppression enforcement harness
 
 `src/sendgrid_suppression_test.py` is a separately approval-gated test harness.
-It has no CLI and has not been run against SendGrid.
+The proof runner has no CLI and has not been run against SendGrid. The file's
+only CLI action is the separately approved cleanup of a completed proof.
 
-It accepts only `admin@tiffanywoodyoga.com` or `jpgan6@gmail.com`, an isolated
-list containing exactly that one address, the exact `TWY Newsletters` group,
-and the statement
+It accepts only `admin@tiffanywoodyoga.com` or `jpgan6@gmail.com`, with
+`jpgan6@gmail.com` as the preferred proof recipient. The admin mailbox remains
+available only for an explicitly selected proof. The harness also requires an
+isolated list containing exactly that one address, the exact
+`TWY Newsletters` group, and the statement
 `APPROVE TWY SENDGRID SUPPRESSION ENFORCEMENT TEST`.
 
 The harness adds and verifies the temporary group suppression before creating a
 Single Send tagged with the same group. It passes only when SendGrid reports
 one request, zero deliveries, zero unique opens, zero unique clicks, and the
-suppression still present. It records the Single Send ID and temporary
-suppression as cleanup requirements.
+suppression still present. Stats are requested beginning with the previous UTC
+date so a run near midnight cannot fall outside the query window. The exact
+`requests == 1` result is a fail-closed live-provider assumption that must be
+confirmed during the first separately approved run.
 
-The harness never auto-removes the suppression because removal restores
-deliverability. Running the proof and later cleaning it up are separate
-provider mutations requiring explicit approval.
+The completed proof records the Single Send ID, temporary suppression, and an
+immutable `cleanup-plan.json`. The proof never auto-removes the suppression
+because removal restores deliverability. Running the proof and cleaning it up
+are separate provider mutations requiring separate approvals.
+
+Cleanup requires the exact statement
+`APPROVE TWY SENDGRID SUPPRESSION TEST CLEANUP`, the proof digest, cleanup
+digest, target account, recipient, and an approval window of no more than 24
+hours. The cleanup command verifies the account, exact group, and current
+suppression membership before deleting only that group membership. It then
+re-reads the group and seals evidence only if the recipient is absent:
+
+```bash
+PYTHONPATH=src python3 src/sendgrid_suppression_test.py cleanup \
+  --proof-plan /private/path/proof-plan.json \
+  --proof-evidence-dir /root/twy/data/sendgrid_proofs/PROOF_RUN_ID \
+  --approval-file /private/path/cleanup-approval.json \
+  --expected-cleanup-digest CLEANUP_OPERATION_DIGEST \
+  --cleanup-id cleanup_YYYYMMDDTHHMMSSZ
+```
+
+This command is implemented and tested against fakes but has not been invoked
+against SendGrid. The source safety scan that excludes global suppression,
+deletion, and mail-send endpoints applies to the production contact writer.
+The suppression harness is intentionally Single-Send-capable and remains
+separately approval-gated.

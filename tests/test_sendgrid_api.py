@@ -322,6 +322,16 @@ def test_search_group_suppressions_uses_exact_group_and_addresses():
     }
 
 
+def test_remove_group_suppression_uses_exact_group_and_encoded_address():
+    api, fake = make_api(FakeResponse(204, None))
+    api.remove_group_suppression(42, "jpgan6+proof@gmail.com")
+    assert fake.calls[-1]["method"] == "DELETE"
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/asm/groups/42/suppressions/jpgan6%2Bproof%40gmail.com"
+    )
+    assert fake.calls[-1]["json"] is None
+
+
 def test_contacts_by_emails_returns_only_contacts_and_raises_provider_errors():
     api, fake = make_api(FakeResponse(200, {
         "result": {
