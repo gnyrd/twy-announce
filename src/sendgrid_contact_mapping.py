@@ -113,6 +113,9 @@ def map_contact(
     elif source.status == "unsubscribed":
         terminal = "marketing_suppressed"
         reasons.append("mailchimp_unsubscribed")
+    elif source.status == "archived":
+        terminal = "archived_excluded"
+        reasons.append("mailchimp_archived")
     elif source.status == "subscribed":
         terminal = "deliverable"
         reasons.append("mailchimp_subscribed")

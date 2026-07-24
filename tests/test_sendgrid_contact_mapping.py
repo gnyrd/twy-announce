@@ -28,7 +28,7 @@ def source(status, email=" Person@Example.COM ", tags=()):
         ("cleaned", "cleaned_denylist"),
         ("pending", "quarantine"),
         ("transactional", "quarantine"),
-        ("archived", "quarantine"),
+        ("archived", "archived_excluded"),
         ("new-status", "quarantine"),
     ],
 )
@@ -64,6 +64,14 @@ def test_contact_search_error_quarantines():
         SendGridSafetyState(lookup_error="backend unavailable"),
     )
     assert mapped.terminal_class == "quarantine"
+
+
+def test_archived_is_excluded_without_profile_or_lists():
+    mapped = map_contact(source("archived"), SendGridSafetyState())
+    assert mapped.terminal_class == "archived_excluded"
+    assert mapped.proposed_lists == frozenset()
+    assert mapped.custom_fields == {}
+    assert mapped.reasons == ("mailchimp_archived",)
 
 
 def test_email_is_normalized_and_provenance_preserved():
