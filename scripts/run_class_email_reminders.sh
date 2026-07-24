@@ -10,12 +10,4 @@ cd "$REPO_ROOT"
 
 PYTHON_BIN="$(command -v python3)"
 
-# Load local overrides from this repo (.env)
-if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  . ./.env
-  set +a
-fi
-
 "$PYTHON_BIN" scripts/send_class_email_reminders.py "$@"
