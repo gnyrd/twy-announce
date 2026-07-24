@@ -93,7 +93,10 @@ The apply order is suppression-first:
 2. Resolve or create the recipient-facing `TWY Newsletters` unsubscribe group.
 3. Re-read that group by ID and require exact name, description, and default
    state.
-4. Add and verify the approved marketing suppressions in that group.
+4. Add the approved marketing suppressions, then check their group-specific
+   membership up to 15 times at one-second intervals to tolerate SendGrid
+   read-after-write lag. Continue only after every approved suppression is
+   visible.
 5. Write the local cleaned denylist once, privately and atomically.
 6. Upsert only deliverable contacts and wait for every async job.
 7. Re-read every deliverable contact and verify its expected list membership.

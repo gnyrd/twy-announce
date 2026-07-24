@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 from sendgrid_migration_evidence import EvidenceStore
@@ -45,6 +46,8 @@ DELIVERABLE_KEYS = {
     "proposed_lists",
     "reasons",
 }
+SUPPRESSION_VERIFY_ATTEMPTS = 15
+SUPPRESSION_VERIFY_DELAY_SECONDS = 1.0
 
 
 class WriterSafetyError(RuntimeError):
@@ -386,6 +389,8 @@ def apply_operation_plan(
     report_dir: Path,
     *,
     now: datetime | None = None,
+    sleep_fn=time.sleep,
+    suppression_verify_attempts: int = SUPPRESSION_VERIFY_ATTEMPTS,
 ) -> dict[str, Any]:
     report_root = Path(report_dir)
     if report_root.exists() and any(report_root.iterdir()):
@@ -423,12 +428,18 @@ def apply_operation_plan(
     suppression_batch = plan["batch_limits"]["group_suppression"]
     for batch in _chunks(suppressed_emails, suppression_batch):
         api.add_group_suppressions(group_id, batch)
-    verified_suppressions: set[str] = set()
-    for batch in _chunks(suppressed_emails, suppression_batch):
-        verified_suppressions.update(
-            api.search_group_suppressions(group_id, batch)
-        )
-    if verified_suppressions != set(suppressed_emails):
+    expected_suppressions = set(suppressed_emails)
+    for attempt in range(suppression_verify_attempts):
+        verified_suppressions: set[str] = set()
+        for batch in _chunks(suppressed_emails, suppression_batch):
+            verified_suppressions.update(
+                api.search_group_suppressions(group_id, batch)
+            )
+        if verified_suppressions == expected_suppressions:
+            break
+        if attempt + 1 < suppression_verify_attempts:
+            sleep_fn(SUPPRESSION_VERIFY_DELAY_SECONDS)
+    else:
         raise WriterSafetyError("group suppression postcondition failed")
 
     _write_private_json_once(Path(denylist_path), cleaned_rows)

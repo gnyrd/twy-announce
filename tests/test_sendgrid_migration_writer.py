@@ -358,6 +358,8 @@ def _apply(tmp_path, api=None):
         tmp_path / "cleaned_denylist.json",
         tmp_path / "apply_report",
         now=now,
+        sleep_fn=lambda _: None,
+        suppression_verify_attempts=3,
     )
     return result
 
@@ -564,6 +566,28 @@ def test_apply_rejects_missing_suppression_postcondition_before_upsert(tmp_path)
     with pytest.raises(WriterSafetyError, match="suppression postcondition"):
         _apply(tmp_path, api)
     assert not any(call[0] == "upsert_contacts" for call in api.calls)
+
+
+def test_apply_retries_suppression_verification_until_provider_is_consistent(
+    tmp_path,
+):
+    api = FakeWriterAPI()
+    search = api.search_group_suppressions
+    attempts = 0
+
+    def eventually_consistent(group_id, emails):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return set()
+        return search(group_id, emails)
+
+    api.search_group_suppressions = eventually_consistent
+    result = _apply(tmp_path, api)
+
+    assert attempts == 2
+    assert result["postconditions"]["group_suppressions_verified"] == 1
+    assert any(call[0] == "upsert_contacts" for call in api.calls)
 
 
 def test_apply_rejects_failed_contact_job(tmp_path):
