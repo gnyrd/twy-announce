@@ -73,6 +73,44 @@ def canonical_digest(contacts: Iterable[DesiredContact]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_MANIFEST_BY_TERMINAL = {
+    "deliverable": "deliverable_contacts",
+    "marketing_suppressed": "marketing_suppressions",
+    "cleaned_denylist": "cleaned_denylist",
+    "archived_excluded": "archived_exclusions",
+}
+
+
+def retention_manifests(
+    contacts: Iterable[DesiredContact],
+) -> dict[str, list[dict[str, Any]]]:
+    result = {name: [] for name in _MANIFEST_BY_TERMINAL.values()}
+    for contact in sorted(contacts, key=lambda item: item.email):
+        manifest = _MANIFEST_BY_TERMINAL.get(contact.terminal_class)
+        if manifest is None:
+            continue
+        if contact.terminal_class == "deliverable":
+            row = {
+                "email": contact.email,
+                "custom_fields": dict(sorted(contact.custom_fields.items())),
+                "proposed_lists": sorted(contact.proposed_lists),
+                "reasons": list(contact.reasons),
+            }
+        else:
+            row = {
+                "email": contact.email,
+                "effective_at": contact.provenance.get(
+                    "mailchimp_last_changed", ""
+                ),
+                "reason": contact.reasons[0] if contact.reasons else "",
+                "source_status": contact.provenance.get(
+                    "mailchimp_status", ""
+                ),
+            }
+        result[manifest].append(row)
+    return result
+
+
 def summarize(contacts: Iterable[DesiredContact]) -> dict[str, Any]:
     contacts = list(contacts)
     terminal_counts = Counter(contact.terminal_class for contact in contacts)
