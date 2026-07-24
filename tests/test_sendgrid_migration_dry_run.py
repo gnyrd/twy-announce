@@ -81,7 +81,12 @@ class FakeSendGrid:
     )
 
     def safety_states(self, emails):
-        return {}
+        return {
+            email: {
+                "confirmed_absent": True,
+            }
+            for email in emails
+        }
 
     def inventory(self):
         return {"lists": [], "custom_fields": [], "groups": []}

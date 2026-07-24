@@ -65,6 +65,8 @@ def test_mailchimp_paginates_one_status_exactly():
     ]
     assert [call["params"]["offset"] for call in fake.calls] == [0, 1]
     assert all(call["params"]["status"] == "subscribed" for call in fake.calls)
+    assert fake.calls[0]["headers"]["Authorization"].startswith("Basic ")
+    assert "secret" not in fake.calls[0]["headers"]["Authorization"]
 
 
 def test_mailchimp_rejects_status_mismatch():

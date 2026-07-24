@@ -155,7 +155,11 @@ def map_contacts(
         if email in seen:
             raise MappingError(f"duplicate Mailchimp source identity: {email}")
         seen.add(email)
-        state = sendgrid_states.get(email, SendGridSafetyState())
+        state = sendgrid_states.get(email)
+        if state is None:
+            state = SendGridSafetyState(
+                lookup_error="missing SendGrid safety state"
+            )
         if isinstance(state, dict):
             state = SendGridSafetyState(**state)
         mapped.append(map_contact(source, state))

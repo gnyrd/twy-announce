@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 import re
 import time
@@ -137,7 +138,11 @@ class ReadOnlyMailchimpAPI(_ReadClient):
         return self._perform(
             method,
             f"{self.base_url}{path}",
-            headers={"Authorization": f"apikey {self._secret}"},
+            headers={
+                "Authorization": "Basic " + base64.b64encode(
+                    f"x:{self._secret}".encode()
+                ).decode()
+            },
             **kwargs,
         )
 

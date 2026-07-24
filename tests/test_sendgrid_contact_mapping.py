@@ -81,6 +81,12 @@ def test_duplicate_source_identity_fails_closed():
         )
 
 
+def test_missing_sendgrid_safety_state_fails_closed():
+    result = map_contacts([source("subscribed")], {})
+    assert result[0].terminal_class == "quarantine"
+    assert result[0].reasons == ("sendgrid_lookup_error",)
+
+
 def test_each_unique_email_has_exactly_one_terminal_class():
     mapped = map_contacts(
         [
