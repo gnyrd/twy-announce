@@ -14,7 +14,11 @@ from typing import Any
 
 from migration_read_clients import ReadOnlyMailchimpAPI, ReadOnlySendGridAPI
 from sendgrid_contact_mapping import SourceContact, map_contacts
-from sendgrid_migration_evidence import EvidenceStore, summarize
+from sendgrid_migration_evidence import (
+    EvidenceStore,
+    retention_manifests,
+    summarize,
+)
 
 
 ALLOWED_POST = {"/marketing/contacts/search/emails"}
@@ -209,6 +213,14 @@ def run_dry_run(
     emails = [source.email for source in sources]
     safety_states = sendgrid.safety_states(emails)
     contacts = map_contacts(sources, safety_states)
+    manifests = retention_manifests(contacts)
+    retention_manifest_counts = {
+        key: len(rows)
+        for key, rows in sorted(manifests.items())
+    }
+    retention_manifests_complete = (
+        sum(retention_manifest_counts.values()) == len(contacts)
+    )
     sendgrid_inventory = sendgrid.inventory()
     mailchimp_inventory = mailchimp.inventory(WELCOME_JOURNEY_ID)
     dependencies = source_dependency_report(mailchimp_inventory)
@@ -230,10 +242,13 @@ def run_dry_run(
         "mutation_endpoint_count": len(mutations),
         "journey_backup_match": journey_report["match"],
         "source_dependencies_complete": dependencies["complete"],
+        "retention_manifest_counts": retention_manifest_counts,
+        "retention_manifests_complete": retention_manifests_complete,
         "gate_passed": not coverage_errors
         and summary["terminal_counts"].get("quarantine", 0) == 0
         and journey_report["match"]
-        and dependencies["complete"],
+        and dependencies["complete"]
+        and retention_manifests_complete,
     })
 
     store.write_json("manifest.json", summary)
@@ -247,6 +262,8 @@ def run_dry_run(
     store.write_json("journey_backup_comparison.json", journey_report)
     store.write_json("endpoint_audit.json", endpoint_audit)
     store.write_json("proof_state.json", proof_manifest or {})
+    for name, rows in manifests.items():
+        store.write_json(f"{name}.json", rows)
     store.complete()
     return summary
 

@@ -32,7 +32,14 @@ class FakeMailchimp:
             "cleaned": [],
             "pending": [],
             "transactional": [],
-            "archived": [],
+            "archived": [{
+                "id": "3",
+                "email_address": "old@example.com",
+                "status": "archived",
+                "tags": [{"name": "Status - Lead"}],
+                "merge_fields": {"FNAME": "Old"},
+                "last_changed": "2024-10-29T16:39:29+00:00",
+            }],
         }
 
     def inventory(self, journey_id):
@@ -124,9 +131,29 @@ def test_run_writes_complete_zero_mutation_evidence(tmp_path):
         },
     )
     assert result["terminal_counts"] == {
+        "archived_excluded": 1,
         "deliverable": 1,
         "marketing_suppressed": 1,
     }
+    assert result["action_counts"]["would_exclude_archived"] == 1
+    assert result["gate_passed"] is True
+    assert result["retention_manifest_counts"] == {
+        "archived_exclusions": 1,
+        "cleaned_denylist": 0,
+        "deliverable_contacts": 1,
+        "marketing_suppressions": 1,
+    }
+    archived = json.loads(
+        (tmp_path / "run" / "archived_exclusions.json").read_text()
+    )
+    assert archived == [{
+        "effective_at": "2024-10-29T16:39:29+00:00",
+        "email": "old@example.com",
+        "reason": "mailchimp_archived",
+        "source_status": "archived",
+    }]
+    for name in result["retention_manifest_counts"]:
+        assert (tmp_path / "run" / f"{name}.json").exists()
     manifest = json.loads((tmp_path / "run" / "manifest.json").read_text())
     assert manifest["mutation_endpoint_count"] == 0
     assert manifest["journey_backup_match"] is True

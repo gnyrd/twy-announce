@@ -127,6 +127,8 @@ def summarize(contacts: Iterable[DesiredContact]) -> dict[str, Any]:
             action_counts["would_add_or_preserve_marketing_suppression"] += 1
         elif contact.terminal_class == "cleaned_denylist":
             action_counts["cleaned_denylist_only"] += 1
+        elif contact.terminal_class == "archived_excluded":
+            action_counts["would_exclude_archived"] += 1
         else:
             action_counts["quarantine"] += 1
     return {
