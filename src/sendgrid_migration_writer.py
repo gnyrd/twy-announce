@@ -388,8 +388,8 @@ def apply_operation_plan(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     report_root = Path(report_dir)
-    if (report_root / "COMPLETE").exists():
-        raise WriterSafetyError("apply report is already complete")
+    if report_root.exists() and any(report_root.iterdir()):
+        raise WriterSafetyError("apply report already exists")
     fresh_plan = build_operation_plan(evidence_dir)
     if fresh_plan != plan:
         raise WriterSafetyError("operation plan differs from current evidence")

@@ -35,6 +35,10 @@ The run also writes four mutually exclusive purpose-specific manifests:
 - `cleaned_denylist.json`
 - `archived_exclusions.json`
 
+Each deliverable row has exactly four fields: normalized `email`,
+`custom_fields`, `proposed_lists`, and `reasons`. The dry-run producer and
+production writer both test this exact schema and fail closed on drift.
+
 Inactive manifests contain only the normalized email, effective timestamp,
 reason, and source status. Names, merge fields, tags, roles, list membership,
 and engagement history are discarded. Archived exclusions are migration
@@ -118,8 +122,8 @@ provider writes.
 
 Any partial apply remains incomplete. The writer does not delete or roll back
 provider objects automatically. A retry requires a fresh read-only
-reconciliation, a distinct apply ID, and a new approval. A completed apply ID
-is immutable and cannot be reused.
+reconciliation, a distinct apply ID, and a new approval. Any apply ID with
+existing evidence, complete or partial, is immutable and cannot be reused.
 
 No production apply has been approved or run.
 
@@ -128,6 +132,8 @@ No production apply has been approved or run.
 `src/sendgrid_suppression_test.py` is a separately approval-gated test harness.
 The proof runner has no CLI and has not been run against SendGrid. The file's
 only CLI action is the separately approved cleanup of a completed proof.
+Both proof creation and cleanup independently enforce the same two-address
+recipient allowlist before any provider access.
 
 It accepts only `admin@tiffanywoodyoga.com` or `jpgan6@gmail.com`, with
 `jpgan6@gmail.com` as the preferred proof recipient. The admin mailbox remains

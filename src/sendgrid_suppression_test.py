@@ -47,6 +47,15 @@ def _normalized_email(value: Any) -> str:
     return email
 
 
+def _allowed_recipient(value: Any) -> str:
+    recipient = _normalized_email(value)
+    if recipient not in ALLOWED_RECIPIENTS:
+        raise SuppressionTestSafetyError(
+            "test recipient is outside the explicit allowlist"
+        )
+    return recipient
+
+
 def build_suppression_test_plan(
     *,
     run_id: str,
@@ -55,11 +64,7 @@ def build_suppression_test_plan(
     group_id: int,
     sender_id: int,
 ) -> dict[str, Any]:
-    normalized = _normalized_email(recipient)
-    if normalized not in ALLOWED_RECIPIENTS:
-        raise SuppressionTestSafetyError(
-            "test recipient is outside the explicit allowlist"
-        )
+    normalized = _allowed_recipient(recipient)
     if not run_id or "/" in run_id or "\\" in run_id:
         raise SuppressionTestSafetyError("test run_id is unsafe")
     if not list_id:
@@ -159,7 +164,7 @@ def _cleanup_plan_from_result(
 ) -> dict[str, Any]:
     _validate_operation_digest(proof_plan, "proof")
     cleanup = result.get("cleanup_required") or {}
-    recipient = _normalized_email(proof_plan.get("recipient"))
+    recipient = _allowed_recipient(proof_plan.get("recipient"))
     single_send_id = result.get("single_send_id")
     if (
         result.get("operation_digest") != proof_plan["operation_digest"]
@@ -219,6 +224,7 @@ def _validate_cleanup_approval(
     now: datetime,
 ) -> None:
     _validate_operation_digest(plan, "cleanup")
+    _allowed_recipient(plan.get("recipient"))
     expected = (
         ("approved_by", "JP", "approver"),
         (

@@ -519,7 +519,33 @@ def test_apply_rejects_reused_completed_report_before_provider_access(tmp_path):
     report.mkdir()
     (report / "COMPLETE").write_text("complete\n")
 
-    with pytest.raises(WriterSafetyError, match="apply report.*complete"):
+    with pytest.raises(WriterSafetyError, match="already exists"):
+        apply_operation_plan(
+            api,
+            plan,
+            valid_approval(plan, now),
+            evidence,
+            tmp_path / "cleaned_denylist.json",
+            report,
+            now=now,
+        )
+    assert api.calls == []
+
+
+def test_apply_rejects_reused_incomplete_report_before_provider_access(
+    tmp_path,
+):
+    api = FakeWriterAPI()
+    evidence = completed_evidence(tmp_path)
+    plan = build_operation_plan(evidence)
+    now = datetime(2026, 7, 24, 19, 0, tzinfo=timezone.utc)
+    report = tmp_path / "apply_report"
+    report.mkdir()
+    _write_json(report / "started.json", {
+        "operation_digest": plan["operation_digest"],
+    })
+
+    with pytest.raises(WriterSafetyError, match="already exists"):
         apply_operation_plan(
             api,
             plan,

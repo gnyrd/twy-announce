@@ -9,6 +9,8 @@ from sendgrid_suppression_test import (
     SUPPRESSION_CLEANUP_APPROVAL_STATEMENT,
     SUPPRESSION_TEST_APPROVAL_STATEMENT,
     SuppressionTestSafetyError,
+    _canonical_digest,
+    _cleanup_plan_from_result,
     build_parser,
     build_suppression_cleanup_plan,
     build_suppression_test_plan,
@@ -316,6 +318,52 @@ def test_cleanup_requires_a_separate_exact_approval(tmp_path):
         call[0] == "remove_group_suppression"
         for call in api.calls
     )
+
+
+def test_cleanup_plan_rejects_recipient_outside_proof_allowlist():
+    proof_plan = plan_for(PREFERRED_SUPPRESSION_TEST_RECIPIENT)
+    proof_plan["recipient"] = "real-subscriber@example.com"
+    proof_plan["operation_digest"] = _canonical_digest({
+        key: value
+        for key, value in proof_plan.items()
+        if key != "operation_digest"
+    })
+    result = {
+        "operation_digest": proof_plan["operation_digest"],
+        "single_send_id": "single-send-1",
+        "cleanup_required": {
+            "remove_temporary_group_suppression":
+                "real-subscriber@example.com",
+            "single_send_id": "single-send-1",
+        },
+    }
+    with pytest.raises(SuppressionTestSafetyError, match="allowlist"):
+        _cleanup_plan_from_result(proof_plan, result)
+
+
+def test_cleanup_execution_rechecks_recipient_allowlist_before_provider_access(
+    tmp_path,
+):
+    _, cleanup_plan = completed_proof_for_cleanup(tmp_path)
+    cleanup_plan["recipient"] = "real-subscriber@example.com"
+    cleanup_plan["operation_digest"] = _canonical_digest({
+        key: value
+        for key, value in cleanup_plan.items()
+        if key != "operation_digest"
+    })
+    approval = cleanup_approval_for(cleanup_plan)
+    api = FakeSuppressionAPI()
+    api.suppressed = {"real-subscriber@example.com"}
+
+    with pytest.raises(SuppressionTestSafetyError, match="allowlist"):
+        run_suppression_cleanup(
+            api,
+            cleanup_plan,
+            approval,
+            EvidenceStore(tmp_path / "cleanup-evidence"),
+            now=NOW,
+        )
+    assert api.calls == []
 
 
 def test_cleanup_removes_only_the_proof_suppression_and_verifies_absence(

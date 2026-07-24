@@ -152,6 +152,15 @@ def test_run_writes_complete_zero_mutation_evidence(tmp_path):
         "reason": "mailchimp_archived",
         "source_status": "archived",
     }]
+    deliverable = json.loads(
+        (tmp_path / "run" / "deliverable_contacts.json").read_text()
+    )
+    assert set(deliverable[0]) == {
+        "email",
+        "custom_fields",
+        "proposed_lists",
+        "reasons",
+    }
     for name in result["retention_manifest_counts"]:
         assert (tmp_path / "run" / f"{name}.json").exists()
     manifest = json.loads((tmp_path / "run" / "manifest.json").read_text())
