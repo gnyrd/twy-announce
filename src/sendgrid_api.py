@@ -92,8 +92,112 @@ class SendGridAPI:
     def account(self) -> dict:
         return self._request("GET", "/user/account")
 
+    def user_email(self) -> str:
+        payload = self._request("GET", "/user/email")
+        email = str((payload or {}).get("email") or "").strip().lower()
+        if not email or "@" not in email:
+            raise SendGridAPIError("SendGrid account email response is invalid")
+        return email
+
+    def marketing_lists(self) -> list[dict]:
+        path = "/marketing/lists?page_size=1000"
+        result: list[dict] = []
+        seen: set[str] = set()
+        while path:
+            if path in seen:
+                raise SendGridAPIError("SendGrid list pagination loop")
+            seen.add(path)
+            payload = self._request("GET", path)
+            result.extend(payload.get("result") or [])
+            path = (payload.get("_metadata") or {}).get("next")
+        return result
+
     def create_list(self, name: str) -> dict:
         return self._request("POST", "/marketing/lists", json={"name": name})
+
+    def field_definitions(self) -> list[dict]:
+        payload = self._request("GET", "/marketing/field_definitions")
+        return list(payload.get("custom_fields") or []) + list(
+            payload.get("reserved_fields") or []
+        )
+
+    def create_field_definition(self, name: str, field_type: str) -> dict:
+        return self._request(
+            "POST",
+            "/marketing/field_definitions",
+            json={"name": name, "field_type": field_type},
+        )
+
+    def suppression_groups(self) -> list[dict]:
+        payload = self._request("GET", "/asm/groups")
+        return list(payload or [])
+
+    def create_suppression_group(
+        self,
+        name: str,
+        description: str,
+        is_default: bool,
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/asm/groups",
+            json={
+                "name": name,
+                "description": description,
+                "is_default": is_default,
+            },
+        )
+
+    def suppression_group(self, group_id: int) -> dict:
+        return self._request("GET", f"/asm/groups/{int(group_id)}")
+
+    def add_group_suppressions(
+        self,
+        group_id: int,
+        emails: list[str],
+    ) -> None:
+        self._request(
+            "POST",
+            f"/asm/groups/{int(group_id)}/suppressions",
+            json={"recipient_emails": emails},
+        )
+
+    def search_group_suppressions(
+        self,
+        group_id: int,
+        emails: list[str],
+    ) -> set[str]:
+        payload = self._request(
+            "POST",
+            f"/asm/groups/{int(group_id)}/suppressions/search",
+            json={"recipient_emails": emails},
+        )
+        found = (
+            payload.get("recipient_emails")
+            if isinstance(payload, dict)
+            else payload
+        ) or []
+        return {str(email).strip().lower() for email in found}
+
+    def contacts_by_emails(self, emails: list[str]) -> dict[str, dict]:
+        payload = self._request(
+            "POST",
+            "/marketing/contacts/search/emails",
+            json={"emails": emails},
+            allow_not_found=True,
+        )
+        if payload is None:
+            return {}
+        result: dict[str, dict] = {}
+        for email, entry in (payload.get("result") or {}).items():
+            normalized = str(email).strip().lower()
+            if entry.get("contact"):
+                result[normalized] = entry["contact"]
+            elif entry.get("error") != "contact not found":
+                raise SendGridAPIError(
+                    f"SendGrid contact lookup failed for {normalized}"
+                )
+        return result
 
     def list_contacts(self, list_id: str) -> list[dict]:
         payload = self._request(

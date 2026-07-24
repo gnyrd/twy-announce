@@ -46,6 +46,20 @@ def test_create_list_uses_marketing_endpoint():
     assert fake.calls[-1]["json"] == {"name": "Proof"}
 
 
+def test_marketing_lists_return_complete_inventory():
+    api, fake = make_api(FakeResponse(200, {
+        "result": [{"id": "list-1", "name": "TWY Marketing"}],
+        "_metadata": {},
+    }))
+    assert api.marketing_lists() == [
+        {"id": "list-1", "name": "TWY Marketing"}
+    ]
+    assert fake.calls[-1]["method"] == "GET"
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/marketing/lists?page_size=1000"
+    )
+
+
 def test_upsert_contacts_returns_async_job_id():
     api, fake = make_api(FakeResponse(202, {"job_id": "job-1"}))
     job_id = api.upsert_contacts(["list-1"], [{"email": "a@example.com"}])
@@ -219,3 +233,115 @@ def test_api_error_never_exposes_key():
         api._request("GET", "/bad")
     assert "SG.secret-proof-key" not in str(caught.value)
     assert "[REDACTED]" in str(caught.value)
+
+
+def test_user_email_requires_exact_email_payload():
+    api, fake = make_api(FakeResponse(200, {"email": "Admin@TiffanyWoodYoga.com"}))
+    assert api.user_email() == "admin@tiffanywoodyoga.com"
+    assert fake.calls[-1]["method"] == "GET"
+    assert fake.calls[-1]["url"].endswith("/v3/user/email")
+
+
+def test_field_definition_inventory_and_creation():
+    api, fake = make_api(
+        FakeResponse(200, {
+            "custom_fields": [{"id": "w1", "name": "twy_status", "field_type": "Text"}],
+            "reserved_fields": [{"id": "_rf0_T", "name": "first_name", "field_type": "Text"}],
+        }),
+        FakeResponse(201, {
+            "id": "w2",
+            "name": "twy_role",
+            "field_type": "Text",
+        }),
+    )
+    assert [row["name"] for row in api.field_definitions()] == [
+        "twy_status",
+        "first_name",
+    ]
+    assert api.create_field_definition("twy_role", "Text")["id"] == "w2"
+    assert fake.calls[-1]["method"] == "POST"
+    assert fake.calls[-1]["url"].endswith("/v3/marketing/field_definitions")
+    assert fake.calls[-1]["json"] == {
+        "name": "twy_role",
+        "field_type": "Text",
+    }
+
+
+def test_suppression_group_creation_resolution_and_group_specific_add():
+    api, fake = make_api(
+        FakeResponse(200, [{"id": 12, "name": "Existing"}]),
+        FakeResponse(201, {
+            "id": 42,
+            "name": "TWY Newsletters",
+            "description": "Tiffany Wood Yoga newsletters",
+            "is_default": True,
+        }),
+        FakeResponse(200, {
+            "id": 42,
+            "name": "TWY Newsletters",
+            "description": "Tiffany Wood Yoga newsletters",
+            "is_default": True,
+        }),
+        FakeResponse(201, {"recipient_emails": ["unsub@example.com"]}),
+    )
+    assert api.suppression_groups()[0]["id"] == 12
+    created = api.create_suppression_group(
+        "TWY Newsletters",
+        "Tiffany Wood Yoga newsletters",
+        True,
+    )
+    assert created["id"] == 42
+    assert api.suppression_group(42)["name"] == "TWY Newsletters"
+    api.add_group_suppressions(42, ["unsub@example.com"])
+    assert fake.calls[-1]["method"] == "POST"
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/asm/groups/42/suppressions"
+    )
+    assert fake.calls[-1]["json"] == {
+        "recipient_emails": ["unsub@example.com"]
+    }
+    assert all(
+        "/asm/suppressions/global" not in call["url"]
+        for call in fake.calls
+    )
+
+
+def test_search_group_suppressions_uses_exact_group_and_addresses():
+    api, fake = make_api(FakeResponse(200, {
+        "recipient_emails": ["a@example.com"],
+    }))
+    assert api.search_group_suppressions(
+        42,
+        ["a@example.com", "b@example.com"],
+    ) == {"a@example.com"}
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/asm/groups/42/suppressions/search"
+    )
+    assert fake.calls[-1]["json"] == {
+        "recipient_emails": ["a@example.com", "b@example.com"]
+    }
+
+
+def test_contacts_by_emails_returns_only_contacts_and_raises_provider_errors():
+    api, fake = make_api(FakeResponse(200, {
+        "result": {
+            "a@example.com": {
+                "contact": {
+                    "email": "a@example.com",
+                    "list_ids": ["list-1"],
+                },
+            },
+            "b@example.com": {"error": "contact not found"},
+        },
+    }))
+    assert api.contacts_by_emails(
+        ["a@example.com", "b@example.com"]
+    ) == {
+        "a@example.com": {
+            "email": "a@example.com",
+            "list_ids": ["list-1"],
+        },
+    }
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/marketing/contacts/search/emails"
+    )
