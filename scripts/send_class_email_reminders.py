@@ -719,7 +719,7 @@ def main(argv: List[str] | None = None) -> int:
     doc_id = os.environ.get("GOOGLE_DOC_ID")
     if not doc_id:
         print("❌ GOOGLE_DOC_ID environment variable is required.\n"
-          "See script docstring for all required variables (or run: set -a && source ../.env && set +a).", 
+          "See the script docstring; configuration is loaded through twy_paths.",
           file=sys.stderr)
         return 1
 

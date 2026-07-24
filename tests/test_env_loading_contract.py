@@ -10,6 +10,7 @@ def test_reminder_script_loads_configuration_through_twy_paths():
     source = (REPO_ROOT / "scripts/send_class_email_reminders.py").read_text()
     assert "from twy_paths import load_env" in source
     assert "load_env()" in source
+    assert "source ../.env" not in source
 
 
 def test_shell_entrypoints_do_not_source_env_files_directly():
