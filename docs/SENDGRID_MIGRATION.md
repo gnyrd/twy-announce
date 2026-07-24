@@ -16,8 +16,10 @@ The mapping fails closed:
 - SendGrid global/group suppression becomes `marketing_suppressed`.
 - Mailchimp `cleaned` becomes `cleaned_denylist`.
 - Mailchimp `unsubscribed` becomes `marketing_suppressed`.
-- Pending, transactional, archived, missing, conflicting, or unknown state
-  becomes `quarantine`.
+- Mailchimp `archived` becomes `archived_excluded` and is neither imported nor
+  suppressed.
+- Pending, transactional, missing, conflicting, or unknown state becomes
+  `quarantine`.
 - Only an uncontradicted Mailchimp `subscribed` record is `deliverable`.
 
 Each run writes an immutable, private evidence directory under
@@ -25,6 +27,19 @@ Each run writes an immutable, private evidence directory under
 journey matches the accepted backup, all code-referenced targeting dependencies
 exist, no source coverage error exists, no contact is quarantined, and the
 endpoint audit contains no mutation.
+
+The run also writes four mutually exclusive purpose-specific manifests:
+
+- `deliverable_contacts.json`
+- `marketing_suppressions.json`
+- `cleaned_denylist.json`
+- `archived_exclusions.json`
+
+Inactive manifests contain only the normalized email, effective timestamp,
+reason, and source status. Names, merge fields, tags, roles, list membership,
+and engagement history are discarded. Archived exclusions are migration
+evidence only; future writers must reject `archived_exclusions.json` as a
+contact or suppression input.
 
 Example:
 
