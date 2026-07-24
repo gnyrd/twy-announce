@@ -262,6 +262,12 @@ class SnapshotWriter:
         os.chmod(path, 0o600)
         return path
 
+    def write_bytes(self, relative: str, value: bytes) -> Path:
+        path = self._path(relative)
+        path.write_bytes(value)
+        os.chmod(path, 0o600)
+        return path
+
     def file_ledger(self) -> list[dict[str, Any]]:
         ledger = []
         for path in sorted(self.run_dir.rglob("*")):
@@ -276,6 +282,46 @@ class SnapshotWriter:
                 }
             )
         return ledger
+
+
+def _supplement_file_gap(
+    supplement_dir: Path,
+    reference: Any,
+    *,
+    journey_id: int,
+    label: str,
+    require_html: bool = False,
+) -> str | None:
+    if not isinstance(reference, dict):
+        return f"journey {journey_id}: {label} reference missing"
+    relative = reference.get("path")
+    expected_bytes = reference.get("bytes")
+    expected_sha = reference.get("sha256")
+    if (
+        not isinstance(relative, str)
+        or not isinstance(expected_bytes, int)
+        or not isinstance(expected_sha, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_sha)
+    ):
+        return f"journey {journey_id}: {label} reference incomplete"
+    pure = PurePosixPath(relative)
+    if pure.is_absolute() or ".." in pure.parts:
+        return f"journey {journey_id}: {label} path is unsafe"
+    path = supplement_dir.joinpath(*pure.parts)
+    try:
+        path.resolve().relative_to(supplement_dir.resolve())
+    except ValueError:
+        return f"journey {journey_id}: {label} path escapes supplement root"
+    if not path.is_file() or path.is_symlink():
+        return f"journey {journey_id}: {label} file missing"
+    body = path.read_bytes()
+    if len(body) != expected_bytes:
+        return f"journey {journey_id}: {label} byte count mismatch"
+    if hashlib.sha256(body).hexdigest() != expected_sha:
+        return f"journey {journey_id}: {label} checksum mismatch"
+    if require_html and b"<html" not in body[:2000].lower():
+        return f"journey {journey_id}: {label} is not HTML"
+    return None
 
 
 def validate_ui_supplements(
@@ -306,6 +352,14 @@ def validate_ui_supplements(
             gaps.append(f"journey {journey_id}: supplement id mismatch")
         if payload.get("source") != "mailchimp-builder-ui":
             gaps.append(f"journey {journey_id}: source is not builder UI")
+        dom_gap = _supplement_file_gap(
+            supplement_dir,
+            payload.get("dom_snapshot"),
+            journey_id=journey_id,
+            label="DOM snapshot",
+        )
+        if dom_gap:
+            gaps.append(dom_gap)
         steps = payload.get("steps")
         if not isinstance(steps, list) or not steps:
             gaps.append(f"journey {journey_id}: ordered steps missing")
@@ -315,6 +369,45 @@ def validate_ui_supplements(
                 gaps.append(
                     f"journey {journey_id}: step positions are not contiguous"
                 )
+            email_steps = [
+                step
+                for step in steps
+                if step.get("type")
+                in {"send-email", "generated-email-preview"}
+            ]
+            if payload.get("email_count") != len(email_steps):
+                gaps.append(f"journey {journey_id}: email count mismatch")
+            for step in email_steps:
+                content_ref = step.get("content_ref")
+                if not isinstance(content_ref, dict):
+                    gaps.append(
+                        f"journey {journey_id}: email step "
+                        f"{step.get('position')} content_ref missing"
+                    )
+                    continue
+                kind = content_ref.get("kind")
+                if kind == "api-campaign":
+                    campaign_id = str(content_ref.get("campaign_id"))
+                    if campaign_id not in exported_campaign_ids:
+                        gaps.append(
+                            f"journey {journey_id}: campaign {campaign_id} "
+                            "has no exported content"
+                        )
+                elif kind == "builder-preview-html":
+                    content_gap = _supplement_file_gap(
+                        supplement_dir,
+                        content_ref,
+                        journey_id=journey_id,
+                        label=f"email step {step.get('position')} HTML",
+                        require_html=True,
+                    )
+                    if content_gap:
+                        gaps.append(content_gap)
+                else:
+                    gaps.append(
+                        f"journey {journey_id}: email step "
+                        f"{step.get('position')} has unsupported content kind"
+                    )
         campaign_ids = payload.get("campaign_ids")
         if not isinstance(campaign_ids, list):
             gaps.append(f"journey {journey_id}: campaign_ids missing")
@@ -326,6 +419,27 @@ def validate_ui_supplements(
                     "has no exported content"
                 )
     return gaps
+
+
+def copy_ui_supplements(
+    supplement_dir: Path,
+    writer: SnapshotWriter,
+) -> int:
+    """Copy validated browser evidence into the checksummed snapshot."""
+    supplement_dir = Path(supplement_dir)
+    copied = 0
+    for path in sorted(supplement_dir.rglob("*")):
+        if path.is_symlink():
+            raise BackupGap(f"UI supplement contains symlink: {path}")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(supplement_dir)
+        writer.write_bytes(
+            str(PurePosixPath("ui-supplements", *relative.parts)),
+            path.read_bytes(),
+        )
+        copied += 1
+    return copied
 
 
 def verify_official_export(path: Path) -> dict[str, Any]:
@@ -508,13 +622,18 @@ def capture_snapshot(
             "manual review required"
         )
 
-    gaps.extend(
-        validate_ui_supplements(
-            ui_supplements,
-            required_journey_ids=steps_404,
-            exported_campaign_ids=exported_campaign_ids,
-        )
+    supplement_gaps = validate_ui_supplements(
+        ui_supplements,
+        required_journey_ids=steps_404,
+        exported_campaign_ids=exported_campaign_ids,
     )
+    gaps.extend(supplement_gaps)
+    ui_supplement_files = 0
+    if ui_supplements is not None:
+        ui_supplement_files = copy_ui_supplements(
+            ui_supplements,
+            writer,
+        )
 
     regular = sum(c.get("type") == "regular" for c in campaigns)
     automation_email = sum(
@@ -546,6 +665,7 @@ def capture_snapshot(
             "classic_automations": len(automations),
             "customer_journeys": len(journeys),
             "journeys_steps_404": len(steps_404),
+            "ui_supplement_files": ui_supplement_files,
         },
         "steps_404_journey_ids": sorted(steps_404),
         "gaps": gaps,

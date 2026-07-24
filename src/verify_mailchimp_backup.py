@@ -53,6 +53,15 @@ def scan_sensitive(root: Path, api_key: bytes) -> list[str]:
     return errors
 
 
+def validate_api_manifest_state(api: dict) -> list[str]:
+    errors = []
+    if api.get("complete") is not True or api.get("gaps"):
+        errors.append("API snapshot is not complete")
+    if (api.get("counts") or {}).get("ui_supplement_files", 0) < 1:
+        errors.append("API snapshot does not contain integrated UI supplements")
+    return errors
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         raise SystemExit("usage: verify API_DIR MEDIA_DIR OFFICIAL_ZIP")
@@ -61,8 +70,7 @@ def main() -> int:
 
     api = json.loads((api_dir / "manifest.json").read_text())
     errors.extend(check_ledger(api_dir, api["artifact_files"]))
-    if api["complete"] is not False or len(api["gaps"]) != 5:
-        errors.append("API manifest does not retain exactly five UI gaps")
+    errors.extend(validate_api_manifest_state(api))
     if {entry["method"] for entry in api["http_audit"]} != {"GET"}:
         errors.append("API snapshot method audit is not GET-only")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import stat
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from mailchimp_backup import (
     REPORT_PAGE_SIZE,
     SnapshotWriter,
     classify_trigger,
+    copy_ui_supplements,
     extract_campaign_renderings,
     paginate,
     validate_ui_supplements,
@@ -249,3 +251,99 @@ def test_ui_supplement_rejects_unexported_campaign_reference(tmp_path):
     )
 
     assert any("missing-email" in gap for gap in gaps)
+
+
+def test_ui_supplement_verifies_builder_html_and_dom_snapshot(tmp_path):
+    supplement_dir = tmp_path / "ui"
+    supplement_dir.mkdir()
+    html_path = supplement_dir / "builder-emails/2745/email.html"
+    html_path.parent.mkdir(parents=True)
+    html_body = b"<html><body>Complete email</body></html>"
+    html_path.write_bytes(html_body)
+    dom_path = supplement_dir / "raw/2745.dom.txt"
+    dom_path.parent.mkdir()
+    dom_body = b"builder DOM evidence"
+    dom_path.write_bytes(dom_body)
+    (supplement_dir / "2745.json").write_text(
+        json.dumps(
+            {
+                "journey_id": 2745,
+                "source": "mailchimp-builder-ui",
+                "dom_snapshot": {
+                    "path": "raw/2745.dom.txt",
+                    "bytes": len(dom_body),
+                    "sha256": hashlib.sha256(dom_body).hexdigest(),
+                },
+                "steps": [
+                    {
+                        "position": 0,
+                        "type": "send-email",
+                        "content_ref": {
+                            "kind": "builder-preview-html",
+                            "path": "builder-emails/2745/email.html",
+                            "bytes": len(html_body),
+                            "sha256": hashlib.sha256(html_body).hexdigest(),
+                        },
+                    }
+                ],
+                "campaign_ids": [],
+                "email_count": 1,
+            }
+        )
+    )
+
+    gaps = validate_ui_supplements(
+        supplement_dir,
+        required_journey_ids={2745},
+        exported_campaign_ids=set(),
+    )
+
+    assert gaps == []
+
+    html_path.write_bytes(html_body.replace(b"email", b"emAil"))
+    gaps = validate_ui_supplements(
+        supplement_dir,
+        required_journey_ids={2745},
+        exported_campaign_ids=set(),
+    )
+    assert any("checksum mismatch" in gap for gap in gaps)
+
+
+def test_ui_supplement_requires_content_for_every_email_step(tmp_path):
+    supplement_dir = tmp_path / "ui"
+    supplement_dir.mkdir()
+    (supplement_dir / "2745.json").write_text(
+        json.dumps(
+            {
+                "journey_id": 2745,
+                "source": "mailchimp-builder-ui",
+                "steps": [{"position": 0, "type": "send-email"}],
+                "campaign_ids": [],
+                "email_count": 1,
+            }
+        )
+    )
+
+    gaps = validate_ui_supplements(
+        supplement_dir,
+        required_journey_ids={2745},
+        exported_campaign_ids=set(),
+    )
+
+    assert any("content_ref missing" in gap for gap in gaps)
+
+
+def test_copy_ui_supplements_places_files_in_snapshot_ledger(tmp_path):
+    source = tmp_path / "ui"
+    source.mkdir()
+    (source / "2745.json").write_text('{"journey_id": 2745}\n')
+    writer = SnapshotWriter(tmp_path / "snapshot")
+
+    copied = copy_ui_supplements(source, writer)
+
+    assert copied == 1
+    assert (writer.run_dir / "ui-supplements/2745.json").is_file()
+    assert any(
+        item["path"] == "ui-supplements/2745.json"
+        for item in writer.file_ledger()
+    )
