@@ -27,8 +27,8 @@ Google credentials:
   scripts). This script will only refresh that token; it will not open
   a browser or prompt for input.
 Usage:
-  source ../.env && python3 send_class_email_reminders.py
-  # Or manually export: export GOOGLE_DOC_ID=... EMAIL_TO=...
+  python3 send_class_email_reminders.py
+  # Configuration is loaded through twy_paths.load_env().
 
 """
 
@@ -52,7 +52,10 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import pickle
 import re
+from twy_paths import load_env
 from zoneinfo import ZoneInfo
+
+load_env()
 
 GOOGLE_TOKEN_PATH = os.path.expanduser("~/.config/twy-google-sheets-token.pickle")
 GMAIL_TOKEN_PATH = os.path.expanduser("~/.config/twy-gmail-token.pickle")
@@ -780,4 +783,3 @@ def main(argv: List[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
