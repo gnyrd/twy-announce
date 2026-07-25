@@ -323,8 +323,8 @@ class FakeWriterAPI:
         self.jobs[job_id] = len(contacts)
         return job_id
 
-    def wait_contact_job(self, job_id):
-        self.calls.append(("wait_contact_job", job_id))
+    def wait_contact_job(self, job_id, timeout_s=None):
+        self.calls.append(("wait_contact_job", job_id, timeout_s))
         count = self.jobs[job_id]
         return {
             "status": "completed",
@@ -590,11 +590,21 @@ def test_apply_retries_suppression_verification_until_provider_is_consistent(
     assert any(call[0] == "upsert_contacts" for call in api.calls)
 
 
+def test_apply_waits_up_to_five_minutes_for_each_contact_job(tmp_path):
+    api = FakeWriterAPI()
+
+    _apply(tmp_path, api)
+
+    waits = [call for call in api.calls if call[0] == "wait_contact_job"]
+    assert waits
+    assert all(call[2] == 300 for call in waits)
+
+
 def test_apply_rejects_failed_contact_job(tmp_path):
     api = FakeWriterAPI()
 
-    def failed_job(job_id):
-        api.calls.append(("wait_contact_job", job_id))
+    def failed_job(job_id, timeout_s=None):
+        api.calls.append(("wait_contact_job", job_id, timeout_s))
         return {
             "status": "completed",
             "results": {

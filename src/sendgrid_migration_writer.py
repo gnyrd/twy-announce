@@ -48,6 +48,7 @@ DELIVERABLE_KEYS = {
 }
 SUPPRESSION_VERIFY_ATTEMPTS = 15
 SUPPRESSION_VERIFY_DELAY_SECONDS = 1.0
+CONTACT_JOB_TIMEOUT_SECONDS = 300
 
 
 class WriterSafetyError(RuntimeError):
@@ -456,7 +457,10 @@ def apply_operation_plan(
         for batch in _chunks(rows, contact_batch):
             contacts = [_contact_payload(row, fields) for row in batch]
             job_id = api.upsert_contacts(list_ids, contacts)
-            outcome = api.wait_contact_job(job_id)
+            outcome = api.wait_contact_job(
+                job_id,
+                timeout_s=CONTACT_JOB_TIMEOUT_SECONDS,
+            )
             results = outcome.get("results") or {}
             if (
                 outcome.get("status") != "completed"
