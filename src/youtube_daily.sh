@@ -6,13 +6,6 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load .env if it exists
-if [[ -f "$REPO_ROOT/.env" ]]; then
-    set -a
-    source "$REPO_ROOT/.env"
-    set +a
-fi
-
 DATE=$(date +%Y-%m-%d)
 LOCAL_FILE="$REPO_ROOT/data/youtube/history/${DATE}.json"
 REMOTE_DEST="${YOUTUBE_REMOTE_DEST:-}"
