@@ -169,6 +169,32 @@ def test_sendgrid_marketing_lists_follow_next_link():
     assert [item["id"] for item in api.marketing_lists()] == ["one", "two"]
 
 
+def test_sendgrid_group_suppressions_uses_single_unpaginated_response():
+    suppressions = [
+        {"email": f"person{i}@example.com"}
+        for i in range(576)
+    ]
+    fake = FakeSession(FakeResponse(body=suppressions))
+    api = ReadOnlySendGridAPI("SG.secret", session=fake)
+
+    assert api.group_suppressions(35187) == suppressions
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["url"].endswith("/asm/groups/35187/suppressions")
+    assert fake.calls[0].get("params") is None
+
+
+def test_sendgrid_email_collection_accepts_string_group_suppressions():
+    assert ReadOnlySendGridAPI._emails([
+        "PersonA@example.com",
+        {"email": "PersonB@example.com"},
+        {"recipient_email": "PersonC@example.com"},
+    ]) == {
+        "persona@example.com",
+        "personb@example.com",
+        "personc@example.com",
+    }
+
+
 def test_api_errors_never_include_secret():
     fake = FakeSession(FakeResponse(403, {"error": "SG.secret"}))
     api = ReadOnlySendGridAPI("SG.secret", session=fake)

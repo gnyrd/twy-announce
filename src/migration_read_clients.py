@@ -361,7 +361,13 @@ class ReadOnlySendGridAPI(_ReadClient):
         return payload if isinstance(payload, list) else payload.get("result") or []
 
     def group_suppressions(self, group_id: int) -> list[dict]:
-        return self._offset_collection(f"/asm/groups/{group_id}/suppressions")
+        payload = self._request(
+            "GET",
+            f"/asm/groups/{group_id}/suppressions",
+        )
+        return payload if isinstance(payload, list) else (
+            payload.get("suppressions") or []
+        )
 
     def global_suppressions(self) -> list[dict]:
         return self._offset_collection("/asm/suppressions/global")
@@ -379,12 +385,15 @@ class ReadOnlySendGridAPI(_ReadClient):
         return self._offset_collection("/suppression/spam_reports")
 
     @staticmethod
-    def _emails(items: Iterable[dict]) -> set[str]:
-        return {
-            str(item.get("email") or item.get("recipient_email") or "").lower()
-            for item in items
-            if item.get("email") or item.get("recipient_email")
-        }
+    def _emails(items: Iterable[dict | str]) -> set[str]:
+        emails: set[str] = set()
+        for item in items:
+            email = item if isinstance(item, str) else (
+                item.get("email") or item.get("recipient_email")
+            )
+            if email:
+                emails.add(str(email).lower())
+        return emails
 
     def safety_states(self, emails: Iterable[str]) -> dict[str, dict[str, Any]]:
         requested = sorted({email.strip().lower() for email in emails})
