@@ -21,15 +21,12 @@ EXPECTED_SAMPLE_HTML = (
     "See the class</span></a></td></tr></table>"
 )
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
 CORPUS_HASHES = {
-    "/root/twy/data/newsletters/2026-06/lifestyle.md":
-        "1e0a0a0f4b2847731a04331c9e69c0cc6c819b1bef63ad3bc341e859cf7fe79f",
-    "/root/twy/data/newsletters/2026-06/non_lifestyle.md":
-        "cab4534740c0184c12eeaa7bd8b4ef3f154e77cbbc0b33f64fb5bf2e40e15d6e",
-    "/root/twy/data/newsletters/2026-07/lifestyle.md":
-        "1639e51141eabc997a4a4cb0d08bfe3b0231ce20c3f838565a27f43c2f0ea777",
-    "/root/twy/data/newsletters/2026-07/non_lifestyle.md":
-        "e3466064ac68b11c7ce370d7e3f2365554cd7dd732bff75314d617515397aba2",
+    FIXTURE_DIR / "newsletter_lifestyle.md":
+        "e6818fffd893a3bb51c1add69b25ea759ab47af60d321bd7f4eb6d72cca5cf05",
+    FIXTURE_DIR / "newsletter_non_lifestyle.md":
+        "3cc131d9da9ae97b85abc1ca7bef44e4f1d94a5eef11deff72ef17cf8c4868f9",
 }
 
 
@@ -54,7 +51,7 @@ def test_render_newsletter_plain_text_removes_markdown_syntax():
     )
 
 
-def test_real_newsletter_corpus_preserves_mailchimp_html():
+def test_stable_newsletter_corpus_preserves_provider_html():
     for filename, expected_hash in CORPUS_HASHES.items():
         body = Path(filename).read_text()
         actual = hashlib.sha256(render_newsletter(body).html.encode()).hexdigest()
