@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from newsletter import save_prompt, prompt_path, newsletter_path
 import habit_newsletter_prompt as hnp
 from habit_newsletter_prompt import check_coverage
+from newsletter_editorial_review import compile_approved_inputs
 from slack import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
@@ -90,24 +91,6 @@ def main():
         print(f"{today}: before 25th, skipping prompt generation")
         return
 
-    # Diff loop (Phases 1-3): archive prior month's sent campaigns, capture diffs,
-    # extract patterns, post review candidates to #review-newsletters.
-    # The month that just wrapped is today.year/today.month (we generate prompts
-    # for next_month()). By the 25th, all of prior-month's sends are complete:
-    # main on the 1st, PH1 ~+1d after Habit class (2nd Saturday), PH2 +7d.
-    from diff_loop import archive_prior_month_sent, extract_patterns_for_month, post_review_candidates
-    prior_year, prior_month = today.year, today.month
-    archive_results = archive_prior_month_sent(year=prior_year, month=prior_month)
-    archived = sum(1 for v in archive_results.values() if v == "archived")
-    print(f"diff-loop archival ({prior_year}-{prior_month:02d}): {archived}/{len(archive_results)} archived. Detail: {archive_results}")
-    extract_patterns_for_month(prior_year, prior_month)
-    # Assemblers read recent .md files directly via _format_recent_references()
-    # at prompt-build time, so no module reload is needed -- whatever the
-    # archival step just wrote is what the next assembler call will see.
-    review_channel = os.getenv("SLACK_REVIEW_CHANNEL", "#review-newsletters")
-    post_review_candidates(prior_year, prior_month, slack_post_fn=lambda t: post_slack(review_channel, t))
-    print(f"diff-loop review post sent to {review_channel}")
-
     # Load overview
     overview = load_month_overview(month)
     if not overview:
@@ -127,6 +110,10 @@ def main():
         print(msg)
         post_slack(SLACK_STATUS_CHANNEL, msg)
         sys.exit(1)
+
+    # Compile only immutable, completed approvals into the prompt input indexes.
+    # Missing or malformed indexes fail prompt generation closed.
+    compile_approved_inputs()
 
     # Assemble and save prompts
     save_prompt(year, month, "lifestyle", hnp.assemble_lifestyle_prompt(overview, plans, year, month))

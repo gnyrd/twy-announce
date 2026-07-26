@@ -2,11 +2,17 @@
 Prompt assembly for newsletter generation.
 Builds fully populated prompt text for Tweee (members + non-members).
 """
+import json
 import re
 import calendar
 from datetime import date
+from pathlib import Path
 import sys
 import requests
+from twy_paths import (
+    newsletter_approved_references_path,
+    newsletter_editorial_guidance_path,
+)
 
 CLASSES_API = "http://localhost:5003"
 
@@ -75,57 +81,114 @@ Subject line:
 
 
 
-# May 2026 exemplars (sent campaigns -- Tiff's final edited content).
-# Paired with June refs below so Tweee sees variation across months.
-
-# References are read DYNAMICALLY from disk at prompt-build time -- see
-# _format_recent_references() below. The .md files in /root/twy/data/newsletters/YYYY-MM/
-# are overwritten with each month's actually-sent content by the diff-loop
-# archival step in generate_newsletter_prompts.py. The assemblers embed the
-# N most recent months' content as voice references.
-
-from pathlib import Path
-from twy_paths import newsletters_dir as _newsletters_dir
-
-_NEWSLETTERS_DIR = _newsletters_dir()
-_MONTH_DIR_RE = re.compile(r'^\d{4}-\d{2}$')
+class NewsletterApprovalError(RuntimeError):
+    """The approved newsletter prompt inputs are missing or invalid."""
 
 
-def _format_recent_references(audience: str, count: int = 2) -> str:
-    """Read the N most recent sent .md files for this audience from disk and
-    return a formatted reference block ready to interpolate into a prompt.
+def _load_approval_index(path: Path) -> list[dict]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NewsletterApprovalError(
+            f"invalid newsletter approval index: {path}"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise NewsletterApprovalError(
+            f"unsupported newsletter approval index: {path}"
+        )
+    items = payload.get("items")
+    if not isinstance(items, list) or any(
+        not isinstance(item, dict) for item in items
+    ):
+        raise NewsletterApprovalError(
+            f"invalid newsletter approval items: {path}"
+        )
+    return items
 
-    Returns empty string if no .md files exist yet.
-    """
-    audience_us = audience.replace('-', '_')
-    refs = []
-    if not _NEWSLETTERS_DIR.exists():
-        return ""
-    for month_dir in sorted(_NEWSLETTERS_DIR.iterdir(), reverse=True):
-        if not month_dir.is_dir() or not _MONTH_DIR_RE.match(month_dir.name):
-            continue
-        md_file = month_dir / f"{audience_us}.md"
-        if not md_file.exists():
-            continue
-        text = md_file.read_text()
-        # Strip the H1 subject line; keep just the body
-        lines = text.split("\n", 2)
-        body = lines[2].strip() if len(lines) > 2 else ""
-        if not body:
-            continue
-        refs.append((month_dir.name, body))
-        if len(refs) >= count:
-            break
-    if not refs:
-        return ""
-    label = "REFERENCE" if len(refs) == 1 else f"REFERENCES ({len(refs)} months)"
-    intro = (
-        f"{label} -- Tiff's actual sent newsletter(s) for this audience from "
-        f"the most recent month(s). Match her VOICE and her VARIETY, NOT the "
-        f"specific content (theme, dates, class title) of any single example:"
+
+def _require_index_fields(
+    item: dict,
+    fields: tuple[str, ...],
+    path: Path,
+) -> None:
+    if any(
+        not isinstance(item.get(field), str) or not item[field].strip()
+        for field in fields
+    ):
+        raise NewsletterApprovalError(
+            f"invalid newsletter approval item: {path}"
+        )
+    if item["audience_key"] not in {"lifestyle", "non_lifestyle"}:
+        raise NewsletterApprovalError(
+            f"invalid newsletter approval audience: {path}"
+        )
+
+
+def _format_approved_guidance(audience_key: str) -> str:
+    path = newsletter_editorial_guidance_path()
+    items = _load_approval_index(path)
+    fields = (
+        "review_id",
+        "candidate_id",
+        "audience_key",
+        "kind",
+        "guideline",
+        "completed_at",
     )
-    blocks = "\n\n".join(f"--- {label} ---\n{body}" for label, body in refs)
-    return f"{intro}\n\n{blocks}"
+    for item in items:
+        _require_index_fields(item, fields, path)
+        if not isinstance(item.get("generated_excerpt"), str) or not isinstance(
+            item.get("sent_excerpt"),
+            str,
+        ):
+            raise NewsletterApprovalError(
+                f"invalid newsletter approval item: {path}"
+            )
+    selected = [
+        item for item in items if item["audience_key"] == audience_key
+    ]
+    if not selected:
+        return ""
+    lines = ["APPROVED EDITORIAL GUIDANCE:"]
+    for item in selected:
+        lines.append(
+            f'* {item["guideline"]} '
+            f'(generated: "{item["generated_excerpt"]}", '
+            f'Tiff: "{item["sent_excerpt"]}")'
+        )
+    return "\n".join(lines)
+
+
+def _format_recent_references(
+    audience_key: str,
+    count: int = 2,
+) -> str:
+    path = newsletter_approved_references_path()
+    items = _load_approval_index(path)
+    fields = (
+        "review_id",
+        "audience_key",
+        "mailing_name",
+        "subject",
+        "body",
+        "completed_at",
+    )
+    for item in items:
+        _require_index_fields(item, fields, path)
+    if count < 1:
+        return ""
+    selected = [
+        item for item in items if item["audience_key"] == audience_key
+    ][-count:]
+    if not selected:
+        return ""
+    sections = ["APPROVED REFERENCE NEWSLETTERS:"]
+    for item in selected:
+        sections.append(
+            f'\n## {item["mailing_name"]}\n'
+            f'Subject: {item["subject"]}\n\n{item["body"]}'
+        )
+    return "\n".join(sections)
 
 
 def get_habit_class_date(year: int, month: int) -> date:
@@ -208,6 +271,7 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
     plans_block = "\n".join(plan_lines) if plan_lines else "(no plans yet)"
 
+    approved_guidance = _format_approved_guidance("lifestyle")
     recent_refs = _format_recent_references("lifestyle")
 
     return f"""Write a member newsletter for Tiffany Wood Yoga.
@@ -217,6 +281,8 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
+
+{approved_guidance}
 
 Month: {habit_date.strftime('%B %Y')}
 Theme title (SUBJECT line only, silent throughline in the body): {overview.get('title', '')}
@@ -261,7 +327,8 @@ def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month:
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
 
-    recent_refs = _format_recent_references("non-lifestyle")
+    approved_guidance = _format_approved_guidance("non_lifestyle")
+    recent_refs = _format_recent_references("non_lifestyle")
 
     return f"""Write an open-door newsletter for people who aren't Tiffany Wood Yoga members.
 
@@ -270,6 +337,8 @@ def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month:
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
+
+{approved_guidance}
 
 Theme title (SUBJECT line only, silent throughline in the body): {overview.get('title', '')}
 
