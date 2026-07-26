@@ -110,6 +110,10 @@ def build_suppression_test_plan(
         "target_account_email": TARGET_ACCOUNT_EMAIL,
         "recipient": normalized,
         "list_id": str(list_id),
+        "proof_list": {
+            "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+            "must_not_exist": False,
+        },
         "group": {
             "id": int(group_id),
             "name": PRODUCTION_GROUP_NAME,
@@ -727,6 +731,13 @@ def _run_suppression_test_authorized(
         raise SuppressionTestSafetyError(
             "test list must contain exactly one approved recipient"
         )
+    single_send_name = str(
+        (plan.get("proof_list") or {}).get("name") or ""
+    )
+    if single_send_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME:
+        raise SuppressionTestSafetyError(
+            "test plan does not use the approved proof name"
+        )
 
     evidence_store.write_json("started.json", {
         "operation_digest": plan["operation_digest"],
@@ -744,10 +755,7 @@ def _run_suppression_test_authorized(
         )
 
     payload = {
-        "name": (
-            (plan.get("proof_list") or {}).get("name")
-            or f"TWY Suppression Enforcement {plan['run_id']}"
-        ),
+        "name": single_send_name,
         "send_to": {
             "all": False,
             "list_ids": [plan["list_id"]],

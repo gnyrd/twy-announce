@@ -252,6 +252,32 @@ def test_suppression_is_verified_before_tagged_single_send(tmp_path):
     assert (tmp_path / "evidence" / "COMPLETE").exists()
 
 
+def test_missing_approved_single_send_name_blocks_before_suppression(
+    tmp_path,
+):
+    plan = plan_for()
+    plan.pop("proof_list", None)
+    plan["operation_digest"] = _canonical_digest({
+        key: value
+        for key, value in plan.items()
+        if key != "operation_digest"
+    })
+    api = FakeSuppressionAPI()
+
+    with pytest.raises(SuppressionTestSafetyError, match="approved proof name"):
+        run(
+            tmp_path,
+            api=api,
+            plan=plan,
+            approval=approval_for(plan),
+        )
+
+    assert not any(
+        call[0] == "add_group_suppressions"
+        for call in api.calls
+    )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
