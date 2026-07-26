@@ -151,13 +151,13 @@ exact statement is
 
 The harness adds and verifies the temporary group suppression before creating a
 Single Send tagged with the same group. It passes only when SendGrid reports
-zero deliveries, zero unique opens, zero unique clicks, and either zero or one
-request, with the suppression still present. One request proves that SendGrid
-counted the suppressed target. If SendGrid reports zero requests, the harness
-waits through the full bounded polling window before accepting that the
-suppression was enforced before request accounting. Stats are requested
-beginning with the previous UTC date so a run near midnight cannot fall
-outside the query window.
+exactly one request, zero deliveries, zero unique opens, zero unique clicks,
+and the suppression still present. A zero-request result is inconclusive and
+fails closed after the full bounded polling window. After the first exact
+one-request result, the harness performs three additional polls at ten-second
+intervals and requires all delivery, open, and click counts to remain zero
+before sealing evidence. Stats are requested beginning with the previous UTC
+date so a run near midnight cannot fall outside the query window.
 
 The completed proof records the Single Send ID, temporary suppression,
 temporary list ID, and an immutable `cleanup-plan.json`. The proof never

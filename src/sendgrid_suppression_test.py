@@ -682,6 +682,7 @@ def run_suppression_test(
     now: datetime | None = None,
     sleep_fn: Callable[[float], None],
     stats_attempts: int = 30,
+    stats_confirmation_attempts: int = 3,
     persist_evidence: bool = True,
 ) -> dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -693,6 +694,7 @@ def run_suppression_test(
         current=current,
         sleep_fn=sleep_fn,
         stats_attempts=stats_attempts,
+        stats_confirmation_attempts=stats_confirmation_attempts,
         persist_evidence=persist_evidence,
     )
 
@@ -705,6 +707,7 @@ def _run_suppression_test_authorized(
     current: datetime,
     sleep_fn: Callable[[float], None],
     stats_attempts: int = 30,
+    stats_confirmation_attempts: int = 3,
     persist_evidence: bool = True,
 ) -> dict[str, Any]:
     if api.user_email() != plan["target_account_email"]:
@@ -784,6 +787,10 @@ def _run_suppression_test_authorized(
         )
     api.schedule_single_send(single_send_id, "now")
 
+    if stats_confirmation_attempts < 1:
+        raise SuppressionTestSafetyError(
+            "suppression stats require at least one confirmation"
+        )
     observed: dict[str, int] | None = None
     for attempt in range(stats_attempts):
         observed = _stats(
@@ -806,15 +813,30 @@ def _run_suppression_test_authorized(
                 break
         if attempt < stats_attempts - 1:
             sleep_fn(10.0)
-    if observed is None:
+    if observed is None or observed["requests"] != 1:
         raise SuppressionTestSafetyError(
             "suppression test stats did not prove enforcement"
         )
-    enforcement_mode = (
-        "request_counted"
-        if observed["requests"] == 1
-        else "suppressed_before_request"
-    )
+    expected_stats = {
+        "requests": 1,
+        "delivered": 0,
+        "unique_opens": 0,
+        "unique_clicks": 0,
+    }
+    for _ in range(stats_confirmation_attempts):
+        sleep_fn(10.0)
+        confirmed = _stats(
+            api.single_send_stats(
+                single_send_id,
+                (current - timedelta(days=1)).date().isoformat(),
+            )
+        )
+        if confirmed != expected_stats:
+            raise SuppressionTestSafetyError(
+                "suppression test stats confirmation failed"
+            )
+        observed = confirmed
+    enforcement_mode = "request_counted_and_confirmed"
     if api.search_group_suppressions(
         group_id,
         [plan["recipient"]],

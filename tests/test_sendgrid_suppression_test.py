@@ -226,6 +226,11 @@ def test_suppression_is_verified_before_tagged_single_send(tmp_path):
         call for call in api.calls if call[0] == "single_send_stats"
     )
     assert stats_call[2] == "2026-07-23"
+    assert len([
+        call
+        for call in api.calls
+        if call[0] == "single_send_stats"
+    ]) == 4
     assert result["stats"] == {
         "requests": 1,
         "delivered": 0,
@@ -296,26 +301,57 @@ def test_any_delivery_or_impossible_request_count_fails_enforcement_proof(
         run(tmp_path, api)
 
 
-def test_zero_requests_after_full_poll_window_proves_pre_request_suppression(
+def test_zero_requests_after_full_poll_window_is_inconclusive_and_fails(
     tmp_path,
 ):
     api = FakeSuppressionAPI()
     api.stats["results"][0]["stats"]["requests"] = 0
     sleeps = []
 
-    result = run_suppression_test(
-        api,
-        plan_for(),
-        approval_for(plan_for()),
-        EvidenceStore(tmp_path / "evidence"),
-        now=NOW,
-        sleep_fn=sleeps.append,
-        stats_attempts=3,
-    )
+    with pytest.raises(SuppressionTestSafetyError, match="stats"):
+        run_suppression_test(
+            api,
+            plan_for(),
+            approval_for(plan_for()),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=sleeps.append,
+            stats_attempts=3,
+        )
 
-    assert result["stats"]["requests"] == 0
-    assert result["enforcement_mode"] == "suppressed_before_request"
     assert sleeps == [10.0, 10.0]
+
+
+def test_delivery_during_confirmation_fails_enforcement_proof(tmp_path):
+    class DelayedDeliveryAPI(FakeSuppressionAPI):
+        def __init__(self):
+            super().__init__()
+            self.stats_calls = 0
+
+        def single_send_stats(self, single_send_id, start_date):
+            self.stats_calls += 1
+            payload = super().single_send_stats(single_send_id, start_date)
+            if self.stats_calls >= 2:
+                payload["results"][0]["stats"]["delivered"] = 1
+            return payload
+
+    api = DelayedDeliveryAPI()
+    sleeps = []
+
+    with pytest.raises(SuppressionTestSafetyError, match="confirmation"):
+        run_suppression_test(
+            api,
+            plan_for(),
+            approval_for(plan_for()),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=sleeps.append,
+            stats_attempts=1,
+            stats_confirmation_attempts=3,
+        )
+
+    assert api.stats_calls == 2
+    assert sleeps == [10.0]
 
 
 def test_temporary_suppression_must_still_exist_after_stats(tmp_path):
