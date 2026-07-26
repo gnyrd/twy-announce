@@ -153,6 +153,23 @@ def test_create_and_schedule_single_send():
     assert fake.calls[-1]["json"] == {"send_at": "now"}
 
 
+def test_get_design_uses_read_only_design_endpoint():
+    api, fake = make_api(
+        FakeResponse(
+            200,
+            {
+                "id": "design-id",
+                "subject": "Subject",
+                "html_content": "<p>Body</p>",
+            },
+        )
+    )
+
+    assert api.get_design("design-id")["id"] == "design-id"
+    assert fake.calls[-1]["method"] == "GET"
+    assert fake.calls[-1]["url"].endswith("/v3/designs/design-id")
+
+
 def test_find_single_send_by_exact_name_follows_pages():
     api, _ = make_api(
         FakeResponse(200, {

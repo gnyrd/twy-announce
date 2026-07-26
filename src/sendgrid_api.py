@@ -279,6 +279,9 @@ class SendGridAPI:
     def get_single_send(self, single_send_id: str) -> dict:
         return self._request("GET", f"/marketing/singlesends/{single_send_id}")
 
+    def get_design(self, design_id: str) -> dict:
+        return self._request("GET", f"/designs/{design_id}")
+
     def find_single_send_by_name(self, name: str) -> dict | None:
         path = "/marketing/singlesends?page_size=100"
         while path:
