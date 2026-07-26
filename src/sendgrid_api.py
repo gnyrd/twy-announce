@@ -117,6 +117,11 @@ class SendGridAPI:
     def create_list(self, name: str) -> dict:
         return self._request("POST", "/marketing/lists", json={"name": name})
 
+    def delete_list(self, list_id: str) -> None:
+        if not list_id:
+            raise ValueError("SendGrid list ID is required")
+        self._request("DELETE", f"/marketing/lists/{list_id}")
+
     def update_list(self, list_id: str, name: str) -> dict:
         return self._request(
             "PATCH",

@@ -5,7 +5,9 @@ import pytest
 
 from sendgrid_migration_evidence import EvidenceStore
 from sendgrid_suppression_test import (
+    APPROVED_SUPPRESSION_PROOF_LIST_NAME,
     PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+    SUPPRESSION_SETUP_APPROVAL_STATEMENT,
     SUPPRESSION_CLEANUP_APPROVAL_STATEMENT,
     SUPPRESSION_TEST_APPROVAL_STATEMENT,
     SuppressionTestSafetyError,
@@ -13,9 +15,11 @@ from sendgrid_suppression_test import (
     _cleanup_plan_from_result,
     build_parser,
     build_suppression_cleanup_plan,
+    build_suppression_setup_plan,
     build_suppression_test_plan,
     main,
     run_suppression_cleanup,
+    run_suppression_setup_and_test,
     run_suppression_test,
 )
 
@@ -65,6 +69,7 @@ def test_plan_is_digest_locked_to_group_list_sender_and_recipient():
 class FakeSuppressionAPI:
     def __init__(self):
         self.calls = []
+        self.lists = {}
         self.group = {
             "id": 42,
             "name": "Email: Unsubscribed",
@@ -95,6 +100,35 @@ class FakeSuppressionAPI:
     def list_contacts(self, list_id):
         self.calls.append(("list_contacts", list_id))
         return list(self.contacts)
+
+    def marketing_lists(self):
+        self.calls.append(("marketing_lists",))
+        return [
+            {
+                "id": list_id,
+                "name": name,
+                "contact_count": len(self.contacts),
+            }
+            for list_id, name in self.lists.items()
+        ]
+
+    def create_list(self, name):
+        self.calls.append(("create_list", name))
+        self.lists["proof-list-1"] = name
+        return {"id": "proof-list-1", "name": name}
+
+    def delete_list(self, list_id):
+        self.calls.append(("delete_list", list_id))
+        self.lists.pop(list_id, None)
+
+    def upsert_contacts(self, list_ids, contacts):
+        self.calls.append(("upsert_contacts", tuple(list_ids), contacts))
+        self.contacts = list(contacts)
+        return "contact-job-1"
+
+    def wait_contact_job(self, job_id, timeout_s=120):
+        self.calls.append(("wait_contact_job", job_id, timeout_s))
+        return {"status": "completed"}
 
     def add_group_suppressions(self, group_id, emails):
         self.calls.append(("add_group_suppressions", group_id, tuple(emails)))
@@ -249,8 +283,120 @@ def test_temporary_suppression_must_still_exist_after_stats(tmp_path):
         run(tmp_path, api)
 
 
-def cleanup_approval_for(plan):
+def setup_plan_for():
+    return build_suppression_setup_plan(
+        run_id="suppression_setup_20260726T120000Z",
+        recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+        list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+        group_id=42,
+        sender_id=9423402,
+    )
+
+
+def setup_approval_for(plan):
     return {
+        "approved_by": "JP",
+        "statement": SUPPRESSION_SETUP_APPROVAL_STATEMENT,
+        "approved_at": NOW.isoformat(),
+        "expires_at": (NOW + timedelta(hours=1)).isoformat(),
+        "target_account_email": "admin@tiffanywoodyoga.com",
+        "recipient": PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+        "operation_digest": plan["operation_digest"],
+    }
+
+
+def test_setup_plan_locks_approved_name_and_preferred_recipient():
+    plan = setup_plan_for()
+    assert plan["recipient"] == "jpgan6@gmail.com"
+    assert plan["proof_list"] == {
+        "name": "Proof: Suppression Enforcement: 2026_07_26",
+        "must_not_exist": True,
+    }
+    assert plan["group"] == {"id": 42, "name": "Email: Unsubscribed"}
+    with pytest.raises(SuppressionTestSafetyError, match="preferred"):
+        build_suppression_setup_plan(
+            run_id="wrong_recipient",
+            recipient="admin@tiffanywoodyoga.com",
+            list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+            group_id=42,
+            sender_id=9423402,
+        )
+    with pytest.raises(SuppressionTestSafetyError, match="approved proof list"):
+        build_suppression_setup_plan(
+            run_id="wrong_name",
+            recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+            list_name="Proof: Other: 2026_07_26",
+            group_id=42,
+            sender_id=9423402,
+        )
+
+
+def test_setup_and_proof_create_exact_isolated_list_under_one_approval(tmp_path):
+    api = FakeSuppressionAPI()
+    api.contacts = []
+    plan = setup_plan_for()
+
+    result = run_suppression_setup_and_test(
+        api,
+        plan,
+        setup_approval_for(plan),
+        EvidenceStore(tmp_path / "evidence"),
+        now=NOW,
+        sleep_fn=lambda _: None,
+        stats_attempts=1,
+    )
+
+    assert ("create_list", APPROVED_SUPPRESSION_PROOF_LIST_NAME) in api.calls
+    assert (
+        "upsert_contacts",
+        ("proof-list-1",),
+        [{"email": "jpgan6@gmail.com"}],
+    ) in api.calls
+    single_send_payload = next(
+        call[1]
+        for call in api.calls
+        if call[0] == "create_single_send"
+    )
+    assert (
+        single_send_payload["name"]
+        == APPROVED_SUPPRESSION_PROOF_LIST_NAME
+    )
+    assert result["proof_list"] == {
+        "id": "proof-list-1",
+        "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+    }
+    cleanup = json.loads(
+        (tmp_path / "evidence" / "cleanup-plan.json").read_text()
+    )
+    assert cleanup["proof_list"] == {
+        "id": "proof-list-1",
+        "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+        "delete": True,
+    }
+    assert (tmp_path / "evidence" / "COMPLETE").exists()
+
+
+def test_setup_blocks_existing_proof_name_before_provider_write(tmp_path):
+    api = FakeSuppressionAPI()
+    api.lists["existing"] = APPROVED_SUPPRESSION_PROOF_LIST_NAME
+    plan = setup_plan_for()
+
+    with pytest.raises(SuppressionTestSafetyError, match="already exists"):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+
+    assert not any(call[0] == "create_list" for call in api.calls)
+
+
+def cleanup_approval_for(plan):
+    approval = {
         "approved_by": "JP",
         "statement": SUPPRESSION_CLEANUP_APPROVAL_STATEMENT,
         "approved_at": NOW.isoformat(),
@@ -260,6 +406,11 @@ def cleanup_approval_for(plan):
         "proof_operation_digest": plan["proof_operation_digest"],
         "operation_digest": plan["operation_digest"],
     }
+    if plan.get("setup_operation_digest"):
+        approval["setup_operation_digest"] = plan[
+            "setup_operation_digest"
+        ]
+    return approval
 
 
 def completed_proof_for_cleanup(tmp_path):
@@ -394,6 +545,38 @@ def test_cleanup_removes_only_the_proof_suppression_and_verifies_absence(
     assert (tmp_path / "cleanup-evidence" / "COMPLETE").exists()
 
 
+def test_cleanup_deletes_only_digest_locked_temporary_proof_list(tmp_path):
+    api = FakeSuppressionAPI()
+    api.contacts = []
+    setup_plan = setup_plan_for()
+    proof_root = tmp_path / "proof"
+    run_suppression_setup_and_test(
+        api,
+        setup_plan,
+        setup_approval_for(setup_plan),
+        EvidenceStore(proof_root),
+        now=NOW,
+        sleep_fn=lambda _: None,
+        stats_attempts=1,
+    )
+    proof_plan = json.loads(
+        (proof_root / "proof-plan.json").read_text()
+    )
+    cleanup_plan = build_suppression_cleanup_plan(proof_plan, proof_root)
+
+    result = run_suppression_cleanup(
+        api,
+        cleanup_plan,
+        cleanup_approval_for(cleanup_plan),
+        EvidenceStore(tmp_path / "cleanup"),
+        now=NOW,
+    )
+
+    assert ("delete_list", "proof-list-1") in api.calls
+    assert result["proof_list_deleted"] is True
+    assert api.lists == {}
+
+
 def test_cleanup_blocks_wrong_account_group_or_missing_membership(
     tmp_path,
 ):
@@ -448,6 +631,19 @@ def test_cleanup_cli_requires_proof_approval_digest_and_cleanup_id():
         "--cleanup-id", "cleanup_20260724T210000Z",
     ])
     assert parsed.command == "cleanup"
+    planned = parser.parse_args([
+        "plan",
+        "--run-id", "suppression_proof_20260726T120000Z",
+    ])
+    assert planned.command == "plan"
+    execution = parser.parse_args([
+        "run",
+        "--plan-file", "/private/plan.json",
+        "--approval-file", "/private/approval.json",
+        "--expected-operation-digest", "b" * 64,
+        "--run-id", "suppression_proof_20260726T120000Z",
+    ])
+    assert execution.command == "run"
 
 
 def test_cleanup_cli_rejects_digest_mismatch_before_provider_access(

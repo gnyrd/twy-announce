@@ -46,6 +46,15 @@ def test_create_list_uses_marketing_endpoint():
     assert fake.calls[-1]["json"] == {"name": "Proof"}
 
 
+def test_delete_list_uses_exact_marketing_endpoint():
+    api, fake = make_api(FakeResponse(204, None))
+
+    api.delete_list("list-1")
+
+    assert fake.calls[-1]["method"] == "DELETE"
+    assert fake.calls[-1]["url"].endswith("/v3/marketing/lists/list-1")
+
+
 def test_marketing_lists_return_complete_inventory():
     api, fake = make_api(FakeResponse(200, {
         "result": [{"id": "list-1", "name": "TWY Marketing"}],

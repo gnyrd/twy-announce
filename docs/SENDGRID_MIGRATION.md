@@ -135,17 +135,19 @@ evidence. It is not a recurring contact synchronization path.
 ## Suppression enforcement harness
 
 `src/sendgrid_suppression_test.py` is a separately approval-gated test harness.
-The proof runner has no CLI and has not been run against SendGrid. The file's
-only CLI action is the separately approved cleanup of a completed proof.
-Both proof creation and cleanup independently enforce the same two-address
-recipient allowlist before any provider access.
+The proof has not been run against SendGrid. Its CLI prepares a provider-inert
+plan, executes one digest-locked setup plus proof operation, and performs the
+separately approved cleanup. Proof creation and cleanup independently enforce
+the recipient allowlist before provider access.
 
 It accepts only `admin@tiffanywoodyoga.com` or `jpgan6@gmail.com`, with
-`jpgan6@gmail.com` as the preferred proof recipient. The admin mailbox remains
-available only for an explicitly selected proof. The harness also requires an
-isolated list containing exactly that one address, the exact
-`Email: Unsubscribed` group, and the statement
-`APPROVE TWY SENDGRID SUPPRESSION ENFORCEMENT TEST`.
+`jpgan6@gmail.com` required by the combined setup operation. The approved
+temporary list name is
+`Proof: Suppression Enforcement: 2026_07_26`. One approval covers creating
+that isolated list, adding only the preferred recipient, adding the temporary
+`Email: Unsubscribed` suppression, and running the tagged Single Send. The
+exact statement is
+`APPROVE TWY SENDGRID SUPPRESSION PROOF SETUP AND TEST`.
 
 The harness adds and verifies the temporary group suppression before creating a
 Single Send tagged with the same group. It passes only when SendGrid reports
@@ -155,16 +157,19 @@ date so a run near midnight cannot fall outside the query window. The exact
 `requests == 1` result is a fail-closed live-provider assumption that must be
 confirmed during the first separately approved run.
 
-The completed proof records the Single Send ID, temporary suppression, and an
-immutable `cleanup-plan.json`. The proof never auto-removes the suppression
-because removal restores deliverability. Running the proof and cleaning it up
-are separate provider mutations requiring separate approvals.
+The completed proof records the Single Send ID, temporary suppression,
+temporary list ID, and an immutable `cleanup-plan.json`. The proof never
+auto-removes the suppression or list because removal restores deliverability
+and deletes provider state. Running the proof and cleaning it up are separate
+provider mutations requiring separate approvals.
 
 Cleanup requires the exact statement
 `APPROVE TWY SENDGRID SUPPRESSION TEST CLEANUP`, the proof digest, cleanup
-digest, target account, recipient, and an approval window of no more than 24
-hours. The cleanup command verifies the account, exact group, and current
-suppression membership before deleting only that group membership. It then
+digest, setup digest, target account, recipient, and an approval window of no
+more than 24 hours. The cleanup command verifies the account, exact group,
+current suppression membership, exact temporary list name, immutable list ID,
+and its one-recipient membership. It removes only that group membership and
+the temporary proof list. It then
 re-reads the group and seals evidence only if the recipient is absent:
 
 ```bash

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable
 
 from sendgrid_campaigns import UNSUBSCRIBE_GROUP_NAME
@@ -21,6 +22,12 @@ ALLOWED_RECIPIENTS = {
     "jpgan6@gmail.com",
 }
 PREFERRED_SUPPRESSION_TEST_RECIPIENT = "jpgan6@gmail.com"
+APPROVED_SUPPRESSION_PROOF_LIST_NAME = (
+    "Proof: Suppression Enforcement: 2026_07_26"
+)
+SUPPRESSION_SETUP_APPROVAL_STATEMENT = (
+    "APPROVE TWY SENDGRID SUPPRESSION PROOF SETUP AND TEST"
+)
 SUPPRESSION_TEST_APPROVAL_STATEMENT = (
     "APPROVE TWY SENDGRID SUPPRESSION ENFORCEMENT TEST"
 )
@@ -91,6 +98,55 @@ def build_suppression_test_plan(
     return plan
 
 
+def build_suppression_setup_plan(
+    *,
+    run_id: str,
+    recipient: str,
+    list_name: str,
+    group_id: int,
+    sender_id: int,
+) -> dict[str, Any]:
+    normalized = _allowed_recipient(recipient)
+    if normalized != PREFERRED_SUPPRESSION_TEST_RECIPIENT:
+        raise SuppressionTestSafetyError(
+            "setup requires the preferred proof recipient"
+        )
+    if list_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME:
+        raise SuppressionTestSafetyError(
+            "setup requires the approved proof list name"
+        )
+    if not run_id or "/" in run_id or "\\" in run_id:
+        raise SuppressionTestSafetyError("test run_id is unsafe")
+    if int(group_id) <= 0 or int(sender_id) <= 0:
+        raise SuppressionTestSafetyError(
+            "positive group and sender IDs are required"
+        )
+    plan: dict[str, Any] = {
+        "schema_version": 2,
+        "run_id": run_id,
+        "target_account_email": TARGET_ACCOUNT_EMAIL,
+        "recipient": normalized,
+        "proof_list": {
+            "name": list_name,
+            "must_not_exist": True,
+        },
+        "group": {
+            "id": int(group_id),
+            "name": PRODUCTION_GROUP_NAME,
+        },
+        "sender_id": int(sender_id),
+        "actions": [
+            "create_isolated_proof_list",
+            "add_preferred_recipient",
+            "add_temporary_group_suppression",
+            "create_and_schedule_tagged_single_send",
+            "verify_zero_delivery_stats",
+        ],
+    }
+    plan["operation_digest"] = _canonical_digest(plan)
+    return plan
+
+
 def _parse_time(value: Any, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(value))
@@ -117,7 +173,14 @@ def _validate_approval(
         ("recipient", plan["recipient"], "recipient"),
         ("operation_digest", plan["operation_digest"], "operation"),
     )
-    for field, value, label in expected:
+    expected_fields = list(expected)
+    if plan.get("setup_operation_digest"):
+        expected_fields.append((
+            "setup_operation_digest",
+            plan["setup_operation_digest"],
+            "setup operation",
+        ))
+    for field, value, label in expected_fields:
         if approval.get(field) != value:
             raise SuppressionTestSafetyError(
                 f"approval {label} does not match test plan"
@@ -135,6 +198,53 @@ def _validate_approval(
     if expires_at - approved_at > timedelta(hours=24):
         raise SuppressionTestSafetyError(
             "approval window exceeds 24 hours"
+        )
+
+
+def _validate_setup_approval(
+    plan: dict[str, Any],
+    approval: dict[str, Any],
+    now: datetime,
+) -> None:
+    _validate_operation_digest(plan, "setup")
+    expected = (
+        ("approved_by", "JP", "approver"),
+        (
+            "statement",
+            SUPPRESSION_SETUP_APPROVAL_STATEMENT,
+            "statement",
+        ),
+        ("target_account_email", plan["target_account_email"], "account"),
+        ("recipient", plan["recipient"], "recipient"),
+        ("operation_digest", plan["operation_digest"], "operation"),
+    )
+    expected_fields = list(expected)
+    if plan.get("setup_operation_digest"):
+        expected_fields.append((
+            "setup_operation_digest",
+            plan["setup_operation_digest"],
+            "setup operation",
+        ))
+    for field, value, label in expected_fields:
+        if approval.get(field) != value:
+            raise SuppressionTestSafetyError(
+                f"setup approval {label} does not match plan"
+            )
+    approved_at = _parse_time(approval.get("approved_at"), "approved_at")
+    expires_at = _parse_time(approval.get("expires_at"), "expires_at")
+    if approved_at > now:
+        raise SuppressionTestSafetyError(
+            "setup approval time is in the future"
+        )
+    if expires_at <= now:
+        raise SuppressionTestSafetyError("setup approval is expired")
+    if expires_at <= approved_at:
+        raise SuppressionTestSafetyError(
+            "setup approval expiry must follow approval time"
+        )
+    if expires_at - approved_at > timedelta(hours=24):
+        raise SuppressionTestSafetyError(
+            "setup approval window exceeds 24 hours"
         )
 
 
@@ -197,6 +307,36 @@ def _cleanup_plan_from_result(
         "single_send_id": str(single_send_id),
         "proof_operation_digest": proof_plan["operation_digest"],
     }
+    setup_operation_digest = result.get("setup_operation_digest")
+    if setup_operation_digest is not None:
+        if (
+            setup_operation_digest
+            != proof_plan.get("setup_operation_digest")
+        ):
+            raise SuppressionTestSafetyError(
+                "completed proof setup digest does not match proof plan"
+            )
+        plan["setup_operation_digest"] = setup_operation_digest
+    proof_list = result.get("proof_list")
+    if proof_list is not None:
+        list_id = str((proof_list or {}).get("id") or "")
+        list_name = str((proof_list or {}).get("name") or "")
+        if (
+            list_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME
+            or not list_id
+            or (proof_plan.get("proof_list") or {}).get("name") != list_name
+        ):
+            raise SuppressionTestSafetyError(
+                "completed proof list does not match approved setup"
+            )
+        plan["action"] = (
+            "remove_temporary_group_suppression_and_delete_proof_list"
+        )
+        plan["proof_list"] = {
+            "id": list_id,
+            "name": list_name,
+            "delete": True,
+        }
     plan["operation_digest"] = _canonical_digest(plan)
     return plan
 
@@ -243,7 +383,14 @@ def _validate_cleanup_approval(
         ),
         ("operation_digest", plan["operation_digest"], "operation"),
     )
-    for field, value, label in expected:
+    expected_fields = list(expected)
+    if plan.get("setup_operation_digest"):
+        expected_fields.append((
+            "setup_operation_digest",
+            plan["setup_operation_digest"],
+            "setup operation",
+        ))
+    for field, value, label in expected_fields:
         if approval.get(field) != value:
             raise SuppressionTestSafetyError(
                 f"cleanup approval {label} does not match plan"
@@ -273,6 +420,8 @@ def run_suppression_cleanup(
     evidence_store,
     *,
     now: datetime | None = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    list_delete_attempts: int = 15,
 ) -> dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     _validate_cleanup_approval(plan, approval, current)
@@ -297,17 +446,65 @@ def run_suppression_cleanup(
         raise SuppressionTestSafetyError(
             "temporary suppression is not present before cleanup"
         )
+    proof_list = plan.get("proof_list")
+    if proof_list is not None:
+        if (
+            proof_list.get("name") != APPROVED_SUPPRESSION_PROOF_LIST_NAME
+            or proof_list.get("delete") is not True
+        ):
+            raise SuppressionTestSafetyError(
+                "cleanup proof list does not match approved temporary name"
+            )
+        list_id = str(proof_list.get("id") or "")
+        matches = [
+            item
+            for item in api.marketing_lists()
+            if str(item.get("id") or "") == list_id
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("name") != proof_list["name"]
+        ):
+            raise SuppressionTestSafetyError(
+                "temporary proof list does not match cleanup plan"
+            )
+        contacts = api.list_contacts(list_id)
+        if {
+            _normalized_email(contact.get("email"))
+            for contact in contacts
+        } != {recipient} or len(contacts) != 1:
+            raise SuppressionTestSafetyError(
+                "temporary proof list membership is not exact"
+            )
     evidence_store.write_json("started.json", {
         "operation_digest": plan["operation_digest"],
         "proof_operation_digest": plan["proof_operation_digest"],
         "group_id": group_id,
         "recipient": recipient,
+        "proof_list": proof_list,
     })
     api.remove_group_suppression(group_id, recipient)
     if api.search_group_suppressions(group_id, [recipient]):
         raise SuppressionTestSafetyError(
             "temporary suppression is still present after cleanup"
         )
+    proof_list_deleted = False
+    if proof_list is not None:
+        api.delete_list(str(proof_list["id"]))
+        for attempt in range(list_delete_attempts):
+            still_present = any(
+                str(item.get("id") or "") == str(proof_list["id"])
+                for item in api.marketing_lists()
+            )
+            if not still_present:
+                break
+            if attempt < list_delete_attempts - 1:
+                sleep_fn(1.0)
+        else:
+            raise SuppressionTestSafetyError(
+                "temporary proof list is still present after cleanup"
+            )
+        proof_list_deleted = True
     result = {
         "operation_digest": plan["operation_digest"],
         "proof_operation_digest": plan["proof_operation_digest"],
@@ -315,6 +512,8 @@ def run_suppression_cleanup(
         "recipient": recipient,
         "suppression_removed": True,
     }
+    if proof_list is not None:
+        result["proof_list_deleted"] = proof_list_deleted
     evidence_store.write_json("result.json", result)
     evidence_store.complete()
     return result
@@ -342,6 +541,7 @@ def run_suppression_test(
     now: datetime | None = None,
     sleep_fn: Callable[[float], None],
     stats_attempts: int = 30,
+    complete_evidence: bool = True,
 ) -> dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     _validate_approval(plan, approval, current)
@@ -386,7 +586,10 @@ def run_suppression_test(
         )
 
     payload = {
-        "name": f"TWY Suppression Enforcement {plan['run_id']}",
+        "name": (
+            (plan.get("proof_list") or {}).get("name")
+            or f"TWY Suppression Enforcement {plan['run_id']}"
+        ),
         "send_to": {
             "all": False,
             "list_ids": [plan["list_id"]],
@@ -457,6 +660,143 @@ def run_suppression_test(
     cleanup_plan = _cleanup_plan_from_result(plan, result)
     evidence_store.write_json("result.json", result)
     evidence_store.write_json("cleanup-plan.json", cleanup_plan)
+    if complete_evidence:
+        evidence_store.complete()
+    return result
+
+
+def run_suppression_setup_and_test(
+    api,
+    plan: dict[str, Any],
+    approval: dict[str, Any],
+    evidence_store,
+    *,
+    now: datetime | None = None,
+    sleep_fn: Callable[[float], None],
+    stats_attempts: int = 30,
+) -> dict[str, Any]:
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    _validate_setup_approval(plan, approval, current)
+    if plan.get("schema_version") != 2:
+        raise SuppressionTestSafetyError(
+            "setup plan schema is not supported"
+        )
+    recipient = _allowed_recipient(plan.get("recipient"))
+    if recipient != PREFERRED_SUPPRESSION_TEST_RECIPIENT:
+        raise SuppressionTestSafetyError(
+            "setup requires the preferred proof recipient"
+        )
+    proof_list = plan.get("proof_list") or {}
+    list_name = str(proof_list.get("name") or "")
+    if (
+        list_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME
+        or proof_list.get("must_not_exist") is not True
+    ):
+        raise SuppressionTestSafetyError(
+            "setup plan does not use the approved proof list"
+        )
+    if api.user_email() != plan["target_account_email"]:
+        raise SuppressionTestSafetyError(
+            "SendGrid account does not match setup plan"
+        )
+    group_id = int((plan.get("group") or {}).get("id", 0))
+    group = api.suppression_group(group_id)
+    if (
+        int(group.get("id", -1)) != group_id
+        or group.get("name") != PRODUCTION_GROUP_NAME
+        or plan["group"].get("name") != PRODUCTION_GROUP_NAME
+    ):
+        raise SuppressionTestSafetyError(
+            "SendGrid suppression group does not match setup plan"
+        )
+    if any(
+        item.get("name") == list_name
+        for item in api.marketing_lists()
+    ):
+        raise SuppressionTestSafetyError(
+            "approved temporary proof list already exists"
+        )
+    if (evidence_store.root / "setup-started.json").exists():
+        raise SuppressionTestSafetyError(
+            "suppression setup evidence already exists"
+        )
+
+    evidence_store.write_json("setup-started.json", {
+        "operation_digest": plan["operation_digest"],
+        "recipient": recipient,
+        "proof_list_name": list_name,
+        "group_id": group_id,
+    })
+    created = api.create_list(list_name)
+    list_id = str((created or {}).get("id") or "")
+    if not list_id or created.get("name") != list_name:
+        raise SuppressionTestSafetyError(
+            "SendGrid proof list creation did not return the exact object"
+        )
+    evidence_store.write_json("setup-created.json", {
+        "operation_digest": plan["operation_digest"],
+        "proof_list": {"id": list_id, "name": list_name},
+    })
+    job_id = api.upsert_contacts(
+        [list_id],
+        [{"email": recipient}],
+    )
+    api.wait_contact_job(job_id, timeout_s=300)
+    contacts = api.list_contacts(list_id)
+    if {
+        _normalized_email(contact.get("email"))
+        for contact in contacts
+    } != {recipient} or len(contacts) != 1:
+        raise SuppressionTestSafetyError(
+            "temporary proof list membership is not exact"
+        )
+
+    proof_plan = build_suppression_test_plan(
+        run_id=str(plan["run_id"]),
+        recipient=recipient,
+        list_id=list_id,
+        group_id=group_id,
+        sender_id=int(plan["sender_id"]),
+    )
+    proof_plan["proof_list"] = {
+        "name": list_name,
+        "must_not_exist": True,
+    }
+    proof_plan["setup_operation_digest"] = plan["operation_digest"]
+    proof_plan["operation_digest"] = _canonical_digest({
+        key: value
+        for key, value in proof_plan.items()
+        if key != "operation_digest"
+    })
+    proof_approval = {
+        "approved_by": "JP",
+        "statement": SUPPRESSION_TEST_APPROVAL_STATEMENT,
+        "approved_at": current.isoformat(),
+        "expires_at": (current + timedelta(hours=1)).isoformat(),
+        "target_account_email": plan["target_account_email"],
+        "recipient": recipient,
+        "operation_digest": proof_plan["operation_digest"],
+        "setup_operation_digest": plan["operation_digest"],
+    }
+    evidence_store.write_json("proof-plan.json", proof_plan)
+    result = run_suppression_test(
+        api,
+        proof_plan,
+        proof_approval,
+        evidence_store,
+        now=current,
+        sleep_fn=sleep_fn,
+        stats_attempts=stats_attempts,
+        complete_evidence=False,
+    )
+    result["setup_operation_digest"] = plan["operation_digest"]
+    result["proof_list"] = {
+        "id": list_id,
+        "name": list_name,
+    }
+    cleanup_plan = _cleanup_plan_from_result(proof_plan, result)
+    evidence_store.write_json("result.json", result)
+    evidence_store.write_json("cleanup-plan.json", cleanup_plan)
     evidence_store.complete()
     return result
 
@@ -464,13 +804,26 @@ def run_suppression_test(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Approval-locked cleanup for a completed TWY suppression proof"
+            "Approval-locked TWY SendGrid suppression proof"
         )
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    plan = commands.add_parser(
+        "plan",
+        help="write one provider-inert setup and proof plan",
+    )
+    plan.add_argument("--run-id", required=True)
+    execute = commands.add_parser(
+        "run",
+        help="execute one approved setup and suppression proof",
+    )
+    execute.add_argument("--plan-file", type=Path, required=True)
+    execute.add_argument("--approval-file", type=Path, required=True)
+    execute.add_argument("--expected-operation-digest", required=True)
+    execute.add_argument("--run-id", required=True)
     cleanup = commands.add_parser(
         "cleanup",
-        help="remove one separately approved proof suppression",
+        help="remove one approved suppression and temporary proof list",
     )
     cleanup.add_argument("--proof-plan", type=Path, required=True)
     cleanup.add_argument("--proof-evidence-dir", type=Path, required=True)
@@ -483,6 +836,91 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        from sendgrid_migration_evidence import EvidenceStore
+        from twy_paths import (
+            data_root,
+            load_env,
+            sendgrid_proof_dir,
+            sendgrid_suppression_cleanup_dir,
+        )
+
+        if args.command == "plan":
+            from sendgrid_campaigns import SendGridRegistry
+
+            root = sendgrid_proof_dir(args.run_id)
+            if root.exists() and any(root.iterdir()):
+                raise SuppressionTestSafetyError(
+                    "suppression proof run already has evidence"
+                )
+            registry = SendGridRegistry.load(
+                data_root() / "sendgrid" / "production_objects.json"
+            )
+            plan = build_suppression_setup_plan(
+                run_id=args.run_id,
+                recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+                list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+                group_id=registry.suppression_group_id,
+                sender_id=registry.sender_id,
+            )
+            destination = EvidenceStore(root).write_json(
+                "plan.json",
+                plan,
+            )
+            print(json.dumps({
+                "run_id": args.run_id,
+                "operation_digest": plan["operation_digest"],
+                "plan_file": str(destination),
+            }, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "run":
+            plan = _read_json(args.plan_file)
+            if plan.get("run_id") != args.run_id:
+                raise SuppressionTestSafetyError(
+                    "run ID does not match setup plan"
+                )
+            root = sendgrid_proof_dir(args.run_id)
+            expected_plan_file = root / "plan.json"
+            if args.plan_file.resolve() != expected_plan_file.resolve():
+                raise SuppressionTestSafetyError(
+                    "setup plan is outside the exact proof evidence directory"
+                )
+            if (
+                plan.get("operation_digest")
+                != args.expected_operation_digest
+            ):
+                raise SuppressionTestSafetyError(
+                    "expected operation digest does not match setup plan"
+                )
+            approval = _read_json(args.approval_file)
+            load_env()
+            api_key = os.getenv("SENDGRID_API_KEY")
+            if not api_key:
+                print(
+                    "missing required configuration: SENDGRID_API_KEY",
+                    file=sys.stderr,
+                )
+                return 2
+            from sendgrid_api import SendGridAPI
+
+            result = run_suppression_setup_and_test(
+                SendGridAPI(api_key),
+                plan,
+                approval,
+                EvidenceStore(root),
+                sleep_fn=time.sleep,
+            )
+            print(json.dumps({
+                "operation_digest": result["operation_digest"],
+                "setup_operation_digest": result[
+                    "setup_operation_digest"
+                ],
+                "single_send_id": result["single_send_id"],
+                "stats": result["stats"],
+                "cleanup_required": True,
+            }, indent=2, sort_keys=True))
+            return 0
+
         proof_plan = _read_json(args.proof_plan)
         cleanup_plan = build_suppression_cleanup_plan(
             proof_plan,
@@ -498,11 +936,6 @@ def main(argv=None) -> int:
             )
 
         from sendgrid_api import SendGridAPI
-        from sendgrid_migration_evidence import EvidenceStore
-        from twy_paths import (
-            load_env,
-            sendgrid_suppression_cleanup_dir,
-        )
 
         load_env()
         api_key = os.getenv("SENDGRID_API_KEY")
@@ -529,9 +962,9 @@ def main(argv=None) -> int:
             "suppression_removed": result["suppression_removed"],
         }, indent=2, sort_keys=True))
         return 0
-    except SuppressionTestSafetyError as exc:
+    except (OSError, SuppressionTestSafetyError) as exc:
         print(
-            f"suppression cleanup safety gate blocked: {exc}",
+            f"suppression proof safety gate blocked: {exc}",
             file=sys.stderr,
         )
         return 3
