@@ -370,6 +370,28 @@ def test_zero_requests_after_full_poll_window_is_inconclusive_and_fails(
     assert sleeps == [10.0, 10.0]
 
 
+def test_persistent_undelivered_control_is_inconclusive_and_fails(
+    tmp_path,
+):
+    api = FakeSuppressionAPI()
+    api.stats["results"][0]["stats"]["requests"] = 1
+    api.stats["results"][0]["stats"]["delivered"] = 0
+    sleeps = []
+
+    with pytest.raises(SuppressionTestSafetyError, match="stats"):
+        run_suppression_test(
+            api,
+            plan_for(),
+            approval_for(plan_for()),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=sleeps.append,
+            stats_attempts=3,
+        )
+
+    assert sleeps == [10.0, 10.0]
+
+
 def test_delivery_during_confirmation_fails_enforcement_proof(tmp_path):
     class DelayedDeliveryAPI(FakeSuppressionAPI):
         def __init__(self):
@@ -829,6 +851,36 @@ def test_cleanup_requires_a_separate_exact_approval(tmp_path):
         call[0] == "remove_group_suppression"
         for call in api.calls
     )
+
+
+def test_cleanup_missing_control_recipient_fails_cleanly_before_provider_access(
+    tmp_path,
+):
+    api, cleanup_plan = completed_proof_for_cleanup(tmp_path)
+    approval = cleanup_approval_for(cleanup_plan)
+    cleanup_plan.pop("control_recipient")
+    cleanup_plan["operation_digest"] = _canonical_digest({
+        key: value
+        for key, value in cleanup_plan.items()
+        if key != "operation_digest"
+    })
+    approval.pop("control_recipient")
+    approval["operation_digest"] = cleanup_plan["operation_digest"]
+    api.calls.clear()
+
+    with pytest.raises(
+        SuppressionTestSafetyError,
+        match="control recipient",
+    ):
+        run_suppression_cleanup(
+            api,
+            cleanup_plan,
+            approval,
+            EvidenceStore(tmp_path / "cleanup-evidence"),
+            now=NOW,
+        )
+
+    assert api.calls == []
 
 
 def test_cleanup_plan_rejects_recipient_outside_proof_allowlist():

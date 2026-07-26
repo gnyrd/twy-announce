@@ -532,7 +532,21 @@ def _validate_cleanup_approval(
     now: datetime,
 ) -> None:
     _validate_operation_digest(plan, "cleanup")
-    _allowed_recipient(plan.get("recipient"))
+    recipient = _allowed_recipient(plan.get("recipient"))
+    if not plan.get("control_recipient"):
+        raise SuppressionTestSafetyError(
+            "cleanup plan is missing the control recipient"
+        )
+    control_recipient = _allowed_recipient(
+        plan.get("control_recipient")
+    )
+    if (
+        control_recipient != SUPPRESSION_CONTROL_RECIPIENT
+        or recipient == control_recipient
+    ):
+        raise SuppressionTestSafetyError(
+            "cleanup control recipient does not match approved role"
+        )
     expected = (
         ("approved_by", "JP", "approver"),
         (
@@ -544,7 +558,7 @@ def _validate_cleanup_approval(
         ("recipient", plan["recipient"], "recipient"),
         (
             "control_recipient",
-            plan["control_recipient"],
+            control_recipient,
             "control recipient",
         ),
         (
