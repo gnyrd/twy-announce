@@ -27,13 +27,12 @@ from mailchimp_campaigns import (
     find_campaign_by_title, followup_campaign_title, monthly_campaign_title,
     _mc_url, _mc_auth,
 )
-from twy_paths import newsletters_dir
+from twy_paths import newsletter_diffs_dir
 from twy_platform import locked_write
 
 MOUNTAIN = ZoneInfo("America/Denver")
 
-# Diff records get stored alongside the newsletters dir
-NEWSLETTER_DIFFS_DIR = newsletters_dir().parent / "newsletter-diffs"
+NEWSLETTER_DIFFS_DIR = newsletter_diffs_dir()
 
 # Map internal audience keys to the campaign-title label segment used in MC.
 # Production convention (as of June 2026). Title pattern:
