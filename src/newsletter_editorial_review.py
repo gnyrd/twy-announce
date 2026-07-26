@@ -9,7 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from diff_loop import detect_structural_signals, diff_phrases
+from diff_loop import (
+    detect_structural_signals,
+    diff_phrases,
+    normalize_for_comparison,
+)
 from twy_paths import (
     newsletter_approved_references_path,
     newsletter_diffs_dir,
@@ -126,6 +130,12 @@ def _candidate(
     }
 
 
+def _candidate_is_meaningful(candidate: dict[str, str]) -> bool:
+    return normalize_for_comparison(
+        candidate["generated_excerpt"]
+    ) != normalize_for_comparison(candidate["sent_excerpt"])
+
+
 def _build_candidates_from_diffs(
     *,
     review_id: str,
@@ -156,6 +166,10 @@ def _build_candidates_from_diffs(
     for index in range(pair_count):
         generated = removed[index] if index < len(removed) else ""
         sent = added[index] if index < len(added) else ""
+        if normalize_for_comparison(
+            generated
+        ) == normalize_for_comparison(sent):
+            continue
         combined = f"{generated} {sent}"
         kind = (
             "one time correction"
@@ -443,13 +457,26 @@ def import_historical_comparisons() -> list[Path]:
                 destination,
                 json.dumps(review, indent=2, sort_keys=True) + "\n",
             )
+            current = review
         except FileExistsError:
             existing = validate_comparison(
                 json.loads(destination.read_text(encoding="utf-8"))
             )
             if existing["content_digest"] != review["content_digest"]:
                 raise ValueError(f"historical review collision: {destination}")
-        ensure_empty_review_is_done(review)
+            approval_path = _approval_path(existing)
+            if (
+                not approval_path.exists()
+                and existing["candidates"] != review["candidates"]
+            ):
+                locked_write(
+                    destination,
+                    json.dumps(review, indent=2, sort_keys=True) + "\n",
+                )
+                current = review
+            else:
+                current = existing
+        ensure_empty_review_is_done(current)
         written.append(destination)
     return written
 
@@ -480,7 +507,10 @@ def compile_approved_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
         eligible_ids = {
             candidate_id
             for candidate_id, item in by_id.items()
-            if item["kind"] in REUSABLE_KINDS
+            if (
+                item["kind"] in REUSABLE_KINDS
+                and _candidate_is_meaningful(item)
+            )
         }
         decided_ids = set(approval["approved_candidate_ids"]) | set(
             approval["rejected_candidate_ids"]
@@ -493,7 +523,11 @@ def compile_approved_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
             )
         for candidate_id in approval["approved_candidate_ids"]:
             candidate = by_id.get(candidate_id)
-            if candidate and candidate["kind"] in REUSABLE_KINDS:
+            if (
+                candidate
+                and candidate["kind"] in REUSABLE_KINDS
+                and _candidate_is_meaningful(candidate)
+            ):
                 guidance_items.append(
                     {
                         "review_id": comparison["review_id"],

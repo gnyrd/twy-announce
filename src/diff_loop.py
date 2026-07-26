@@ -222,9 +222,22 @@ def _split_sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p and p.strip()]
 
 
+_MARKDOWN_ESCAPE_RE = re.compile(r"\\([*_])")
+_MARKDOWN_EMPHASIS_RE = re.compile(
+    r"(?<!\w)[*_]+|[*_]+(?!\w)"
+)
+
+
+def normalize_for_comparison(value: str) -> str:
+    """Normalize prose while ignoring Markdown emphasis and separators."""
+    unescaped = _MARKDOWN_ESCAPE_RE.sub(r"\1", value)
+    without_emphasis = _MARKDOWN_EMPHASIS_RE.sub(" ", unescaped)
+    return re.sub(r"\s+", " ", without_emphasis.strip().lower())
+
+
 def _normalize(s: str) -> str:
     """Lowercase + collapse whitespace for set-based comparison."""
-    return re.sub(r"\s+", " ", s.strip().lower())
+    return normalize_for_comparison(s)
 
 
 def diff_phrases(tweee_body: str, tiff_body: str) -> tuple[list[str], list[str]]:

@@ -90,6 +90,13 @@ def test_compiler_includes_only_done_reusable_approvals(monkeypatch, tmp_path):
                 "sent_excerpt": "August 12",
                 "guideline": "Use the corrected class date",
             },
+            {
+                "candidate_id": "4" * 32,
+                "kind": "voice",
+                "generated_excerpt": "**Same words**",
+                "sent_excerpt": "** Same words**",
+                "guideline": "Formatting noise must not become guidance",
+            },
         ],
     }
     comparison_path = diffs / "2026-08" / f'{"a" * 32}.review.json'
@@ -105,7 +112,11 @@ def test_compiler_includes_only_done_reusable_approvals(monkeypatch, tmp_path):
                 "status": "done",
                 "content_digest": "d" * 64,
                 "completed_at": "2026-08-04T11:00:00-06:00",
-                "approved_candidate_ids": ["1" * 32, "3" * 32],
+                "approved_candidate_ids": [
+                    "1" * 32,
+                    "3" * 32,
+                    "4" * 32,
+                ],
                 "rejected_candidate_ids": ["2" * 32],
                 "approved_as_reference": True,
             }
@@ -216,6 +227,83 @@ def test_historical_import_converts_only_newsletter_audiences(monkeypatch, tmp_p
     assert record["provider"] == "historical"
     assert record["mailing_name"] == "Yoga Lifestyle: 2026_07: Monthly"
     assert not list(period.glob("*reminder*.review.json"))
+
+
+def test_markdown_only_body_differences_produce_no_candidates():
+    record = build_review_record(
+        mailing_name="Yoga Lifestyle: 2026_07: Monthly",
+        audience_key="lifestyle",
+        captured_at="2026-07-25T03:00:22-06:00",
+        provider_single_send_id="single-send",
+        provider_design_id=None,
+        provider_ui_url=None,
+        generated_subject="Same subject",
+        generated_body=(
+            "**There will not be a class in July** Details.\n\n"
+            r"\_\_\_\_\_\_\_\_\_\_"
+        ),
+        sent_subject="Same subject",
+        sent_body=(
+            "** There will not be a class in July** Details.\n\n"
+            "__________"
+        ),
+    )
+
+    assert record["candidates"] == []
+
+
+def test_historical_import_refreshes_pending_formatting_noise(
+    monkeypatch,
+    tmp_path,
+):
+    diffs, reviews = _patch_locations(monkeypatch, tmp_path)
+    period = diffs / "2026-07"
+    period.mkdir(parents=True)
+    raw = {
+        "audience": "lifestyle",
+        "month": "2026-07",
+        "captured_at": "2026-07-25T03:00:22-06:00",
+        "tweee_submitted": {
+            "subject": "Same subject",
+            "body_md": "**Same words**",
+        },
+        "tiff_sent": {
+            "subject": "Same subject",
+            "body_md": "** Same words**",
+        },
+        "removed_phrases": ["**Same words**"],
+        "added_phrases": ["** Same words**"],
+        "structural_signals": [],
+    }
+    (period / "lifestyle.diff.json").write_text(
+        json.dumps(raw),
+        encoding="utf-8",
+    )
+    comparison = newsletter_editorial_review._historical_review(raw)
+    destination = period / f'{comparison["review_id"]}.review.json'
+    stale = dict(comparison)
+    stale["candidates"] = [
+        {
+            "candidate_id": "f" * 32,
+            "kind": "voice",
+            "generated_excerpt": "**Same words**",
+            "sent_excerpt": "** Same words**",
+            "guideline": "Prefer Tiff wording",
+        }
+    ]
+    destination.write_text(json.dumps(stale), encoding="utf-8")
+
+    import_historical_comparisons()
+
+    refreshed = json.loads(destination.read_text(encoding="utf-8"))
+    approval_path = (
+        reviews / "2026_07" / f'{comparison["review_id"]}.json'
+    )
+    approval = json.loads(approval_path.read_text(encoding="utf-8"))
+    assert refreshed["candidates"] == []
+    assert approval["status"] == "done"
+    assert approval["approved_candidate_ids"] == []
+    assert approval["approved_as_reference"] is False
 
 
 def test_invalid_audience_is_rejected():
