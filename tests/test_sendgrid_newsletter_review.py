@@ -100,6 +100,50 @@ def test_collect_review_reads_design_and_writes_provider_neutral_record(
     ]
 
 
+def test_collect_review_supports_api_created_inline_content(
+    monkeypatch,
+    tmp_path,
+):
+    diffs = tmp_path / "newsletter-diffs"
+    monkeypatch.setattr(
+        sendgrid_newsletter_review,
+        "newsletter_diffs_dir",
+        lambda: diffs,
+    )
+    monkeypatch.setattr(
+        sendgrid_newsletter_review,
+        "ensure_empty_review_is_done",
+        lambda record: None,
+    )
+    api = FakeSendGridAPI(
+        single_send={
+            "id": "sg-id",
+            "status": "triggered",
+            "name": "Yoga Habit: 2026_08: General Invitation",
+            "send_at": "2026-08-04T16:00:00Z",
+            "email_config": {
+                "subject": "Tiff subject",
+                "html_content": "<p>Inline Tiff body</p>",
+            },
+        }
+    )
+
+    path = collect_review(
+        api=api,
+        single_send_id="sg-id",
+        generated_path=_generated_file(tmp_path),
+        mailing_name="Yoga Habit: 2026_08: General Invitation",
+        audience_key="non_lifestyle",
+        captured_at="2026-08-04T10:15:00-06:00",
+    )
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["provider_design_id"] is None
+    assert record["sent"]["subject"] == "Tiff subject"
+    assert "Inline Tiff body" in record["sent"]["body"]
+    assert api.calls == [("get_single_send", "sg-id")]
+
+
 def test_collect_review_rejects_mismatched_mailing_name(tmp_path):
     api = FakeSendGridAPI(
         single_send={

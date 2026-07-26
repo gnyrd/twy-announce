@@ -48,13 +48,15 @@ def collect_review(
 
     email_config = single_send.get("email_config") or {}
     design_id = email_config.get("design_id")
-    if not design_id:
-        raise ValueError("Single Send does not identify a design")
-    design = api.get_design(design_id)
+    design = api.get_design(design_id) if design_id else {}
     sent_subject = design.get("subject") or email_config.get("subject")
     if not sent_subject:
         raise ValueError("SendGrid content is missing a subject")
-    sent_body = html_to_markdown(design.get("html_content", ""))
+    sent_body = html_to_markdown(
+        design.get("html_content")
+        or email_config.get("html_content")
+        or ""
+    )
     if not sent_body.strip():
         raise ValueError("SendGrid content is missing a body")
 
