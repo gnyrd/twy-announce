@@ -151,11 +151,13 @@ exact statement is
 
 The harness adds and verifies the temporary group suppression before creating a
 Single Send tagged with the same group. It passes only when SendGrid reports
-one request, zero deliveries, zero unique opens, zero unique clicks, and the
-suppression still present. Stats are requested beginning with the previous UTC
-date so a run near midnight cannot fall outside the query window. The exact
-`requests == 1` result is a fail-closed live-provider assumption that must be
-confirmed during the first separately approved run.
+zero deliveries, zero unique opens, zero unique clicks, and either zero or one
+request, with the suppression still present. One request proves that SendGrid
+counted the suppressed target. If SendGrid reports zero requests, the harness
+waits through the full bounded polling window before accepting that the
+suppression was enforced before request accounting. Stats are requested
+beginning with the previous UTC date so a run near midnight cannot fall
+outside the query window.
 
 The completed proof records the Single Send ID, temporary suppression,
 temporary list ID, and an immutable `cleanup-plan.json`. The proof never
@@ -163,13 +165,31 @@ auto-removes the suppression or list because removal restores deliverability
 and deletes provider state. Running the proof and cleaning it up are separate
 provider mutations requiring separate approvals.
 
+The outer approval digest binds the pre-existing account, suppression group,
+sender, preferred test recipient, exact temporary label, and ordered actions.
+The new list cannot have an immutable provider ID until SendGrid creates it.
+The harness therefore serializes setup and cleanup through one nonblocking
+process lock, requires the label to be absent before creation, captures the
+returned list ID immediately, and verifies its exact one-recipient membership
+before the Single Send. The single outer approval directly authorizes this
+runtime identity check; the code does not manufacture a second human approval.
+
+Immediately after list creation, the harness writes the runtime proof plan and
+a digest-locked `recovery-cleanup-plan.json` before any contact, suppression,
+or Single Send mutation. If a later step fails, the partial plan authorizes
+only a separately approved cleanup of that exact list and removal of the test
+suppression if it is present. The same cleanup command accepts completed proof
+evidence or this validated partial recovery evidence.
+
 Cleanup requires the exact statement
 `APPROVE TWY SENDGRID SUPPRESSION TEST CLEANUP`, the proof digest, cleanup
 digest, setup digest, target account, recipient, and an approval window of no
 more than 24 hours. The cleanup command verifies the account, exact group,
-current suppression membership, exact temporary list name, immutable list ID,
-and its one-recipient membership. It removes only that group membership and
-the temporary proof list. It then
+current suppression membership when a completed proof requires it, exact
+temporary list name, immutable list ID, and either the exact one-recipient
+membership or an empty list left by an interrupted import. It removes only
+that test-address group membership when present and the exact temporary proof
+list. It then
 re-reads the group and seals evidence only if the recipient is absent:
 
 ```bash
@@ -186,3 +206,8 @@ against SendGrid. The source safety scan that excludes global suppression,
 deletion, and mail-send endpoints applies to the production contact writer.
 The suppression harness is intentionally Single-Send-capable and remains
 separately approval-gated.
+
+Deleting the temporary list does not delete the preferred test address from
+the SendGrid account. The address may predate this proof and is allowlisted for
+ongoing testing, so cleanup deliberately avoids a contact deletion whose
+ownership could not be proven by this operation.

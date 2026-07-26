@@ -13,6 +13,7 @@ from sendgrid_suppression_test import (
     SuppressionTestSafetyError,
     _canonical_digest,
     _cleanup_plan_from_result,
+    _exclusive_run_lock,
     build_parser,
     build_suppression_cleanup_plan,
     build_suppression_setup_plan,
@@ -257,16 +258,38 @@ def test_suppression_is_verified_before_tagged_single_send(tmp_path):
         ("delivered", 1),
         ("unique_opens", 1),
         ("unique_clicks", 1),
-        ("requests", 0),
+        ("requests", 2),
     ],
 )
-def test_any_delivery_or_missing_request_fails_enforcement_proof(
+def test_any_delivery_or_impossible_request_count_fails_enforcement_proof(
     tmp_path, field, value
 ):
     api = FakeSuppressionAPI()
     api.stats["results"][0]["stats"][field] = value
     with pytest.raises(SuppressionTestSafetyError, match="stats"):
         run(tmp_path, api)
+
+
+def test_zero_requests_after_full_poll_window_proves_pre_request_suppression(
+    tmp_path,
+):
+    api = FakeSuppressionAPI()
+    api.stats["results"][0]["stats"]["requests"] = 0
+    sleeps = []
+
+    result = run_suppression_test(
+        api,
+        plan_for(),
+        approval_for(plan_for()),
+        EvidenceStore(tmp_path / "evidence"),
+        now=NOW,
+        sleep_fn=sleeps.append,
+        stats_attempts=3,
+    )
+
+    assert result["stats"]["requests"] == 0
+    assert result["enforcement_mode"] == "suppressed_before_request"
+    assert sleeps == [10.0, 10.0]
 
 
 def test_temporary_suppression_must_still_exist_after_stats(tmp_path):
@@ -393,6 +416,179 @@ def test_setup_blocks_existing_proof_name_before_provider_write(tmp_path):
         )
 
     assert not any(call[0] == "create_list" for call in api.calls)
+
+
+def test_setup_blocks_wrong_account_group_and_existing_evidence(
+    tmp_path,
+):
+    plan = setup_plan_for()
+
+    wrong_account = FakeSuppressionAPI()
+    wrong_account.user_email = lambda: "wrong@example.com"
+    with pytest.raises(SuppressionTestSafetyError, match="account"):
+        run_suppression_setup_and_test(
+            wrong_account,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "account"),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+    assert not any(call[0] == "create_list" for call in wrong_account.calls)
+
+    wrong_group = FakeSuppressionAPI()
+    wrong_group.group["name"] = "Wrong"
+    with pytest.raises(SuppressionTestSafetyError, match="group"):
+        run_suppression_setup_and_test(
+            wrong_group,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "group"),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+    assert not any(call[0] == "create_list" for call in wrong_group.calls)
+
+    evidence = EvidenceStore(tmp_path / "existing")
+    evidence.write_json("setup-started.json", {"existing": True})
+    existing = FakeSuppressionAPI()
+    with pytest.raises(SuppressionTestSafetyError, match="evidence"):
+        run_suppression_setup_and_test(
+            existing,
+            plan,
+            setup_approval_for(plan),
+            evidence,
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+    assert not any(call[0] == "create_list" for call in existing.calls)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"statement": "WRONG"}, "statement"),
+        ({"approved_at": (NOW + timedelta(seconds=1)).isoformat()}, "future"),
+        ({"expires_at": NOW.isoformat()}, "expired"),
+        (
+            {
+                "approved_at": NOW.isoformat(),
+                "expires_at": (NOW + timedelta(hours=25)).isoformat(),
+            },
+            "24 hours",
+        ),
+        ({"operation_digest": "0" * 64}, "operation"),
+    ],
+)
+def test_setup_approval_fail_closed_gates_block_before_provider_access(
+    tmp_path,
+    change,
+    message,
+):
+    plan = setup_plan_for()
+    approval = setup_approval_for(plan)
+    approval.update(change)
+    api = FakeSuppressionAPI()
+
+    with pytest.raises(SuppressionTestSafetyError, match=message):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            approval,
+            EvidenceStore(tmp_path / message.replace(" ", "_")),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+
+    assert api.calls == []
+
+
+def test_setup_rejects_unexpected_post_upsert_membership(tmp_path):
+    class UnexpectedMemberAPI(FakeSuppressionAPI):
+        def upsert_contacts(self, list_ids, contacts):
+            job_id = super().upsert_contacts(list_ids, contacts)
+            self.contacts.append({"email": "other@example.com"})
+            return job_id
+
+    api = UnexpectedMemberAPI()
+    plan = setup_plan_for()
+
+    with pytest.raises(SuppressionTestSafetyError, match="membership"):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+
+    assert not any(call[0] == "add_group_suppressions" for call in api.calls)
+
+
+@pytest.mark.parametrize("failure_point", ["wait_contact_job", "create_single_send"])
+def test_partial_setup_persists_digest_locked_recovery_cleanup(
+    tmp_path,
+    failure_point,
+):
+    class FailingAPI(FakeSuppressionAPI):
+        def wait_contact_job(self, job_id, timeout_s=120):
+            if failure_point == "wait_contact_job":
+                raise RuntimeError("injected contact job failure")
+            return super().wait_contact_job(job_id, timeout_s)
+
+        def create_single_send(self, payload):
+            if failure_point == "create_single_send":
+                raise RuntimeError("injected Single Send failure")
+            return super().create_single_send(payload)
+
+    api = FailingAPI()
+    plan = setup_plan_for()
+    root = tmp_path / failure_point
+
+    with pytest.raises(RuntimeError, match="injected"):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(root),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+
+    proof_plan = json.loads((root / "proof-plan.json").read_text())
+    recovery = build_suppression_cleanup_plan(proof_plan, root)
+    assert recovery["action"] == "recover_partial_suppression_proof"
+    assert recovery["proof_list"] == {
+        "id": "proof-list-1",
+        "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+        "delete": True,
+    }
+    assert recovery["remove_temporary_group_suppression_if_present"] is True
+    assert recovery["setup_operation_digest"] == plan["operation_digest"]
+    assert recovery["proof_operation_digest"] == proof_plan[
+        "operation_digest"
+    ]
+
+    cleanup_result = run_suppression_cleanup(
+        api,
+        recovery,
+        cleanup_approval_for(recovery),
+        EvidenceStore(tmp_path / f"{failure_point}_cleanup"),
+        now=NOW,
+    )
+    assert cleanup_result["proof_list_deleted"] is True
+    assert cleanup_result["suppression_removed"] == (
+        failure_point == "create_single_send"
+    )
+    assert api.lists == {}
+    assert api.suppressed == set()
 
 
 def cleanup_approval_for(plan):
@@ -678,6 +874,72 @@ def test_cleanup_cli_rejects_digest_mismatch_before_provider_access(
 
     assert result == 3
     assert "expected cleanup digest" in capsys.readouterr().err
+
+
+def test_setup_run_cli_rejects_digest_mismatch_before_provider_access(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    root = tmp_path / "proof"
+    root.mkdir()
+    plan = setup_plan_for()
+    plan_path = root / "plan.json"
+    approval_path = tmp_path / "approval.json"
+    plan_path.write_text(json.dumps(plan))
+    approval_path.write_text(json.dumps(setup_approval_for(plan)))
+    monkeypatch.setattr(
+        "twy_paths.sendgrid_proof_dir",
+        lambda _run_id: root,
+    )
+    monkeypatch.setattr(
+        "twy_paths.load_env",
+        lambda: pytest.fail("load_env must not run"),
+    )
+
+    result = main([
+        "run",
+        "--plan-file", str(plan_path),
+        "--approval-file", str(approval_path),
+        "--expected-operation-digest", "0" * 64,
+        "--run-id", plan["run_id"],
+    ])
+
+    assert result == 3
+    assert "expected operation digest" in capsys.readouterr().err
+
+
+def test_setup_and_cleanup_share_one_nonblocking_process_lock(tmp_path):
+    lock_path = tmp_path / "suppression_proof_run.lock"
+
+    with _exclusive_run_lock(lock_path):
+        with pytest.raises(SuppressionTestSafetyError, match="active"):
+            with _exclusive_run_lock(lock_path):
+                pytest.fail("concurrent lock unexpectedly acquired")
+
+    with _exclusive_run_lock(lock_path):
+        pass
+
+
+def test_operational_error_is_not_reported_as_a_safety_gate(
+    monkeypatch,
+    capsys,
+):
+    def fail_path(_run_id):
+        raise OSError("injected filesystem failure")
+
+    monkeypatch.setattr("twy_paths.sendgrid_proof_dir", fail_path)
+
+    result = main([
+        "plan",
+        "--run-id", "suppression_proof_20260726T120000Z",
+    ])
+
+    assert result == 4
+    error = capsys.readouterr().err
+    assert "operational error" in error
+    assert "cleanup may be required" in error
+    assert "safety gate blocked" not in error
 
 
 def test_cleanup_cli_missing_key_fails_before_api_construction(
