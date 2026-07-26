@@ -90,7 +90,7 @@ The apply order is suppression-first:
 
 1. Resolve exact production list names and the `twy_status` and `twy_role`
    fields.
-2. Resolve or create the recipient-facing `TWY Newsletters` unsubscribe group.
+2. Resolve or create the migration-time unsubscribe group.
 3. Re-read that group by ID and require exact name, description, and default
    state.
 4. Add the approved marketing suppressions, then check their group-specific
@@ -108,12 +108,12 @@ addresses to a deleted or nonexistent unsubscribe group can place them on the
 global suppression list. The writer always verifies the exact group by ID
 before adding group-specific suppressions.
 
-`TWY Newsletters` is intentionally the account's default unsubscribe group
-because it is TWY's only production unsubscribe group. SendGrid still requires
-each send to identify the enforcing group with `asm.group_id` (or the
-equivalent Single Send field). The default flag controls which group appears
-on the recipient preferences page when `groups_to_display` is omitted; it does
-not make an untagged send honor this group automatically.
+The production naming cutover renamed the only production unsubscribe group
+to `Email: Unsubscribed`. SendGrid still requires each send to identify the
+enforcing group with `asm.group_id` or the equivalent Single Send field. The
+default flag controls which group appears on the recipient preferences page
+when `groups_to_display` is omitted. It does not make an untagged send honor
+this group automatically.
 
 `first_name` and `last_name` use SendGrid reserved contact fields.
 `twy_status` and `twy_role` resolve to exact custom-field IDs at apply time.
@@ -128,7 +128,9 @@ provider objects automatically. A retry requires a fresh read-only
 reconciliation, a distinct apply ID, and a new approval. Any apply ID with
 existing evidence, complete or partial, is immutable and cannot be reused.
 
-No production apply has been approved or run.
+The production contact apply and provider naming cutover are complete. The
+one-time migration writer is retained only as historical, digest-locked
+evidence. It is not a recurring contact synchronization path.
 
 ## Suppression enforcement harness
 
@@ -142,7 +144,7 @@ It accepts only `admin@tiffanywoodyoga.com` or `jpgan6@gmail.com`, with
 `jpgan6@gmail.com` as the preferred proof recipient. The admin mailbox remains
 available only for an explicitly selected proof. The harness also requires an
 isolated list containing exactly that one address, the exact
-`TWY Newsletters` group, and the statement
+`Email: Unsubscribed` group, and the statement
 `APPROVE TWY SENDGRID SUPPRESSION ENFORCEMENT TEST`.
 
 The harness adds and verifies the temporary group suppression before creating a

@@ -11,9 +11,11 @@ from pathlib import Path
 import sys
 from typing import Any, Callable
 
+from sendgrid_campaigns import UNSUBSCRIBE_GROUP_NAME
+
 
 TARGET_ACCOUNT_EMAIL = "admin@tiffanywoodyoga.com"
-PRODUCTION_GROUP_NAME = "TWY Newsletters"
+PRODUCTION_GROUP_NAME = UNSUBSCRIBE_GROUP_NAME
 ALLOWED_RECIPIENTS = {
     "admin@tiffanywoodyoga.com",
     "jpgan6@gmail.com",

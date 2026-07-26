@@ -55,7 +55,7 @@ def test_plan_accepts_only_explicit_test_recipient_allowlist():
 def test_plan_is_digest_locked_to_group_list_sender_and_recipient():
     plan = plan_for()
     assert plan["target_account_email"] == "admin@tiffanywoodyoga.com"
-    assert plan["group"] == {"id": 42, "name": "TWY Newsletters"}
+    assert plan["group"] == {"id": 42, "name": "Email: Unsubscribed"}
     assert plan["list_id"] == "list-test"
     assert plan["sender_id"] == 9423402
     assert len(plan["operation_digest"]) == 64
@@ -67,7 +67,7 @@ class FakeSuppressionAPI:
         self.calls = []
         self.group = {
             "id": 42,
-            "name": "TWY Newsletters",
+            "name": "Email: Unsubscribed",
             "description": "Tiffany Wood Yoga newsletters",
             "is_default": True,
         }
@@ -287,7 +287,7 @@ def test_cleanup_plan_requires_completed_proof_and_prefers_jpgan6(tmp_path):
     assert cleanup_plan["recipient"] == "jpgan6@gmail.com"
     assert cleanup_plan["group"] == {
         "id": 42,
-        "name": "TWY Newsletters",
+        "name": "Email: Unsubscribed",
     }
     assert cleanup_plan["single_send_id"] == "single-send-1"
     assert cleanup_plan["proof_operation_digest"]
