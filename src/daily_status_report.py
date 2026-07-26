@@ -21,7 +21,8 @@ load_env()
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent
-MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
+EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/email/history"
+LEGACY_EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
 REPORTS_DIR = PROJECT_ROOT / "data/reports"
@@ -274,16 +275,18 @@ def get_next_habit_event() -> Optional[Dict[str, Any]]:
     return {"start": row[0], "registrations": row[1]}
 
 
-def load_mailchimp_snapshot(date: str) -> Optional[Dict[str, Any]]:
-    """Load Mailchimp snapshot for a specific date."""
-    filepath = MAILCHIMP_HISTORY_DIR / f"{date}.json"
+def load_email_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load current email count, with read only historical archive fallback."""
+    current = EMAIL_HISTORY_DIR / f"{date}.json"
+    legacy = LEGACY_EMAIL_HISTORY_DIR / f"{date}.json"
+    filepath = current if current.exists() else legacy
     if not filepath.exists():
         return None
     try:
         with open(filepath) as f:
             return json.load(f)
     except Exception as e:
-        print(f"Warning: Could not load Mailchimp snapshot for {date}: {e}")
+        print(f"Warning: Could not load email snapshot for {date}: {e}")
         return None
 
 
@@ -365,14 +368,17 @@ def ensure_instagram_snapshot(date: str) -> None:
 
 
 def extract_subscriber_counts(
-    mailchimp: Optional[Dict[str, Any]],
+    email_snapshot: Optional[Dict[str, Any]],
     instagram: Optional[Dict[str, Any]],
     youtube: Optional[Dict[str, Any]]
 ) -> Dict[str, int]:
     """Extract email/social subscriber counts into a flat dict for comparison."""
     counts = {}
-    if mailchimp:
-        counts["mailchimp:subscriber_count"] = mailchimp.get("subscriber_count", 0)
+    if email_snapshot:
+        counts["email:subscriber_count"] = email_snapshot.get(
+            "subscriber_count",
+            0,
+        )
     if instagram:
         counts["instagram:follower_count"] = instagram.get("follower_count", 0)
     if youtube:
@@ -458,10 +464,10 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     month_ago_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     year_ago_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
 
-    mc_today_snap = load_mailchimp_snapshot(today)
-    mc_week_snap = load_mailchimp_snapshot(week_ago_date)
-    mc_month_snap = load_mailchimp_snapshot(month_ago_date)
-    mc_year_snap = load_mailchimp_snapshot(year_ago_date)
+    email_today_snap = load_email_snapshot(today)
+    email_week_snap = load_email_snapshot(week_ago_date)
+    email_month_snap = load_email_snapshot(month_ago_date)
+    email_year_snap = load_email_snapshot(year_ago_date)
 
     ig_today_snap = load_instagram_snapshot(today)
     ig_week_snap = load_instagram_snapshot(week_ago_date)
@@ -493,7 +499,14 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     # Followers (Email / Instagram / YouTube)
     followers: List[str] = []
     for label, today_snap, week_snap, month_snap, year_snap, key in (
-        ("Email", mc_today_snap, mc_week_snap, mc_month_snap, mc_year_snap, "subscriber_count"),
+        (
+            "Email",
+            email_today_snap,
+            email_week_snap,
+            email_month_snap,
+            email_year_snap,
+            "subscriber_count",
+        ),
         ("Instagram", ig_today_snap, ig_week_snap, ig_month_snap, ig_year_snap, "follower_count"),
         ("YouTube", yt_today_snap, yt_week_snap, yt_month_snap, yt_year_snap, "subscriber_count"),
     ):
@@ -611,17 +624,25 @@ def main(dry_run: bool = False):
         subscriptions = get_marvelous_data()
 
         # Load today's subscriber snapshots (email/social only)
-        mc_today = load_mailchimp_snapshot(today)
+        email_today = load_email_snapshot(today)
         ig_today = load_instagram_snapshot(today)
         yt_today = load_youtube_snapshot(today)
 
         # Load yesterday's subscriber snapshots for comparison
-        mc_yesterday = load_mailchimp_snapshot(yesterday)
+        email_yesterday = load_email_snapshot(yesterday)
         ig_yesterday = load_instagram_snapshot(yesterday)
         yt_yesterday = load_youtube_snapshot(yesterday)
 
-        today_counts = extract_subscriber_counts(mc_today, ig_today, yt_today)
-        yesterday_counts = extract_subscriber_counts(mc_yesterday, ig_yesterday, yt_yesterday)
+        today_counts = extract_subscriber_counts(
+            email_today,
+            ig_today,
+            yt_today,
+        )
+        yesterday_counts = extract_subscriber_counts(
+            email_yesterday,
+            ig_yesterday,
+            yt_yesterday,
+        )
         changes = compare_counts(today_counts, yesterday_counts)
 
         # Member movement from the nightly HM report snapshots (fail-soft)

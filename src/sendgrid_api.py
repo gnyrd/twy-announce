@@ -115,6 +115,32 @@ class SendGridAPI:
     def create_list(self, name: str) -> dict:
         return self._request("POST", "/marketing/lists", json={"name": name})
 
+    def update_list(self, list_id: str, name: str) -> dict:
+        return self._request(
+            "PATCH",
+            f"/marketing/lists/{list_id}",
+            json={"name": name},
+        )
+
+    def remove_contacts_from_list(
+        self,
+        list_id: str,
+        contact_ids: list[str],
+    ) -> str:
+        if not contact_ids:
+            raise ValueError("at least one contact ID is required")
+        payload = self._request(
+            "DELETE",
+            f"/marketing/lists/{list_id}/contacts",
+            params={"contact_ids": ",".join(contact_ids)},
+        )
+        job_id = str((payload or {}).get("job_id") or "")
+        if not job_id:
+            raise SendGridAPIError(
+                "SendGrid list contact removal returned no job_id"
+            )
+        return job_id
+
     def field_definitions(self) -> list[dict]:
         payload = self._request("GET", "/marketing/field_definitions")
         return list(payload.get("custom_fields") or []) + list(
@@ -150,6 +176,24 @@ class SendGridAPI:
 
     def suppression_group(self, group_id: int) -> dict:
         return self._request("GET", f"/asm/groups/{int(group_id)}")
+
+    def update_suppression_group(
+        self,
+        group_id: int,
+        *,
+        name: str,
+        description: str,
+        is_default: bool,
+    ) -> dict:
+        return self._request(
+            "PATCH",
+            f"/asm/groups/{int(group_id)}",
+            json={
+                "name": name,
+                "description": description,
+                "is_default": is_default,
+            },
+        )
 
     def add_group_suppressions(
         self,
@@ -276,6 +320,17 @@ class SendGridAPI:
     def create_single_send(self, payload: dict) -> dict:
         return self._request("POST", "/marketing/singlesends", json=payload)
 
+    def update_single_send(
+        self,
+        single_send_id: str,
+        payload: dict,
+    ) -> dict:
+        return self._request(
+            "PATCH",
+            f"/marketing/singlesends/{single_send_id}",
+            json=payload,
+        )
+
     def get_single_send(self, single_send_id: str) -> dict:
         return self._request("GET", f"/marketing/singlesends/{single_send_id}")
 
@@ -297,6 +352,76 @@ class SendGridAPI:
             "PUT",
             f"/marketing/singlesends/{single_send_id}/schedule",
             json={"send_at": send_at},
+        )
+
+    def unschedule_single_send(self, single_send_id: str) -> dict:
+        return self._request(
+            "DELETE",
+            f"/marketing/singlesends/{single_send_id}/schedule",
+        )
+
+    def segments(self) -> list[dict]:
+        path = "/marketing/segments/2.0?page_size=100"
+        result: list[dict] = []
+        seen: set[str] = set()
+        while path:
+            if path in seen:
+                raise SendGridAPIError("SendGrid segment pagination loop")
+            seen.add(path)
+            payload = self._request("GET", path)
+            result.extend(payload.get("results") or [])
+            path = (payload.get("_metadata") or {}).get("next")
+        return result
+
+    def create_segment(
+        self,
+        *,
+        name: str,
+        query_dsl: str,
+        parent_list_ids: list[str] | None = None,
+    ) -> dict:
+        payload: dict[str, Any] = {
+            "name": name,
+            "query_dsl": query_dsl,
+        }
+        if parent_list_ids:
+            payload["parent_list_ids"] = parent_list_ids
+        return self._request(
+            "POST",
+            "/marketing/segments/2.0",
+            json=payload,
+        )
+
+    def segment(self, segment_id: str) -> dict:
+        return self._request(
+            "GET",
+            f"/marketing/segments/2.0/{segment_id}",
+        )
+
+    def update_segment(
+        self,
+        segment_id: str,
+        *,
+        name: str,
+        query_dsl: str,
+        parent_list_ids: list[str] | None = None,
+    ) -> dict:
+        payload: dict[str, Any] = {
+            "name": name,
+            "query_dsl": query_dsl,
+        }
+        if parent_list_ids:
+            payload["parent_list_ids"] = parent_list_ids
+        return self._request(
+            "PATCH",
+            f"/marketing/segments/2.0/{segment_id}",
+            json=payload,
+        )
+
+    def refresh_segment(self, segment_id: str) -> dict:
+        return self._request(
+            "POST",
+            f"/marketing/segments/2.0/{segment_id}/refresh",
         )
 
     def single_send_stats(

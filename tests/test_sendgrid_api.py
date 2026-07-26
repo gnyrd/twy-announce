@@ -372,3 +372,99 @@ def test_contacts_by_emails_returns_only_contacts_and_raises_provider_errors():
     assert fake.calls[-1]["url"].endswith(
         "/v3/marketing/contacts/search/emails"
     )
+
+
+def test_update_list_and_remove_exact_contacts():
+    api, fake = make_api(
+        FakeResponse(200, {"id": "list-1", "name": "Email: Subscribed"}),
+        FakeResponse(202, {"job_id": "job-1"}),
+    )
+    updated = api.update_list("list-1", "Email: Subscribed")
+    assert updated["name"] == "Email: Subscribed"
+    assert fake.calls[0]["method"] == "PATCH"
+    assert fake.calls[0]["url"].endswith("/v3/marketing/lists/list-1")
+    assert fake.calls[0]["json"] == {"name": "Email: Subscribed"}
+
+    job_id = api.remove_contacts_from_list(
+        "list-1",
+        ["contact-1", "contact-2"],
+    )
+    assert job_id == "job-1"
+    assert fake.calls[1]["method"] == "DELETE"
+    assert fake.calls[1]["params"] == {
+        "contact_ids": "contact-1,contact-2",
+    }
+
+
+def test_update_suppression_group_uses_exact_asm_endpoint():
+    api, fake = make_api(
+        FakeResponse(
+            200,
+            {
+                "id": 35187,
+                "name": "Email: Unsubscribed",
+                "is_default": True,
+            },
+        )
+    )
+
+    result = api.update_suppression_group(
+        35187,
+        name="Email: Unsubscribed",
+        description="TWY email preferences",
+        is_default=True,
+    )
+
+    assert result["name"] == "Email: Unsubscribed"
+    assert fake.calls[0]["method"] == "PATCH"
+    assert fake.calls[0]["url"].endswith("/v3/asm/groups/35187")
+    assert fake.calls[0]["json"] == {
+        "name": "Email: Unsubscribed",
+        "description": "TWY email preferences",
+        "is_default": True,
+    }
+
+
+def test_segment_v2_lifecycle_uses_documented_endpoints():
+    api, fake = make_api(
+        FakeResponse(200, {"results": [{"id": "segment-1"}]}),
+        FakeResponse(201, {"id": "segment-2", "status": {}}),
+        FakeResponse(200, {"id": "segment-2", "contacts_count": 4}),
+        FakeResponse(202, {"id": "segment-2", "status": {}}),
+    )
+    assert api.segments()[0]["id"] == "segment-1"
+    created = api.create_segment(
+        name="Yoga Habit: 2026_08: General Invitation",
+        query_dsl="SELECT contact_id, updated_at FROM contact_data",
+        parent_list_ids=["list-1"],
+    )
+    assert created["id"] == "segment-2"
+    assert fake.calls[1]["json"]["parent_list_ids"] == ["list-1"]
+    assert api.segment("segment-2")["contacts_count"] == 4
+    api.refresh_segment("segment-2")
+    assert fake.calls[3]["method"] == "POST"
+    assert fake.calls[3]["url"].endswith(
+        "/v3/marketing/segments/2.0/segment-2/refresh"
+    )
+
+
+def test_single_send_update_and_unschedule():
+    api, fake = make_api(
+        FakeResponse(200, {"id": "send-1", "status": "draft"}),
+        FakeResponse(200, {"id": "send-1", "status": "draft"}),
+    )
+    updated = api.update_single_send(
+        "send-1",
+        {"send_to": {"list_ids": ["list-1"], "all": False}},
+    )
+    assert updated["status"] == "draft"
+    assert fake.calls[0]["method"] == "PATCH"
+    assert fake.calls[0]["url"].endswith(
+        "/v3/marketing/singlesends/send-1"
+    )
+    unscheduled = api.unschedule_single_send("send-1")
+    assert unscheduled["status"] == "draft"
+    assert fake.calls[1]["method"] == "DELETE"
+    assert fake.calls[1]["url"].endswith(
+        "/v3/marketing/singlesends/send-1/schedule"
+    )
