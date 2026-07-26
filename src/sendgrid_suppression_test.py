@@ -24,8 +24,9 @@ ALLOWED_RECIPIENTS = {
     "jpgan6@gmail.com",
 }
 PREFERRED_SUPPRESSION_TEST_RECIPIENT = "jpgan6@gmail.com"
+SUPPRESSION_CONTROL_RECIPIENT = TARGET_ACCOUNT_EMAIL
 APPROVED_SUPPRESSION_PROOF_LIST_NAME = (
-    "Proof: Suppression Enforcement: 2026_07_26"
+    "Proof: Suppression Enforcement Control: 2026_07_26"
 )
 SUPPRESSION_SETUP_APPROVAL_STATEMENT = (
     "APPROVE TWY SENDGRID SUPPRESSION PROOF SETUP AND TEST"
@@ -91,11 +92,21 @@ def build_suppression_test_plan(
     *,
     run_id: str,
     recipient: str,
+    control_recipient: str,
     list_id: str,
     group_id: int,
     sender_id: int,
 ) -> dict[str, Any]:
     normalized = _allowed_recipient(recipient)
+    normalized_control = _allowed_recipient(control_recipient)
+    if (
+        normalized != PREFERRED_SUPPRESSION_TEST_RECIPIENT
+        or normalized_control != SUPPRESSION_CONTROL_RECIPIENT
+        or normalized == normalized_control
+    ):
+        raise SuppressionTestSafetyError(
+            "test requires distinct approved suppression and control recipients"
+        )
     if not run_id or "/" in run_id or "\\" in run_id:
         raise SuppressionTestSafetyError("test run_id is unsafe")
     if not list_id:
@@ -109,6 +120,7 @@ def build_suppression_test_plan(
         "run_id": run_id,
         "target_account_email": TARGET_ACCOUNT_EMAIL,
         "recipient": normalized,
+        "control_recipient": normalized_control,
         "list_id": str(list_id),
         "proof_list": {
             "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
@@ -128,14 +140,23 @@ def build_suppression_setup_plan(
     *,
     run_id: str,
     recipient: str,
+    control_recipient: str,
     list_name: str,
     group_id: int,
     sender_id: int,
 ) -> dict[str, Any]:
     normalized = _allowed_recipient(recipient)
+    normalized_control = _allowed_recipient(control_recipient)
     if normalized != PREFERRED_SUPPRESSION_TEST_RECIPIENT:
         raise SuppressionTestSafetyError(
             "setup requires the preferred proof recipient"
+        )
+    if (
+        normalized_control != SUPPRESSION_CONTROL_RECIPIENT
+        or normalized_control == normalized
+    ):
+        raise SuppressionTestSafetyError(
+            "setup requires the distinct approved control recipient"
         )
     if list_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME:
         raise SuppressionTestSafetyError(
@@ -152,6 +173,7 @@ def build_suppression_setup_plan(
         "run_id": run_id,
         "target_account_email": TARGET_ACCOUNT_EMAIL,
         "recipient": normalized,
+        "control_recipient": normalized_control,
         "proof_list": {
             "name": list_name,
             "must_not_exist": True,
@@ -163,10 +185,10 @@ def build_suppression_setup_plan(
         "sender_id": int(sender_id),
         "actions": [
             "create_isolated_proof_list",
-            "add_preferred_recipient",
+            "add_suppressed_and_control_recipients",
             "add_temporary_group_suppression",
             "create_and_schedule_tagged_single_send",
-            "verify_zero_delivery_stats",
+            "verify_positive_control_delivery_stats",
         ],
     }
     plan["operation_digest"] = _canonical_digest(plan)
@@ -197,6 +219,11 @@ def _validate_approval(
         ("statement", SUPPRESSION_TEST_APPROVAL_STATEMENT, "statement"),
         ("target_account_email", plan["target_account_email"], "account"),
         ("recipient", plan["recipient"], "recipient"),
+        (
+            "control_recipient",
+            plan["control_recipient"],
+            "control recipient",
+        ),
         ("operation_digest", plan["operation_digest"], "operation"),
     )
     expected_fields = list(expected)
@@ -242,6 +269,11 @@ def _validate_setup_approval(
         ),
         ("target_account_email", plan["target_account_email"], "account"),
         ("recipient", plan["recipient"], "recipient"),
+        (
+            "control_recipient",
+            plan["control_recipient"],
+            "control recipient",
+        ),
         ("operation_digest", plan["operation_digest"], "operation"),
     )
     expected_fields = list(expected)
@@ -303,6 +335,9 @@ def _recovery_cleanup_plan(
     _validate_operation_digest(setup_plan, "setup")
     _validate_operation_digest(proof_plan, "proof")
     recipient = _allowed_recipient(proof_plan.get("recipient"))
+    control_recipient = _allowed_recipient(
+        proof_plan.get("control_recipient")
+    )
     proof_list = proof_plan.get("proof_list") or {}
     list_id = str(proof_plan.get("list_id") or "")
     list_name = str(proof_list.get("name") or "")
@@ -311,6 +346,8 @@ def _recovery_cleanup_plan(
         proof_plan.get("setup_operation_digest")
         != setup_plan["operation_digest"]
         or recipient != setup_plan.get("recipient")
+        or control_recipient != setup_plan.get("control_recipient")
+        or recipient == control_recipient
         or list_name != APPROVED_SUPPRESSION_PROOF_LIST_NAME
         or (setup_plan.get("proof_list") or {}).get("name") != list_name
         or not list_id
@@ -326,6 +363,7 @@ def _recovery_cleanup_plan(
         "action": "recover_partial_suppression_proof",
         "target_account_email": TARGET_ACCOUNT_EMAIL,
         "recipient": recipient,
+        "control_recipient": control_recipient,
         "group": {
             "id": int(group["id"]),
             "name": PRODUCTION_GROUP_NAME,
@@ -357,6 +395,9 @@ def _validate_recovery_cleanup_plan(
         or plan.get("target_account_email") != TARGET_ACCOUNT_EMAIL
         or _allowed_recipient(plan.get("recipient"))
         != proof_plan.get("recipient")
+        or _allowed_recipient(plan.get("control_recipient"))
+        != proof_plan.get("control_recipient")
+        or plan.get("recipient") == plan.get("control_recipient")
         or plan.get("group") != proof_group
         or proof_group.get("name") != PRODUCTION_GROUP_NAME
         or proof_list.get("id") != proof_plan.get("list_id")
@@ -384,10 +425,15 @@ def _cleanup_plan_from_result(
     _validate_operation_digest(proof_plan, "proof")
     cleanup = result.get("cleanup_required") or {}
     recipient = _allowed_recipient(proof_plan.get("recipient"))
+    control_recipient = _allowed_recipient(
+        proof_plan.get("control_recipient")
+    )
     single_send_id = result.get("single_send_id")
     if (
         result.get("operation_digest") != proof_plan["operation_digest"]
         or cleanup.get("remove_temporary_group_suppression") != recipient
+        or control_recipient != SUPPRESSION_CONTROL_RECIPIENT
+        or recipient == control_recipient
         or cleanup.get("single_send_id") != single_send_id
         or not single_send_id
     ):
@@ -407,6 +453,7 @@ def _cleanup_plan_from_result(
         "action": "remove_temporary_group_suppression",
         "target_account_email": TARGET_ACCOUNT_EMAIL,
         "recipient": recipient,
+        "control_recipient": control_recipient,
         "group": {
             "id": int(group["id"]),
             "name": PRODUCTION_GROUP_NAME,
@@ -496,6 +543,11 @@ def _validate_cleanup_approval(
         ("target_account_email", plan["target_account_email"], "account"),
         ("recipient", plan["recipient"], "recipient"),
         (
+            "control_recipient",
+            plan["control_recipient"],
+            "control recipient",
+        ),
+        (
             "proof_operation_digest",
             plan["proof_operation_digest"],
             "proof operation",
@@ -558,13 +610,20 @@ def run_suppression_cleanup(
             "SendGrid suppression group does not match cleanup plan"
         )
     recipient = plan["recipient"]
+    control_recipient = plan["control_recipient"]
+    approved_recipients = {recipient, control_recipient}
     recovery_cleanup = (
         plan.get("action") == "recover_partial_suppression_proof"
     )
-    suppression_was_present = api.search_group_suppressions(
+    suppression_state = api.search_group_suppressions(
         group_id,
-        [recipient],
-    ) == {recipient}
+        sorted(approved_recipients),
+    )
+    if control_recipient in suppression_state:
+        raise SuppressionTestSafetyError(
+            "cleanup control recipient is unexpectedly suppressed"
+        )
+    suppression_was_present = recipient in suppression_state
     if not recovery_cleanup and not suppression_was_present:
         raise SuppressionTestSafetyError(
             "temporary suppression is not present before cleanup"
@@ -606,11 +665,15 @@ def run_suppression_cleanup(
             for contact in contacts
         }
         membership_is_exact = (
-            contact_emails == {recipient} and len(contacts) == 1
+            contact_emails == approved_recipients
+            and len(contacts) == 2
         )
-        membership_is_empty = not contacts
+        membership_is_approved_subset = (
+            contact_emails.issubset(approved_recipients)
+            and len(contact_emails) == len(contacts)
+        )
         if not membership_is_exact and not (
-            recovery_cleanup and membership_is_empty
+            recovery_cleanup and membership_is_approved_subset
         ):
             raise SuppressionTestSafetyError(
                 "temporary proof list membership is not exact"
@@ -620,6 +683,7 @@ def run_suppression_cleanup(
         "proof_operation_digest": plan["proof_operation_digest"],
         "group_id": group_id,
         "recipient": recipient,
+        "control_recipient": control_recipient,
         "proof_list": proof_list,
         "recovery_cleanup": recovery_cleanup,
     })
@@ -651,6 +715,7 @@ def run_suppression_cleanup(
         "proof_operation_digest": plan["proof_operation_digest"],
         "group_id": group_id,
         "recipient": recipient,
+        "control_recipient": control_recipient,
         "suppression_removed": suppression_was_present,
     }
     if proof_list is not None:
@@ -730,9 +795,13 @@ def _run_suppression_test_authorized(
         _normalized_email(contact.get("email"))
         for contact in contacts
     }
-    if contact_emails != {plan["recipient"]} or len(contacts) != 1:
+    expected_recipients = {
+        plan["recipient"],
+        plan["control_recipient"],
+    }
+    if contact_emails != expected_recipients or len(contacts) != 2:
         raise SuppressionTestSafetyError(
-            "test list must contain exactly one approved recipient"
+            "test list must contain exactly two approved recipients"
         )
     single_send_name = str(
         (plan.get("proof_list") or {}).get("name") or ""
@@ -741,20 +810,28 @@ def _run_suppression_test_authorized(
         raise SuppressionTestSafetyError(
             "test plan does not use the approved proof name"
         )
+    if api.search_group_suppressions(
+        group_id,
+        sorted(expected_recipients),
+    ):
+        raise SuppressionTestSafetyError(
+            "proof requires an unsuppressed control and temporary recipient"
+        )
 
     evidence_store.write_json("started.json", {
         "operation_digest": plan["operation_digest"],
         "recipient": plan["recipient"],
+        "control_recipient": plan["control_recipient"],
         "list_id": plan["list_id"],
         "group_id": group_id,
     })
     api.add_group_suppressions(group_id, [plan["recipient"]])
     if api.search_group_suppressions(
         group_id,
-        [plan["recipient"]],
+        sorted(expected_recipients),
     ) != {plan["recipient"]}:
         raise SuppressionTestSafetyError(
-            "recipient suppression membership was not verified"
+            "recipient suppression and unsuppressed control were not verified"
         )
 
     payload = {
@@ -764,14 +841,14 @@ def _run_suppression_test_authorized(
             "list_ids": [plan["list_id"]],
         },
         "email_config": {
-            "subject": "TWY SendGrid suppression enforcement test",
+            "subject": "TWY SendGrid suppression control test",
             "html_content": (
-                "<p>This message must not be delivered. "
-                "It verifies newsletter suppression.</p>"
+                "<p>This is the approved positive control message for "
+                "TWY newsletter suppression verification.</p>"
             ),
             "plain_content": (
-                "This message must not be delivered. "
-                "It verifies newsletter suppression.\n"
+                "This is the approved positive control message for "
+                "TWY newsletter suppression verification.\n"
             ),
             "generate_plain_content": False,
             "editor": "code",
@@ -802,27 +879,29 @@ def _run_suppression_test_authorized(
         if observed:
             if (
                 observed["requests"] not in {0, 1}
-                or observed["delivered"] != 0
-                or observed["unique_opens"] != 0
-                or observed["unique_clicks"] != 0
+                or observed["delivered"] not in {0, 1}
+                or observed["unique_opens"] not in {0, 1}
+                or observed["unique_clicks"] not in {0, 1}
+                or observed["delivered"] > observed["requests"]
             ):
                 raise SuppressionTestSafetyError(
                     "suppression test stats did not prove enforcement"
                 )
-            if observed["requests"] == 1:
+            if (
+                observed["requests"] == 1
+                and observed["delivered"] == 1
+            ):
                 break
         if attempt < stats_attempts - 1:
             sleep_fn(10.0)
-    if observed is None or observed["requests"] != 1:
+    if (
+        observed is None
+        or observed["requests"] != 1
+        or observed["delivered"] != 1
+    ):
         raise SuppressionTestSafetyError(
             "suppression test stats did not prove enforcement"
         )
-    expected_stats = {
-        "requests": 1,
-        "delivered": 0,
-        "unique_opens": 0,
-        "unique_clicks": 0,
-    }
     for _ in range(stats_confirmation_attempts):
         sleep_fn(10.0)
         confirmed = _stats(
@@ -831,15 +910,21 @@ def _run_suppression_test_authorized(
                 (current - timedelta(days=1)).date().isoformat(),
             )
         )
-        if confirmed != expected_stats:
+        if (
+            confirmed is None
+            or confirmed["requests"] != 1
+            or confirmed["delivered"] != 1
+            or confirmed["unique_opens"] not in {0, 1}
+            or confirmed["unique_clicks"] not in {0, 1}
+        ):
             raise SuppressionTestSafetyError(
                 "suppression test stats confirmation failed"
             )
         observed = confirmed
-    enforcement_mode = "request_counted_and_confirmed"
+    enforcement_mode = "positive_control_delivered_and_confirmed"
     if api.search_group_suppressions(
         group_id,
-        [plan["recipient"]],
+        sorted(expected_recipients),
     ) != {plan["recipient"]}:
         raise SuppressionTestSafetyError(
             "temporary suppression is not still present after stats"
@@ -881,9 +966,19 @@ def run_suppression_setup_and_test(
             "setup plan schema is not supported"
         )
     recipient = _allowed_recipient(plan.get("recipient"))
+    control_recipient = _allowed_recipient(
+        plan.get("control_recipient")
+    )
     if recipient != PREFERRED_SUPPRESSION_TEST_RECIPIENT:
         raise SuppressionTestSafetyError(
             "setup requires the preferred proof recipient"
+        )
+    if (
+        control_recipient != SUPPRESSION_CONTROL_RECIPIENT
+        or control_recipient == recipient
+    ):
+        raise SuppressionTestSafetyError(
+            "setup requires the distinct approved control recipient"
         )
     proof_list = plan.get("proof_list") or {}
     list_name = str(proof_list.get("name") or "")
@@ -915,6 +1010,17 @@ def run_suppression_setup_and_test(
         raise SuppressionTestSafetyError(
             "approved temporary proof list already exists"
         )
+    if api.find_single_send_by_name(list_name) is not None:
+        raise SuppressionTestSafetyError(
+            "approved temporary proof Single Send already exists"
+        )
+    if api.search_group_suppressions(
+        group_id,
+        sorted({recipient, control_recipient}),
+    ):
+        raise SuppressionTestSafetyError(
+            "setup requires both proof recipients to start unsuppressed"
+        )
     if (evidence_store.root / "setup-started.json").exists():
         raise SuppressionTestSafetyError(
             "suppression setup evidence already exists"
@@ -923,6 +1029,7 @@ def run_suppression_setup_and_test(
     evidence_store.write_json("setup-started.json", {
         "operation_digest": plan["operation_digest"],
         "recipient": recipient,
+        "control_recipient": control_recipient,
         "proof_list_name": list_name,
         "group_id": group_id,
     })
@@ -935,6 +1042,7 @@ def run_suppression_setup_and_test(
     proof_plan = build_suppression_test_plan(
         run_id=str(plan["run_id"]),
         recipient=recipient,
+        control_recipient=control_recipient,
         list_id=list_id,
         group_id=group_id,
         sender_id=int(plan["sender_id"]),
@@ -961,14 +1069,17 @@ def run_suppression_setup_and_test(
     })
     job_id = api.upsert_contacts(
         [list_id],
-        [{"email": recipient}],
+        [
+            {"email": recipient},
+            {"email": control_recipient},
+        ],
     )
     api.wait_contact_job(job_id, timeout_s=300)
     contacts = api.list_contacts(list_id)
     if {
         _normalized_email(contact.get("email"))
         for contact in contacts
-    } != {recipient} or len(contacts) != 1:
+    } != {recipient, control_recipient} or len(contacts) != 2:
         raise SuppressionTestSafetyError(
             "temporary proof list membership is not exact"
         )
@@ -1051,6 +1162,7 @@ def main(argv=None) -> int:
             plan = build_suppression_setup_plan(
                 run_id=args.run_id,
                 recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+                control_recipient=SUPPRESSION_CONTROL_RECIPIENT,
                 list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
                 group_id=registry.suppression_group_id,
                 sender_id=registry.sender_id,

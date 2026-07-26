@@ -28,10 +28,11 @@ from sendgrid_suppression_test import (
 NOW = datetime(2026, 7, 24, 20, 0, tzinfo=timezone.utc)
 
 
-def plan_for(recipient="admin@tiffanywoodyoga.com"):
+def plan_for(recipient="jpgan6@gmail.com"):
     return build_suppression_test_plan(
         run_id="suppression_test_20260724T200000Z",
         recipient=recipient,
+        control_recipient="admin@tiffanywoodyoga.com",
         list_id="list-test",
         group_id=42,
         sender_id=9423402,
@@ -46,15 +47,17 @@ def approval_for(plan):
         "expires_at": (NOW + timedelta(hours=1)).isoformat(),
         "target_account_email": "admin@tiffanywoodyoga.com",
         "recipient": plan["recipient"],
+        "control_recipient": plan["control_recipient"],
         "operation_digest": plan["operation_digest"],
     }
 
 
 def test_plan_accepts_only_explicit_test_recipient_allowlist():
-    assert plan_for()["recipient"] == "admin@tiffanywoodyoga.com"
-    assert plan_for("jpgan6@gmail.com")["recipient"] == "jpgan6@gmail.com"
+    assert plan_for()["recipient"] == "jpgan6@gmail.com"
     with pytest.raises(SuppressionTestSafetyError, match="allowlist"):
         plan_for("someone@example.com")
+    with pytest.raises(SuppressionTestSafetyError, match="distinct approved"):
+        plan_for("admin@tiffanywoodyoga.com")
 
 
 def test_plan_is_digest_locked_to_group_list_sender_and_recipient():
@@ -67,23 +70,41 @@ def test_plan_is_digest_locked_to_group_list_sender_and_recipient():
     assert plan_for() == plan
 
 
+def test_runtime_plan_binds_the_positive_control_recipient():
+    plan = build_suppression_test_plan(
+        run_id="suppression_control_20260726T233000Z",
+        recipient="jpgan6@gmail.com",
+        control_recipient="admin@tiffanywoodyoga.com",
+        list_id="list-test",
+        group_id=42,
+        sender_id=9423402,
+    )
+
+    assert plan["recipient"] == "jpgan6@gmail.com"
+    assert plan["control_recipient"] == "admin@tiffanywoodyoga.com"
+
+
 class FakeSuppressionAPI:
     def __init__(self):
         self.calls = []
         self.lists = {}
+        self.single_sends = {}
         self.group = {
             "id": 42,
             "name": "Email: Unsubscribed",
             "description": "Tiffany Wood Yoga newsletters",
             "is_default": True,
         }
-        self.contacts = [{"email": "admin@tiffanywoodyoga.com"}]
+        self.contacts = [
+            {"email": "jpgan6@gmail.com"},
+            {"email": "admin@tiffanywoodyoga.com"},
+        ]
         self.suppressed = set()
         self.stats = {
             "results": [{
                 "stats": {
                     "requests": 1,
-                    "delivered": 0,
+                    "delivered": 1,
                     "unique_opens": 0,
                     "unique_clicks": 0,
                 },
@@ -145,7 +166,15 @@ class FakeSuppressionAPI:
 
     def create_single_send(self, payload):
         self.calls.append(("create_single_send", payload))
+        self.single_sends["single-send-1"] = dict(payload)
         return {"id": "single-send-1", "status": "draft"}
+
+    def find_single_send_by_name(self, name):
+        self.calls.append(("find_single_send_by_name", name))
+        for single_send_id, payload in self.single_sends.items():
+            if payload.get("name") == name:
+                return {"id": single_send_id, **payload}
+        return None
 
     def schedule_single_send(self, single_send_id, send_at):
         self.calls.append(("schedule_single_send", single_send_id, send_at))
@@ -191,7 +220,7 @@ def test_wrong_target_group_or_list_blocks_before_scheduling(tmp_path):
 
     wrong_list = FakeSuppressionAPI()
     wrong_list.contacts.append({"email": "other@example.com"})
-    with pytest.raises(SuppressionTestSafetyError, match="one approved"):
+    with pytest.raises(SuppressionTestSafetyError, match="two approved"):
         run(tmp_path / "list", wrong_list)
     assert not any(
         call[0] == "add_group_suppressions"
@@ -202,8 +231,8 @@ def test_wrong_target_group_or_list_blocks_before_scheduling(tmp_path):
 def test_approval_must_match_exact_plan_and_recipient(tmp_path):
     plan = plan_for()
     approval = approval_for(plan)
-    approval["recipient"] = "jpgan6@gmail.com"
-    with pytest.raises(SuppressionTestSafetyError, match="recipient"):
+    approval["control_recipient"] = "jpgan6@gmail.com"
+    with pytest.raises(SuppressionTestSafetyError, match="control"):
         run(tmp_path, plan=plan, approval=approval)
 
 
@@ -233,12 +262,12 @@ def test_suppression_is_verified_before_tagged_single_send(tmp_path):
     ]) == 4
     assert result["stats"] == {
         "requests": 1,
-        "delivered": 0,
+        "delivered": 1,
         "unique_opens": 0,
         "unique_clicks": 0,
     }
     assert result["cleanup_required"] == {
-        "remove_temporary_group_suppression": "admin@tiffanywoodyoga.com",
+        "remove_temporary_group_suppression": "jpgan6@gmail.com",
         "single_send_id": "single-send-1",
         "cleanup_plan": "cleanup-plan.json",
     }
@@ -252,9 +281,27 @@ def test_suppression_is_verified_before_tagged_single_send(tmp_path):
     assert cleanup_plan["proof_operation_digest"] == plan_for()[
         "operation_digest"
     ]
-    assert cleanup_plan["recipient"] == "admin@tiffanywoodyoga.com"
+    assert cleanup_plan["recipient"] == "jpgan6@gmail.com"
+    assert cleanup_plan["control_recipient"] == "admin@tiffanywoodyoga.com"
     assert cleanup_plan["operation_digest"]
     assert (tmp_path / "evidence" / "COMPLETE").exists()
+
+
+def test_control_must_be_unsuppressed_before_any_proof_mutation(tmp_path):
+    api = FakeSuppressionAPI()
+    api.suppressed.add("admin@tiffanywoodyoga.com")
+
+    with pytest.raises(SuppressionTestSafetyError, match="unsuppressed control"):
+        run(tmp_path, api)
+
+    assert not any(
+        call[0] in {
+            "add_group_suppressions",
+            "create_single_send",
+            "schedule_single_send",
+        }
+        for call in api.calls
+    )
 
 
 def test_missing_approved_single_send_name_blocks_before_suppression(
@@ -286,9 +333,9 @@ def test_missing_approved_single_send_name_blocks_before_suppression(
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("delivered", 1),
-        ("unique_opens", 1),
-        ("unique_clicks", 1),
+        ("delivered", 2),
+        ("unique_opens", 2),
+        ("unique_clicks", 2),
         ("requests", 2),
     ],
 )
@@ -306,6 +353,7 @@ def test_zero_requests_after_full_poll_window_is_inconclusive_and_fails(
 ):
     api = FakeSuppressionAPI()
     api.stats["results"][0]["stats"]["requests"] = 0
+    api.stats["results"][0]["stats"]["delivered"] = 0
     sleeps = []
 
     with pytest.raises(SuppressionTestSafetyError, match="stats"):
@@ -332,7 +380,7 @@ def test_delivery_during_confirmation_fails_enforcement_proof(tmp_path):
             self.stats_calls += 1
             payload = super().single_send_stats(single_send_id, start_date)
             if self.stats_calls >= 2:
-                payload["results"][0]["stats"]["delivered"] = 1
+                payload["results"][0]["stats"]["delivered"] = 2
             return payload
 
     api = DelayedDeliveryAPI()
@@ -361,7 +409,9 @@ def test_temporary_suppression_must_still_exist_after_stats(tmp_path):
     def disappearing(group_id, emails):
         nonlocal calls
         calls += 1
-        return set(emails) if calls == 1 else set()
+        if calls == 2:
+            return {"jpgan6@gmail.com"}
+        return set()
 
     api.search_group_suppressions = disappearing
     with pytest.raises(SuppressionTestSafetyError, match="still present"):
@@ -372,6 +422,7 @@ def setup_plan_for():
     return build_suppression_setup_plan(
         run_id="suppression_setup_20260726T120000Z",
         recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+        control_recipient="admin@tiffanywoodyoga.com",
         list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
         group_id=42,
         sender_id=9423402,
@@ -386,6 +437,7 @@ def setup_approval_for(plan):
         "expires_at": (NOW + timedelta(hours=1)).isoformat(),
         "target_account_email": "admin@tiffanywoodyoga.com",
         "recipient": PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+        "control_recipient": "admin@tiffanywoodyoga.com",
         "operation_digest": plan["operation_digest"],
     }
 
@@ -394,7 +446,7 @@ def test_setup_plan_locks_approved_name_and_preferred_recipient():
     plan = setup_plan_for()
     assert plan["recipient"] == "jpgan6@gmail.com"
     assert plan["proof_list"] == {
-        "name": "Proof: Suppression Enforcement: 2026_07_26",
+        "name": "Proof: Suppression Enforcement Control: 2026_07_26",
         "must_not_exist": True,
     }
     assert plan["group"] == {"id": 42, "name": "Email: Unsubscribed"}
@@ -402,6 +454,7 @@ def test_setup_plan_locks_approved_name_and_preferred_recipient():
         build_suppression_setup_plan(
             run_id="wrong_recipient",
             recipient="admin@tiffanywoodyoga.com",
+            control_recipient="jpgan6@gmail.com",
             list_name=APPROVED_SUPPRESSION_PROOF_LIST_NAME,
             group_id=42,
             sender_id=9423402,
@@ -410,10 +463,29 @@ def test_setup_plan_locks_approved_name_and_preferred_recipient():
         build_suppression_setup_plan(
             run_id="wrong_name",
             recipient=PREFERRED_SUPPRESSION_TEST_RECIPIENT,
+            control_recipient="admin@tiffanywoodyoga.com",
             list_name="Proof: Other: 2026_07_26",
             group_id=42,
             sender_id=9423402,
         )
+
+
+def test_setup_plan_binds_distinct_suppressed_and_control_recipients():
+    plan = build_suppression_setup_plan(
+        run_id="suppression_control_20260726T233000Z",
+        recipient="jpgan6@gmail.com",
+        control_recipient="admin@tiffanywoodyoga.com",
+        list_name="Proof: Suppression Enforcement Control: 2026_07_26",
+        group_id=42,
+        sender_id=9423402,
+    )
+
+    assert plan["recipient"] == "jpgan6@gmail.com"
+    assert plan["control_recipient"] == "admin@tiffanywoodyoga.com"
+    assert plan["proof_list"] == {
+        "name": "Proof: Suppression Enforcement Control: 2026_07_26",
+        "must_not_exist": True,
+    }
 
 
 def test_setup_and_proof_create_exact_isolated_list_under_one_approval(tmp_path):
@@ -435,7 +507,10 @@ def test_setup_and_proof_create_exact_isolated_list_under_one_approval(tmp_path)
     assert (
         "upsert_contacts",
         ("proof-list-1",),
-        [{"email": "jpgan6@gmail.com"}],
+        [
+            {"email": "jpgan6@gmail.com"},
+            {"email": "admin@tiffanywoodyoga.com"},
+        ],
     ) in api.calls
     single_send_payload = next(
         call[1]
@@ -467,6 +542,29 @@ def test_setup_blocks_existing_proof_name_before_provider_write(tmp_path):
     plan = setup_plan_for()
 
     with pytest.raises(SuppressionTestSafetyError, match="already exists"):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=lambda _: None,
+            stats_attempts=1,
+        )
+
+    assert not any(call[0] == "create_list" for call in api.calls)
+
+
+def test_setup_blocks_existing_proof_single_send_before_provider_write(
+    tmp_path,
+):
+    api = FakeSuppressionAPI()
+    api.single_sends["existing"] = {
+        "name": APPROVED_SUPPRESSION_PROOF_LIST_NAME,
+    }
+    plan = setup_plan_for()
+
+    with pytest.raises(SuppressionTestSafetyError, match="Single Send"):
         run_suppression_setup_and_test(
             api,
             plan,
@@ -661,6 +759,7 @@ def cleanup_approval_for(plan):
         "expires_at": (NOW + timedelta(hours=1)).isoformat(),
         "target_account_email": "admin@tiffanywoodyoga.com",
         "recipient": plan["recipient"],
+        "control_recipient": plan["control_recipient"],
         "proof_operation_digest": plan["proof_operation_digest"],
         "operation_digest": plan["operation_digest"],
     }
@@ -674,7 +773,10 @@ def cleanup_approval_for(plan):
 def completed_proof_for_cleanup(tmp_path):
     proof_plan = plan_for(PREFERRED_SUPPRESSION_TEST_RECIPIENT)
     api = FakeSuppressionAPI()
-    api.contacts = [{"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT}]
+    api.contacts = [
+        {"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT},
+        {"email": "admin@tiffanywoodyoga.com"},
+    ]
     run(
         tmp_path,
         api=api,
@@ -798,6 +900,7 @@ def test_cleanup_removes_only_the_proof_suppression_and_verifies_absence(
         "proof_operation_digest": cleanup_plan["proof_operation_digest"],
         "group_id": 42,
         "recipient": "jpgan6@gmail.com",
+        "control_recipient": "admin@tiffanywoodyoga.com",
         "suppression_removed": True,
     }
     assert (tmp_path / "cleanup-evidence" / "COMPLETE").exists()
@@ -904,12 +1007,50 @@ def test_cleanup_cli_requires_proof_approval_digest_and_cleanup_id():
     assert execution.command == "run"
 
 
+def test_plan_cli_writes_both_approved_recipient_roles(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    class Registry:
+        suppression_group_id = 42
+        sender_id = 9423402
+
+    root = tmp_path / "proof"
+    monkeypatch.setattr(
+        "twy_paths.sendgrid_proof_dir",
+        lambda _run_id: root,
+    )
+    monkeypatch.setattr(
+        "twy_paths.data_root",
+        lambda: tmp_path,
+    )
+    monkeypatch.setattr(
+        "sendgrid_campaigns.SendGridRegistry.load",
+        lambda _path: Registry(),
+    )
+
+    result = main([
+        "plan",
+        "--run-id", "suppression_control_20260726T233000Z",
+    ])
+
+    assert result == 0
+    plan = json.loads((root / "plan.json").read_text())
+    assert plan["recipient"] == "jpgan6@gmail.com"
+    assert plan["control_recipient"] == "admin@tiffanywoodyoga.com"
+    assert "operation_digest" in json.loads(capsys.readouterr().out)
+
+
 def test_cleanup_cli_rejects_digest_mismatch_before_provider_access(
     tmp_path, capsys
 ):
     proof_plan = plan_for(PREFERRED_SUPPRESSION_TEST_RECIPIENT)
     api = FakeSuppressionAPI()
-    api.contacts = [{"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT}]
+    api.contacts = [
+        {"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT},
+        {"email": "admin@tiffanywoodyoga.com"},
+    ]
     run(
         tmp_path,
         api=api,
@@ -1009,7 +1150,10 @@ def test_cleanup_cli_missing_key_fails_before_api_construction(
 ):
     proof_plan = plan_for(PREFERRED_SUPPRESSION_TEST_RECIPIENT)
     api = FakeSuppressionAPI()
-    api.contacts = [{"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT}]
+    api.contacts = [
+        {"email": PREFERRED_SUPPRESSION_TEST_RECIPIENT},
+        {"email": "admin@tiffanywoodyoga.com"},
+    ]
     run(
         tmp_path,
         api=api,
