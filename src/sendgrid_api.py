@@ -270,6 +270,19 @@ class SendGridAPI:
             )
         return contacts
 
+    def list_contact_count(self, list_id: str) -> int:
+        payload = self._request(
+            "POST",
+            "/marketing/contacts/search",
+            json={"query": f"CONTAINS(list_ids, '{list_id}')"},
+        )
+        count = payload.get("contact_count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise SendGridAPIError(
+                "SendGrid contact search returned no valid contact_count"
+            )
+        return count
+
     def upsert_contacts(self, list_ids: list[str], contacts: list[dict]) -> str:
         payload = self._request(
             "PUT",

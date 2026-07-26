@@ -82,6 +82,26 @@ def test_list_contacts_uses_sgql_and_returns_complete_result():
     assert fake.calls[-1]["json"] == {"query": "CONTAINS(list_ids, 'list-1')"}
 
 
+def test_list_contact_count_uses_authoritative_count_without_requiring_results():
+    api, fake = make_api(FakeResponse(200, {
+        "result": [{"email": f"user{index}@example.com"} for index in range(50)],
+        "contact_count": 921,
+    }))
+
+    assert api.list_contact_count("list-1") == 921
+    assert fake.calls[-1]["url"].endswith("/v3/marketing/contacts/search")
+    assert fake.calls[-1]["json"] == {"query": "CONTAINS(list_ids, 'list-1')"}
+
+
+def test_list_contact_count_rejects_missing_authoritative_count():
+    api, _ = make_api(FakeResponse(200, {
+        "result": [{"email": "a@example.com"}],
+    }))
+
+    with pytest.raises(SendGridAPIError, match="valid contact_count"):
+        api.list_contact_count("list-1")
+
+
 def test_wait_contact_job_accepts_completed():
     api, _ = make_api(
         FakeResponse(200, {"status": "pending"}),

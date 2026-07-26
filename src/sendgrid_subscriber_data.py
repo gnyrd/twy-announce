@@ -17,11 +17,11 @@ from twy_paths import data_root, load_env, twy_root
 
 def collect_snapshot(*, api, registry, captured_at: str) -> dict:
     list_id = registry.list_id(EMAIL_SUBSCRIBED)
-    contacts = api.list_contacts(list_id)
+    subscriber_count = api.list_contact_count(list_id)
     return {
         "captured_at": captured_at,
         "list_name": EMAIL_SUBSCRIBED,
-        "subscriber_count": len(contacts),
+        "subscriber_count": subscriber_count,
     }
 
 
