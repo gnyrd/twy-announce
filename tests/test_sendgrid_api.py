@@ -70,16 +70,104 @@ def test_upsert_contacts_returns_async_job_id():
     }
 
 
-def test_list_contacts_uses_sgql_and_returns_complete_result():
-    api, fake = make_api(FakeResponse(200, {
-        "result": [{"email": "a@example.com", "list_ids": ["list-1"]}],
-        "contact_count": 1,
-    }))
+def test_list_contacts_uses_complete_list_scoped_export():
+    first_csv = (
+        b'"EMAIL","FIRST_NAME","CONTACT_ID"\n'
+        b'"a@example.com","A","contact-1"\n'
+    )
+    second_csv = (
+        b'"EMAIL","FIRST_NAME","CONTACT_ID"\n'
+        b'"b@example.com","B","contact-2"\n'
+    )
+    api, fake = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(
+            200,
+            {
+                "id": "export-1",
+                "status": "ready",
+                "contact_count": 2,
+                "urls": [
+                    "https://storage.example/export-1.csv",
+                    "https://storage.example/export-2.csv",
+                ],
+            },
+        ),
+        FakeResponse(200, content=first_csv),
+        FakeResponse(200, content=second_csv),
+    )
     assert api.list_contacts("list-1") == [
-        {"email": "a@example.com", "list_ids": ["list-1"]}
+        {"email": "a@example.com", "id": "contact-1"},
+        {"email": "b@example.com", "id": "contact-2"},
     ]
-    assert fake.calls[-1]["url"].endswith("/v3/marketing/contacts/search")
-    assert fake.calls[-1]["json"] == {"query": "CONTAINS(list_ids, 'list-1')"}
+    assert fake.calls[0]["url"].endswith("/v3/marketing/contacts/exports")
+    assert fake.calls[0]["json"]["list_ids"] == ["list-1"]
+    assert "headers" not in fake.calls[2]
+    assert "headers" not in fake.calls[3]
+
+
+def test_list_contacts_rejects_incomplete_export():
+    api, _ = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(
+            200,
+            {
+                "id": "export-1",
+                "status": "ready",
+                "contact_count": 2,
+                "urls": ["https://storage.example/export.csv"],
+            },
+        ),
+        FakeResponse(
+            200,
+            content=(
+                b'"EMAIL","CONTACT_ID"\n'
+                b'"a@example.com","contact-1"\n'
+            ),
+        ),
+    )
+
+    with pytest.raises(SendGridAPIError, match="expected 2, got 1"):
+        api.list_contacts("list-1")
+
+
+def test_list_contacts_rejects_export_without_required_columns():
+    api, _ = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(
+            200,
+            {
+                "id": "export-1",
+                "status": "ready",
+                "contact_count": 1,
+                "urls": ["https://storage.example/export.csv"],
+            },
+        ),
+        FakeResponse(
+            200,
+            content=b'"EMAIL"\n"a@example.com"\n',
+        ),
+    )
+
+    with pytest.raises(SendGridAPIError, match="required columns"):
+        api.list_contacts("list-1")
+
+
+def test_list_contacts_accepts_empty_export_without_download_urls():
+    api, _ = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(
+            200,
+            {
+                "id": "export-1",
+                "status": "ready",
+                "contact_count": 0,
+                "urls": [],
+            },
+        ),
+    )
+
+    assert api.list_contacts("list-1") == []
 
 
 def test_list_contact_count_uses_authoritative_count_without_requiring_results():

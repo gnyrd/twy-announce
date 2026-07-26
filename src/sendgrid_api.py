@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import time
 from typing import Any, Callable
 from urllib.parse import quote, urlsplit
@@ -257,16 +259,65 @@ class SendGridAPI:
         return result
 
     def list_contacts(self, list_id: str) -> list[dict]:
-        payload = self._request(
-            "POST",
-            "/marketing/contacts/search",
-            json={"query": f"CONTAINS(list_ids, '{list_id}')"},
-        )
-        contacts = payload.get("result", [])
-        expected = payload.get("contact_count")
-        if expected is not None and expected != len(contacts):
+        if not list_id:
+            raise ValueError("SendGrid list ID is required")
+        started = self.start_contact_export([list_id])
+        export_id = str((started or {}).get("id") or "")
+        if not export_id:
+            raise SendGridAPIError("SendGrid contact export returned no ID")
+        ready = self.wait_contact_export(export_id)
+        expected = ready.get("contact_count")
+        if (
+            isinstance(expected, bool)
+            or not isinstance(expected, int)
+            or expected < 0
+        ):
             raise SendGridAPIError(
-                f"SendGrid contact search incomplete: expected {expected}, got {len(contacts)}"
+                "SendGrid contact export returned no valid contact_count"
+            )
+
+        urls = ready.get("urls") or []
+        if not isinstance(urls, list) or any(
+            not isinstance(url, str) or not url for url in urls
+        ):
+            raise SendGridAPIError("SendGrid contact export returned invalid URLs")
+
+        contacts: list[dict] = []
+        seen_ids: set[str] = set()
+        seen_emails: set[str] = set()
+        for url in urls:
+            payload = self.download_contact_export(url)
+            try:
+                text = payload.decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                raise SendGridAPIError(
+                    "SendGrid contact export is not valid UTF-8"
+                ) from exc
+            reader = csv.DictReader(io.StringIO(text))
+            fields = set(reader.fieldnames or [])
+            if not {"EMAIL", "CONTACT_ID"}.issubset(fields):
+                raise SendGridAPIError(
+                    "SendGrid contact export is missing required columns"
+                )
+            for row in reader:
+                email = str(row.get("EMAIL") or "").strip().lower()
+                contact_id = str(row.get("CONTACT_ID") or "").strip()
+                if not email or "@" not in email or not contact_id:
+                    raise SendGridAPIError(
+                        "SendGrid contact export contains an invalid contact"
+                    )
+                if contact_id in seen_ids or email in seen_emails:
+                    raise SendGridAPIError(
+                        "SendGrid contact export contains a duplicate contact"
+                    )
+                seen_ids.add(contact_id)
+                seen_emails.add(email)
+                contacts.append({"email": email, "id": contact_id})
+
+        if expected != len(contacts):
+            raise SendGridAPIError(
+                "SendGrid contact export incomplete: "
+                f"expected {expected}, got {len(contacts)}"
             )
         return contacts
 
