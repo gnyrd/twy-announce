@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from newsletter import save_prompt, prompt_path, newsletter_path
 import habit_newsletter_prompt as hnp
-from habit_newsletter_prompt import check_coverage
+from habit_newsletter_prompt import check_coverage, MINIMUM_CLASS_PLANS
 from newsletter_editorial_review import compile_approved_inputs
 from slack import post_slack
 
@@ -88,16 +88,19 @@ def main():
 
     # Only generate prompts on/after 25th
     if today.day < 25:
-        print(f"{today}: before 25th, skipping prompt generation")
         return
 
     # Load overview
     overview = load_month_overview(month)
     if not overview:
-        msg = f":x: Newsletter prompts FAILED for {month_label}: no monthly overview found"
+        msg = (
+            f":clipboard: Tiff action needed for {month_label}: "
+            "the monthly overview is missing. "
+            "Newsletter draft generation remains blocked."
+        )
         print(msg)
         post_slack(SLACK_STATUS_CHANNEL, msg)
-        sys.exit(1)
+        return
 
     # Load class plans
     plans = load_plans_for_month(year, month)
@@ -106,10 +109,23 @@ def main():
     try:
         check_coverage(plans, year, month)
     except ValueError as e:
-        msg = f":x: Insufficient class plans for {month_label}: {e}. Add plans and re-run."
+        if len(plans) < MINIMUM_CLASS_PLANS:
+            missing = MINIMUM_CLASS_PLANS - len(plans)
+            msg = (
+                f":clipboard: Tiff action needed for {month_label}: "
+                f"{missing} more class plans required "
+                f"({len(plans)} of {MINIMUM_CLASS_PLANS}). "
+                "Newsletter draft generation remains blocked until all "
+                f"{MINIMUM_CLASS_PLANS} are ready."
+            )
+        else:
+            msg = (
+                f":clipboard: Tiff action needed for {month_label}: {e}. "
+                "Newsletter draft generation remains blocked."
+            )
         print(msg)
         post_slack(SLACK_STATUS_CHANNEL, msg)
-        sys.exit(1)
+        return
 
     # Compile only immutable, completed approvals into the prompt input indexes.
     # Missing or malformed indexes fail prompt generation closed.

@@ -15,6 +15,7 @@ from twy_paths import (
 )
 
 CLASSES_API = "http://localhost:5003"
+MINIMUM_CLASS_PLANS = 7
 
 _PERSPECTIVE = """PERSPECTIVE (governs everything below):
 Never write from the curriculum. Always write from the student's lived experience. The curriculum informs the email but should rarely be described directly. Introduce the month's philosophy through relatable life experiences before connecting it to the practices students will explore in class.
@@ -228,10 +229,10 @@ def check_coverage(plans: dict, year: int, month: int) -> None:
     Tiff teaches ~3 days/week (Mon/Tue/Thu + Yoga Habit free class).
     Minimum: 7 plans, and the Habit class date must have a plan.
     """
-    if len(plans) < 7:
+    if len(plans) < MINIMUM_CLASS_PLANS:
         raise ValueError(
             f"insufficient class plans: {len(plans)} plans for {year}-{month:02d} "
-            f"(need at least 7)"
+            f"(need at least {MINIMUM_CLASS_PLANS})"
         )
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.isoformat()
