@@ -1111,7 +1111,8 @@ def run_suppression_setup_and_test(
             or len(contact_emails) != len(contacts)
         ):
             raise SuppressionTestSafetyError(
-                "temporary proof list membership is not exact"
+                "temporary proof list membership contains an "
+                "unexpected or duplicate address"
             )
         if contact_emails == expected_members and len(contacts) == 2:
             membership_is_exact = True
@@ -1120,7 +1121,8 @@ def run_suppression_setup_and_test(
             sleep_fn(contact_membership_poll_seconds)
     if not membership_is_exact:
         raise SuppressionTestSafetyError(
-            "temporary proof list membership is not exact"
+            "temporary proof list membership did not become exact "
+            "within the bounded poll window"
         )
 
     result = _run_suppression_test_authorized(

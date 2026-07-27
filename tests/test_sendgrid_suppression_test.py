@@ -698,19 +698,69 @@ def test_setup_rejects_unexpected_post_upsert_membership(tmp_path):
 
     api = UnexpectedMemberAPI()
     plan = setup_plan_for()
+    sleeps = []
 
-    with pytest.raises(SuppressionTestSafetyError, match="membership"):
+    with pytest.raises(
+        SuppressionTestSafetyError,
+        match="unexpected or duplicate",
+    ):
         run_suppression_setup_and_test(
             api,
             plan,
             setup_approval_for(plan),
             EvidenceStore(tmp_path / "evidence"),
             now=NOW,
-            sleep_fn=lambda _: None,
+            sleep_fn=sleeps.append,
             stats_attempts=1,
         )
 
-    assert not any(call[0] == "add_group_suppressions" for call in api.calls)
+    assert sleeps == []
+    assert not any(
+        call[0] in {
+            "add_group_suppressions",
+            "create_single_send",
+            "schedule_single_send",
+        }
+        for call in api.calls
+    )
+
+
+def test_setup_rejects_duplicate_post_upsert_membership_without_sleep(
+    tmp_path,
+):
+    class DuplicateMemberAPI(FakeSuppressionAPI):
+        def upsert_contacts(self, list_ids, contacts):
+            job_id = super().upsert_contacts(list_ids, contacts)
+            self.contacts.append(dict(self.contacts[0]))
+            return job_id
+
+    api = DuplicateMemberAPI()
+    plan = setup_plan_for()
+    sleeps = []
+
+    with pytest.raises(
+        SuppressionTestSafetyError,
+        match="unexpected or duplicate",
+    ):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=sleeps.append,
+            stats_attempts=1,
+        )
+
+    assert sleeps == []
+    assert not any(
+        call[0] in {
+            "add_group_suppressions",
+            "create_single_send",
+            "schedule_single_send",
+        }
+        for call in api.calls
+    )
 
 
 def test_setup_waits_for_delayed_exact_membership_visibility(tmp_path):
@@ -758,7 +808,10 @@ def test_setup_membership_visibility_timeout_is_bounded_and_fails_closed(
     plan = setup_plan_for()
     sleeps = []
 
-    with pytest.raises(SuppressionTestSafetyError, match="membership"):
+    with pytest.raises(
+        SuppressionTestSafetyError,
+        match="bounded poll window",
+    ):
         run_suppression_setup_and_test(
             api,
             plan,
