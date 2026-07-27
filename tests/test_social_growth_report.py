@@ -480,6 +480,30 @@ def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
     assert "expires within 48 hours" in events[3]["text"]
 
 
+def test_warning_events_include_plausible_collection_errors():
+    snapshot = {
+        "captured_at": "2026-07-27T20:00:00Z",
+        "instagram": {"zernio_account": {}},
+        "zernio": {},
+        "landing_page": {
+            "plausible": {
+                "status": "error",
+                "site_id": "habit.tiffanywoodyoga.com",
+                "error": "Plausible query failed: 401 invalid",
+            }
+        },
+    }
+
+    events = social_growth.warning_events(snapshot, token_warning_hours=48)
+
+    assert [event["key"] for event in events] == [
+        "plausible_error:habit.tiffanywoodyoga.com:Plausible query failed: 401 invalid"
+    ]
+    assert "Plausible funnel collection failed" in events[0]["text"]
+    assert "habit.tiffanywoodyoga.com" in events[0]["text"]
+    assert "401 invalid" in events[0]["text"]
+
+
 def test_post_new_warning_events_records_sent_keys_and_skips_repeats(tmp_path):
     state_path = tmp_path / ".alert_state.json"
     sent = []

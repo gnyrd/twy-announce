@@ -775,6 +775,19 @@ def warning_events(
                 ),
             }
         )
+    plausible = ((snapshot.get("landing_page") or {}).get("plausible") or {})
+    if plausible.get("status") == "error":
+        site_id = plausible.get("site_id") or "unknown site"
+        error = plausible.get("error") or "unknown error"
+        events.append(
+            {
+                "key": f"plausible_error:{site_id}:{error}",
+                "text": (
+                    ":warning: TWY social growth: Plausible funnel collection "
+                    f"failed for {site_id}: {error}"
+                ),
+            }
+        )
     token_event = zernio_token_warning_event(
         snapshot,
         token_warning_hours=token_warning_hours,
