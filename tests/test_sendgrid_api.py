@@ -179,6 +179,34 @@ def test_list_contacts_accepts_empty_export_without_download_urls():
     assert api.list_contacts("list-1") == []
 
 
+def test_list_contacts_accepts_ready_empty_export_without_export_count():
+    api, fake = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(
+            200,
+            {
+                "id": "export-1",
+                "status": "ready",
+                "urls": [],
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "id": "list-1",
+                "name": "Yoga Habit: Registered: 2026_08",
+                "contact_count": 0,
+            },
+        ),
+    )
+
+    assert api.list_contacts("list-1") == []
+    assert fake.calls[-1]["method"] == "GET"
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/marketing/lists/list-1"
+    )
+
+
 def test_list_contact_count_uses_authoritative_count_without_requiring_results():
     api, fake = make_api(FakeResponse(200, {
         "result": [{"email": f"user{index}@example.com"} for index in range(50)],

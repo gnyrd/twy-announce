@@ -114,6 +114,11 @@ class SendGridAPI:
             path = (payload.get("_metadata") or {}).get("next")
         return result
 
+    def marketing_list(self, list_id: str) -> dict:
+        if not list_id:
+            raise ValueError("SendGrid list ID is required")
+        return self._request("GET", f"/marketing/lists/{list_id}")
+
     def create_list(self, name: str) -> dict:
         return self._request("POST", "/marketing/lists", json={"name": name})
 
@@ -271,7 +276,23 @@ class SendGridAPI:
         if not export_id:
             raise SendGridAPIError("SendGrid contact export returned no ID")
         ready = self.wait_contact_export(export_id)
+
+        urls = ready.get("urls") or []
+        if not isinstance(urls, list) or any(
+            not isinstance(url, str) or not url for url in urls
+        ):
+            raise SendGridAPIError("SendGrid contact export returned invalid URLs")
+
         expected = ready.get("contact_count")
+        if expected is None and not urls:
+            list_payload = self.marketing_list(list_id)
+            list_count = list_payload.get("contact_count")
+            if (
+                not isinstance(list_count, bool)
+                and isinstance(list_count, int)
+                and list_count == 0
+            ):
+                expected = 0
         if (
             isinstance(expected, bool)
             or not isinstance(expected, int)
@@ -280,12 +301,6 @@ class SendGridAPI:
             raise SendGridAPIError(
                 "SendGrid contact export returned no valid contact_count"
             )
-
-        urls = ready.get("urls") or []
-        if not isinstance(urls, list) or any(
-            not isinstance(url, str) or not url for url in urls
-        ):
-            raise SendGridAPIError("SendGrid contact export returned invalid URLs")
 
         contacts: list[dict] = []
         seen_ids: set[str] = set()
