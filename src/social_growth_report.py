@@ -27,6 +27,20 @@ DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
 DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
+ZERNIO_ANALYTICS_METRICS = (
+    "impressions",
+    "reach",
+    "likes",
+    "comments",
+    "shares",
+    "saves",
+    "clicks",
+    "views",
+    "follows",
+    "igReelsAvgWatchTime",
+    "igReelsVideoViewTotalTime",
+    "engagementRate",
+)
 
 
 def iso_z(value: datetime) -> str:
@@ -170,6 +184,41 @@ def zernio_fetcher_from_env() -> Callable[[str], dict[str, Any]] | None:
     return fetch
 
 
+def zernio_analytics_fetcher_from_env() -> Callable[[str], dict[str, Any]] | None:
+    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
+    if not api_key:
+        return None
+    account_id = os.getenv("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
+    base_url = os.getenv("ZERNIO_BASE_URL", DEFAULT_ZERNIO_BASE_URL).rstrip("/")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def fetch(post_id: str) -> dict[str, Any]:
+        params = {"postId": post_id}
+        if account_id:
+            params["accountId"] = account_id
+        response = requests.get(
+            f"{base_url}/analytics",
+            headers=headers,
+            params=params,
+            timeout=30,
+        )
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {"text": response.text[:200]}
+        payload["_collector_http_status"] = response.status_code
+        if response.status_code in {202, 402, 424}:
+            return payload
+        if response.status_code >= 400:
+            raise RuntimeError(f"Zernio GET /analytics failed: {response.status_code} {payload}")
+        return payload
+
+    return fetch
+
+
 def zernio_account_health_from_env() -> dict[str, Any] | None:
     api_key = os.getenv("ZERNIO_API_KEY", "").strip()
     account_id = os.getenv("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
@@ -229,11 +278,125 @@ def zernio_post_row(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str,
     }
 
 
+def zernio_analytics_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    metrics = payload.get("analytics")
+    if not isinstance(metrics, dict):
+        platforms = payload.get("platforms") or []
+        if platforms and isinstance(platforms[0], dict):
+            metrics = platforms[0].get("analytics")
+    if not isinstance(metrics, dict):
+        return {}
+    return {
+        key: metrics.get(key)
+        for key in ZERNIO_ANALYTICS_METRICS
+        if key in metrics
+    }
+
+
+def zernio_analytics_row(row: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    platforms = payload.get("platforms") or []
+    platform = platforms[0] if platforms and isinstance(platforms[0], dict) else {}
+    return {
+        "scheduled_for": row.get("scheduled_for"),
+        "post_type": row.get("post_type"),
+        "posted_for_class": row.get("posted_for_class"),
+        "class_name": row.get("class_name"),
+        "clip_name": row.get("clip_name"),
+        "zernio_post_id": row.get("zernio_post_id"),
+        "platform_post_id": platform.get("platformPostId") or payload.get("platformPostId"),
+        "platform_post_url": platform.get("platformPostUrl") or payload.get("platformPostUrl"),
+        "sync_status": platform.get("syncStatus") or payload.get("syncStatus"),
+        "metrics": zernio_analytics_metrics(payload),
+    }
+
+
+def collect_zernio_post_analytics(
+    *,
+    rows: list[dict[str, Any]],
+    fetch_analytics: Callable[[str], dict[str, Any]] | None,
+) -> dict[str, Any]:
+    if fetch_analytics is None:
+        return {
+            "status": "not_configured",
+            "reason": "ZERNIO_API_KEY is not configured",
+        }
+    published = [
+        row
+        for row in rows
+        if row.get("zernio_post_id")
+        and (row.get("post_status") == "published" or row.get("platform_status") == "published")
+    ]
+    if not published:
+        return {
+            "status": "no_published_posts",
+            "queried_count": 0,
+            "posts": [],
+        }
+    analytics_rows: list[dict[str, Any]] = []
+    api_errors: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    platform_failed: list[dict[str, Any]] = []
+    for row in published:
+        post_id = str(row["zernio_post_id"])
+        try:
+            payload = fetch_analytics(post_id)
+        except Exception as exc:
+            api_errors.append(
+                {
+                    "zernio_post_id": post_id,
+                    "scheduled_for": row.get("scheduled_for"),
+                    "error": str(exc),
+                }
+            )
+            continue
+        http_status = payload.get("_collector_http_status")
+        if http_status == 402:
+            return {
+                "status": "blocked",
+                "queried_count": len(analytics_rows),
+                "code": payload.get("code"),
+                "error": payload.get("error"),
+                "reason": payload.get("reason"),
+                "mode": payload.get("mode"),
+            }
+        if http_status == 202:
+            pending.append(
+                {
+                    "zernio_post_id": post_id,
+                    "scheduled_for": row.get("scheduled_for"),
+                    "message": payload.get("message"),
+                }
+            )
+            continue
+        if http_status == 424:
+            platform_failed.append(
+                {
+                    "zernio_post_id": post_id,
+                    "scheduled_for": row.get("scheduled_for"),
+                    "error": payload.get("error"),
+                }
+            )
+            continue
+        analytics_rows.append(zernio_analytics_row(row, payload))
+    return {
+        "status": "ok",
+        "queried_count": len(analytics_rows),
+        "api_error_count": len(api_errors),
+        "api_errors": api_errors,
+        "pending_count": len(pending),
+        "pending": pending,
+        "platform_failed_count": len(platform_failed),
+        "platform_failed": platform_failed,
+        "posts": analytics_rows,
+    }
+
+
 def collect_zernio_recent_status(
     *,
     history_path: Path,
     captured_at: datetime,
     fetch_post: Callable[[str], dict[str, Any]] | None,
+    fetch_analytics: Callable[[str], dict[str, Any]] | None = None,
     lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
 ) -> dict[str, Any]:
@@ -299,6 +462,7 @@ def collect_zernio_recent_status(
         "failed": failed,
         "pending_count": len(pending),
         "pending": pending,
+        "analytics": collect_zernio_post_analytics(rows=rows, fetch_analytics=fetch_analytics),
     }
 
 
@@ -407,6 +571,7 @@ def collect_snapshot(
     twy_root: Path,
     data_root: Path,
     zernio_fetch_post: Callable[[str], dict[str, Any]] | None,
+    zernio_fetch_analytics: Callable[[str], dict[str, Any]] | None = None,
     zernio_account_health: Callable[[], dict[str, Any] | None] | None,
     zernio_lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     zernio_lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
@@ -433,6 +598,7 @@ def collect_snapshot(
             history_path=twy_root / "clips/state/ig_history.json",
             captured_at=captured_at,
             fetch_post=zernio_fetch_post,
+            fetch_analytics=zernio_fetch_analytics,
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
         ),
@@ -547,6 +713,21 @@ def warning_events(
                 ),
             }
         )
+    analytics = zernio.get("analytics") or {}
+    for row in analytics.get("api_errors") or []:
+        post_id = row.get("zernio_post_id") or "unknown"
+        scheduled_for = row.get("scheduled_for") or "unknown time"
+        error = row.get("error") or "unknown error"
+        events.append(
+            {
+                "key": f"zernio_analytics_api_error:{post_id}:{scheduled_for}",
+                "text": (
+                    ":warning: TWY social growth: Zernio analytics check "
+                    f"failed for post {post_id} scheduled {scheduled_for}: "
+                    f"{error}"
+                ),
+            }
+        )
     token_event = zernio_token_warning_event(
         snapshot,
         token_warning_hours=token_warning_hours,
@@ -629,6 +810,7 @@ def main() -> int:
         twy_root=root,
         data_root=data_dir,
         zernio_fetch_post=zernio_fetcher_from_env(),
+        zernio_fetch_analytics=zernio_analytics_fetcher_from_env(),
         zernio_account_health=zernio_account_health_from_env,
         zernio_lookback_hours=args.lookback_hours,
         zernio_lookahead_hours=args.lookahead_hours,

@@ -259,6 +259,109 @@ def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):
     assert status["pending_count"] == 1
     assert status["failed"][0]["zernio_post_id"] == "failed1"
     assert status["pending"][0]["zernio_post_id"] == "scheduled1"
+    assert status["analytics"]["status"] == "not_configured"
+
+
+def test_collect_zernio_post_analytics_reports_blocked_addon():
+    rows = [
+        {
+            "zernio_post_id": "post1",
+            "scheduled_for": "2026-07-27T08:00:00-06:00",
+            "post_status": "published",
+            "platform_status": "published",
+        }
+    ]
+
+    def fake_fetch(post_id):
+        assert post_id == "post1"
+        return {
+            "_collector_http_status": 402,
+            "error": "Analytics add-on required",
+            "code": "analytics_addon_required",
+            "reason": "no_analytics",
+            "mode": "subscription",
+        }
+
+    status = social_growth.collect_zernio_post_analytics(
+        rows=rows,
+        fetch_analytics=fake_fetch,
+    )
+
+    assert status == {
+        "status": "blocked",
+        "queried_count": 0,
+        "code": "analytics_addon_required",
+        "error": "Analytics add-on required",
+        "reason": "no_analytics",
+        "mode": "subscription",
+    }
+
+
+def test_collect_zernio_post_analytics_extracts_metrics():
+    rows = [
+        {
+            "scheduled_for": "2026-07-27T08:00:00-06:00",
+            "post_type": "reel",
+            "posted_for_class": "2026-07-28",
+            "class_name": "2026-07-15_breath",
+            "clip_name": "06_teaching_score8_9s",
+            "zernio_post_id": "post1",
+            "post_status": "published",
+            "platform_status": "published",
+        }
+    ]
+
+    def fake_fetch(post_id):
+        assert post_id == "post1"
+        return {
+            "_collector_http_status": 200,
+            "analytics": {
+                "impressions": 100,
+                "reach": 80,
+                "likes": 7,
+                "comments": 1,
+                "shares": 2,
+                "saves": 3,
+                "views": 90,
+                "engagementRate": 0.13,
+            },
+            "platforms": [
+                {
+                    "platformPostId": "ig1",
+                    "platformPostUrl": "https://www.instagram.com/reel/example/",
+                    "syncStatus": "synced",
+                }
+            ],
+        }
+
+    status = social_growth.collect_zernio_post_analytics(
+        rows=rows,
+        fetch_analytics=fake_fetch,
+    )
+
+    assert status["status"] == "ok"
+    assert status["queried_count"] == 1
+    assert status["posts"][0] == {
+        "scheduled_for": "2026-07-27T08:00:00-06:00",
+        "post_type": "reel",
+        "posted_for_class": "2026-07-28",
+        "class_name": "2026-07-15_breath",
+        "clip_name": "06_teaching_score8_9s",
+        "zernio_post_id": "post1",
+        "platform_post_id": "ig1",
+        "platform_post_url": "https://www.instagram.com/reel/example/",
+        "sync_status": "synced",
+        "metrics": {
+            "impressions": 100,
+            "reach": 80,
+            "likes": 7,
+            "comments": 1,
+            "shares": 2,
+            "saves": 3,
+            "views": 90,
+            "engagementRate": 0.13,
+        },
+    }
 
 
 def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
@@ -290,6 +393,15 @@ def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
                     "error": "rate limited",
                 }
             ],
+            "analytics": {
+                "api_errors": [
+                    {
+                        "zernio_post_id": "analytics1",
+                        "scheduled_for": "2026-07-28T08:00:00-06:00",
+                        "error": "analytics timeout",
+                    }
+                ]
+            },
         },
     }
 
@@ -298,11 +410,13 @@ def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
     assert [event["key"] for event in events] == [
         "zernio_failed:failed1",
         "zernio_api_error:api1:2026-07-28T08:00:00-06:00",
+        "zernio_analytics_api_error:analytics1:2026-07-28T08:00:00-06:00",
         "zernio_token:2026-07-28T19:00:00Z",
     ]
     assert "TWY IG Reel for 2026-07-28" in events[0]["text"]
     assert "rate limited" in events[1]["text"]
-    assert "expires within 48 hours" in events[2]["text"]
+    assert "analytics timeout" in events[2]["text"]
+    assert "expires within 48 hours" in events[3]["text"]
 
 
 def test_post_new_warning_events_records_sent_keys_and_skips_repeats(tmp_path):
