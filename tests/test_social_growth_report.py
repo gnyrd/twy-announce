@@ -208,3 +208,84 @@ def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):
     assert status["pending_count"] == 1
     assert status["failed"][0]["zernio_post_id"] == "failed1"
     assert status["pending"][0]["zernio_post_id"] == "scheduled1"
+
+
+def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
+    snapshot = {
+        "captured_at": "2026-07-27T20:00:00Z",
+        "instagram": {
+            "zernio_account": {
+                "username": "tiffanywoodyoga",
+                "token_status": {
+                    "valid": True,
+                    "needs_refresh": False,
+                    "expires_at": "2026-07-28T19:00:00Z",
+                },
+            }
+        },
+        "zernio": {
+            "failed": [
+                {
+                    "zernio_post_id": "failed1",
+                    "title": "TWY IG Reel for 2026-07-28",
+                    "scheduled_for": "2026-07-27T08:00:00-06:00",
+                    "platform_status": "failed",
+                }
+            ],
+            "api_errors": [
+                {
+                    "zernio_post_id": "api1",
+                    "scheduled_for": "2026-07-28T08:00:00-06:00",
+                    "error": "rate limited",
+                }
+            ],
+        },
+    }
+
+    events = social_growth.warning_events(snapshot, token_warning_hours=48)
+
+    assert [event["key"] for event in events] == [
+        "zernio_failed:failed1",
+        "zernio_api_error:api1:2026-07-28T08:00:00-06:00",
+        "zernio_token:2026-07-28T19:00:00Z",
+    ]
+    assert "TWY IG Reel for 2026-07-28" in events[0]["text"]
+    assert "rate limited" in events[1]["text"]
+    assert "expires within 48 hours" in events[2]["text"]
+
+
+def test_post_new_warning_events_records_sent_keys_and_skips_repeats(tmp_path):
+    state_path = tmp_path / ".alert_state.json"
+    sent = []
+
+    def fake_post(channel, text):
+        sent.append((channel, text))
+
+    events = [
+        {"key": "one", "text": "First warning"},
+        {"key": "two", "text": "Second warning"},
+    ]
+
+    first = social_growth.post_new_warning_events(
+        events,
+        state_path=state_path,
+        channel="C0ASG1EU0HL",
+        post_warning=fake_post,
+        sent_at=datetime(2026, 7, 27, 20, 0, tzinfo=timezone.utc),
+    )
+    second = social_growth.post_new_warning_events(
+        events,
+        state_path=state_path,
+        channel="C0ASG1EU0HL",
+        post_warning=fake_post,
+        sent_at=datetime(2026, 7, 27, 20, 5, tzinfo=timezone.utc),
+    )
+
+    assert first == {"posted": 2, "skipped": 0, "failed": 0}
+    assert second == {"posted": 0, "skipped": 2, "failed": 0}
+    assert sent == [
+        ("C0ASG1EU0HL", "First warning"),
+        ("C0ASG1EU0HL", "Second warning"),
+    ]
+    state = json.loads(state_path.read_text())
+    assert sorted(state["sent"]) == ["one", "two"]

@@ -24,6 +24,8 @@ from twy_paths import twy_root as default_twy_root
 DEFAULT_ZERNIO_BASE_URL = "https://zernio.com/api/v1"
 DEFAULT_ZERNIO_LOOKBACK_HOURS = 72
 DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
+DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
+DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 
 
 def iso_z(value: datetime) -> str:
@@ -390,11 +392,172 @@ def save_snapshot(snapshot: dict[str, Any], *, output_dir: Path) -> Path:
     return path
 
 
+def system_warnings_channel() -> str:
+    return (
+        os.getenv("SOCIAL_GROWTH_WARNINGS_CHANNEL", "").strip()
+        or os.getenv("SENDGRID_SYSTEM_WARNINGS_CHANNEL", "").strip()
+        or os.getenv("IG_SYSTEM_WARNINGS_SLACK_CHANNEL", "").strip()
+        or DEFAULT_SYSTEM_WARNINGS_CHANNEL
+    )
+
+
+def slack_post_warning(channel: str, text: str) -> None:
+    token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+    if not token:
+        print(f"[slack] {channel}: {text}")
+        return
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"channel": channel, "text": text},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack API error: {payload.get('error')}")
+
+
+def zernio_token_warning_event(
+    snapshot: dict[str, Any],
+    *,
+    token_warning_hours: int,
+) -> dict[str, str] | None:
+    account = ((snapshot.get("instagram") or {}).get("zernio_account") or {})
+    token_status = account.get("token_status") or {}
+    expires_at = token_status.get("expires_at")
+    needs_refresh = token_status.get("needs_refresh")
+    valid = token_status.get("valid")
+    if not expires_at:
+        return None
+    captured_at = parse_datetime(str(snapshot["captured_at"]))
+    expiry = parse_datetime(str(expires_at))
+    hours_left = (expiry - captured_at).total_seconds() / 3600
+    if valid is False:
+        reason = "is invalid"
+    elif needs_refresh:
+        reason = "needs refresh"
+    elif hours_left <= token_warning_hours:
+        reason = f"expires within {token_warning_hours} hours"
+    else:
+        return None
+    username = account.get("username") or "unknown account"
+    return {
+        "key": f"zernio_token:{expires_at}",
+        "text": (
+            ":warning: TWY social growth: Zernio Instagram token "
+            f"for {username} {reason}. Expires at {expires_at}."
+        ),
+    }
+
+
+def warning_events(
+    snapshot: dict[str, Any],
+    *,
+    token_warning_hours: int = DEFAULT_ZERNIO_TOKEN_WARNING_HOURS,
+) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    zernio = snapshot.get("zernio") or {}
+    for row in zernio.get("failed") or []:
+        post_id = row.get("zernio_post_id") or "unknown"
+        title = row.get("title") or "untitled post"
+        scheduled_for = row.get("scheduled_for") or "unknown time"
+        status = row.get("platform_status") or row.get("post_status") or "failed"
+        events.append(
+            {
+                "key": f"zernio_failed:{post_id}",
+                "text": (
+                    ":warning: TWY social growth: Zernio publish failed "
+                    f"for {title} scheduled {scheduled_for}. "
+                    f"Post id {post_id}. Status {status}."
+                ),
+            }
+        )
+    for row in zernio.get("api_errors") or []:
+        post_id = row.get("zernio_post_id") or "unknown"
+        scheduled_for = row.get("scheduled_for") or "unknown time"
+        error = row.get("error") or "unknown error"
+        events.append(
+            {
+                "key": f"zernio_api_error:{post_id}:{scheduled_for}",
+                "text": (
+                    ":warning: TWY social growth: Zernio status check "
+                    f"failed for post {post_id} scheduled {scheduled_for}: "
+                    f"{error}"
+                ),
+            }
+        )
+    token_event = zernio_token_warning_event(
+        snapshot,
+        token_warning_hours=token_warning_hours,
+    )
+    if token_event:
+        events.append(token_event)
+    return events
+
+
+def load_alert_state(state_path: Path) -> dict[str, Any]:
+    if not state_path.exists():
+        return {"sent": {}}
+    try:
+        state = read_json(state_path)
+    except Exception:
+        return {"sent": {}}
+    if not isinstance(state, dict):
+        return {"sent": {}}
+    sent = state.get("sent")
+    if not isinstance(sent, dict):
+        state["sent"] = {}
+    return state
+
+
+def save_alert_state(state: dict[str, Any], state_path: Path) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+def post_new_warning_events(
+    events: list[dict[str, str]],
+    *,
+    state_path: Path,
+    channel: str,
+    post_warning: Callable[[str, str], None],
+    sent_at: datetime,
+) -> dict[str, int]:
+    state = load_alert_state(state_path)
+    sent = state["sent"]
+    result = {"posted": 0, "skipped": 0, "failed": 0}
+    for event in events:
+        key = event["key"]
+        if key in sent:
+            result["skipped"] += 1
+            continue
+        try:
+            post_warning(channel, event["text"])
+        except Exception as exc:
+            print(f"Warning: could not post Slack alert {key}: {exc}")
+            result["failed"] += 1
+            continue
+        sent[key] = {
+            "sent_at": iso_z(sent_at),
+            "text": event["text"],
+        }
+        result["posted"] += 1
+    if result["posted"]:
+        save_alert_state(state, state_path)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect TWY social growth evidence")
     parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing it")
     parser.add_argument("--lookback-hours", type=int, default=DEFAULT_ZERNIO_LOOKBACK_HOURS)
     parser.add_argument("--lookahead-hours", type=int, default=DEFAULT_ZERNIO_LOOKAHEAD_HOURS)
+    parser.add_argument(
+        "--token-warning-hours",
+        type=int,
+        default=DEFAULT_ZERNIO_TOKEN_WARNING_HOURS,
+    )
     args = parser.parse_args()
 
     load_env()
@@ -412,6 +575,12 @@ def main() -> int:
     )
     if args.dry_run:
         print(json.dumps(snapshot, indent=2, sort_keys=True))
+        events = warning_events(
+            snapshot,
+            token_warning_hours=args.token_warning_hours,
+        )
+        for event in events:
+            print(f"[DRY RUN alert] {event['text']}")
         return 0
     destination = save_snapshot(snapshot, output_dir=data_dir / "social_growth")
     print(f"Saved social growth snapshot to {destination}")
@@ -420,6 +589,24 @@ def main() -> int:
         print(f"Zernio failed posts in window: {zernio['failed_count']}")
     if zernio.get("api_error_count"):
         print(f"Zernio API errors in window: {zernio['api_error_count']}")
+    events = warning_events(
+        snapshot,
+        token_warning_hours=args.token_warning_hours,
+    )
+    alert_result = post_new_warning_events(
+        events,
+        state_path=data_dir / "social_growth" / ".alert_state.json",
+        channel=system_warnings_channel(),
+        post_warning=slack_post_warning,
+        sent_at=now,
+    )
+    if events:
+        print(
+            "Slack alerts: "
+            f"{alert_result['posted']} posted, "
+            f"{alert_result['skipped']} skipped, "
+            f"{alert_result['failed']} failed"
+        )
     return 0
 
 
