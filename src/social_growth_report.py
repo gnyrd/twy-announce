@@ -628,6 +628,35 @@ def collect_socialblade_status() -> dict[str, Any]:
     }
 
 
+def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    followers = (snapshot.get("instagram") or {}).get("followers") or {}
+    subscribers = (snapshot.get("email") or {}).get("subscribers") or {}
+    habit_event = (snapshot.get("habit") or {}).get("next_event") or {}
+    queues = snapshot.get("queues") or {}
+    zernio = snapshot.get("zernio") or {}
+    zernio_analytics = zernio.get("analytics") or {}
+    plausible = ((snapshot.get("landing_page") or {}).get("plausible") or {})
+    day = ((plausible.get("metrics") or {}).get("day") or {})
+    funnel_events = day.get("funnel_events") or {}
+    return {
+        "instagram_followers": followers.get("count"),
+        "instagram_follower_delta": followers.get("delta_since_previous"),
+        "email_subscribers": subscribers.get("count"),
+        "next_habit_registrations": habit_event.get("registrations"),
+        "ig_clip_queue": queues.get("ig_clip_queue"),
+        "ig_quote_queue": queues.get("ig_quote_queue"),
+        "zernio_status": zernio.get("status"),
+        "zernio_failed_posts": zernio.get("failed_count"),
+        "zernio_api_errors": zernio.get("api_error_count"),
+        "zernio_analytics_status": zernio_analytics.get("status"),
+        "landing_page_status": plausible.get("status"),
+        "landing_day_visitors": day.get("visitors"),
+        "landing_day_pageviews": day.get("pageviews"),
+        "habit_register_clicks_day": funnel_events.get("Habit Register Click"),
+        "habit_signup_success_day": funnel_events.get("Habit Signup Success"),
+    }
+
+
 def collect_snapshot(
     *,
     captured_at: datetime,
@@ -643,7 +672,7 @@ def collect_snapshot(
         account_health = zernio_account_health() if zernio_account_health else None
     except Exception as exc:
         account_health = {"status": "error", "error": str(exc)}
-    return {
+    snapshot = {
         "date": captured_at.date().isoformat(),
         "captured_at": iso_z(captured_at),
         "instagram": {
@@ -672,6 +701,8 @@ def collect_snapshot(
             "socialblade": collect_socialblade_status(),
         },
     }
+    snapshot["summary"] = summarize_snapshot(snapshot)
+    return snapshot
 
 
 def save_snapshot(snapshot: dict[str, Any], *, output_dir: Path) -> Path:

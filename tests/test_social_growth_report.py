@@ -128,6 +128,23 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
     }
     assert snapshot["landing_page"]["plausible"]["status"] == "not_configured"
     assert snapshot["external_benchmarks"]["socialblade"]["status"] == "not_configured"
+    assert snapshot["summary"] == {
+        "email_subscribers": 921,
+        "habit_register_clicks_day": None,
+        "habit_signup_success_day": None,
+        "ig_clip_queue": 2,
+        "ig_quote_queue": 1,
+        "instagram_follower_delta": -2,
+        "instagram_followers": 2303,
+        "landing_day_pageviews": None,
+        "landing_day_visitors": None,
+        "landing_page_status": "not_configured",
+        "next_habit_registrations": 4,
+        "zernio_analytics_status": None,
+        "zernio_api_errors": None,
+        "zernio_failed_posts": None,
+        "zernio_status": "not_configured",
+    }
 
 
 def test_collect_plausible_status_queries_configured_site(monkeypatch):
