@@ -25,6 +25,7 @@ DEFAULT_ZERNIO_BASE_URL = "https://zernio.com/api/v1"
 DEFAULT_ZERNIO_LOOKBACK_HOURS = 72
 DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
 DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
+DEFAULT_FOLLOWER_DROP_ALERT_THRESHOLD = 10
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 PLAUSIBLE_FUNNEL_EVENTS = (
@@ -83,13 +84,28 @@ def latest_json_snapshot(history_dir: Path) -> dict[str, Any] | None:
 
 
 def latest_instagram_followers(twy_root: Path) -> dict[str, Any] | None:
-    snapshot = latest_json_snapshot(twy_root / "announce/data/instagram/history")
-    if not snapshot:
+    history_dir = twy_root / "announce/data/instagram/history"
+    snapshots: list[dict[str, Any]] = []
+    for path in sorted(history_dir.glob("*.json"), reverse=True):
+        try:
+            data = read_json(path)
+        except Exception:
+            continue
+        count = data.get("follower_count")
+        if count is None:
+            continue
+        snapshots.append({"count": int(count), "snapshot_date": path.stem})
+        if len(snapshots) == 2:
+            break
+    if not snapshots:
         return None
-    count = snapshot["data"].get("follower_count")
-    if count is None:
-        return None
-    return {"count": int(count), "snapshot_date": snapshot["date"]}
+    latest = snapshots[0]
+    if len(snapshots) > 1:
+        previous = snapshots[1]
+        latest["previous_count"] = previous["count"]
+        latest["previous_snapshot_date"] = previous["snapshot_date"]
+        latest["delta_since_previous"] = latest["count"] - previous["count"]
+    return latest
 
 
 def latest_email_subscribers(twy_root: Path) -> dict[str, Any] | None:
@@ -728,6 +744,7 @@ def warning_events(
     snapshot: dict[str, Any],
     *,
     token_warning_hours: int = DEFAULT_ZERNIO_TOKEN_WARNING_HOURS,
+    follower_drop_threshold: int = DEFAULT_FOLLOWER_DROP_ALERT_THRESHOLD,
 ) -> list[dict[str, str]]:
     events: list[dict[str, str]] = []
     zernio = snapshot.get("zernio") or {}
@@ -785,6 +802,27 @@ def warning_events(
                 "text": (
                     ":warning: TWY social growth: Plausible funnel collection "
                     f"failed for {site_id}: {error}"
+                ),
+            }
+        )
+    followers = ((snapshot.get("instagram") or {}).get("followers") or {})
+    delta = followers.get("delta_since_previous")
+    if (
+        follower_drop_threshold > 0
+        and isinstance(delta, int)
+        and delta <= -follower_drop_threshold
+    ):
+        count = followers.get("count")
+        previous_count = followers.get("previous_count")
+        snapshot_date = followers.get("snapshot_date") or "unknown date"
+        previous_date = followers.get("previous_snapshot_date") or "unknown prior date"
+        events.append(
+            {
+                "key": f"instagram_follower_drop:{snapshot_date}:{previous_date}:{delta}",
+                "text": (
+                    ":warning: TWY social growth: Instagram followers dropped "
+                    f"by {abs(delta)} from {previous_count} to {count} "
+                    f"({previous_date} -> {snapshot_date}, threshold {follower_drop_threshold})."
                 ),
             }
         )
@@ -859,6 +897,11 @@ def main() -> int:
         type=int,
         default=DEFAULT_ZERNIO_TOKEN_WARNING_HOURS,
     )
+    parser.add_argument(
+        "--follower-drop-threshold",
+        type=int,
+        default=DEFAULT_FOLLOWER_DROP_ALERT_THRESHOLD,
+    )
     args = parser.parse_args()
 
     load_env()
@@ -880,6 +923,7 @@ def main() -> int:
         events = warning_events(
             snapshot,
             token_warning_hours=args.token_warning_hours,
+            follower_drop_threshold=args.follower_drop_threshold,
         )
         for event in events:
             print(f"[DRY RUN alert] {event['text']}")
@@ -894,6 +938,7 @@ def main() -> int:
     events = warning_events(
         snapshot,
         token_warning_hours=args.token_warning_hours,
+        follower_drop_threshold=args.follower_drop_threshold,
     )
     alert_result = post_new_warning_events(
         events,

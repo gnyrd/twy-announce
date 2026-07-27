@@ -104,6 +104,9 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
     assert snapshot["instagram"]["followers"] == {
         "count": 2303,
         "snapshot_date": "2026-07-27",
+        "previous_count": 2305,
+        "previous_snapshot_date": "2026-07-26",
+        "delta_since_previous": -2,
     }
     assert snapshot["email"]["subscribers"] == {
         "count": 921,
@@ -502,6 +505,36 @@ def test_warning_events_include_plausible_collection_errors():
     assert "Plausible funnel collection failed" in events[0]["text"]
     assert "habit.tiffanywoodyoga.com" in events[0]["text"]
     assert "401 invalid" in events[0]["text"]
+
+
+def test_warning_events_include_significant_follower_drop():
+    snapshot = {
+        "captured_at": "2026-07-27T20:00:00Z",
+        "instagram": {
+            "followers": {
+                "count": 2290,
+                "snapshot_date": "2026-07-27",
+                "previous_count": 2303,
+                "previous_snapshot_date": "2026-07-26",
+                "delta_since_previous": -13,
+            },
+            "zernio_account": {},
+        },
+        "zernio": {},
+    }
+
+    events = social_growth.warning_events(
+        snapshot,
+        token_warning_hours=48,
+        follower_drop_threshold=10,
+    )
+
+    assert [event["key"] for event in events] == [
+        "instagram_follower_drop:2026-07-27:2026-07-26:-13"
+    ]
+    assert "Instagram followers dropped by 13" in events[0]["text"]
+    assert "2303 to 2290" in events[0]["text"]
+    assert "threshold 10" in events[0]["text"]
 
 
 def test_post_new_warning_events_records_sent_keys_and_skips_repeats(tmp_path):
