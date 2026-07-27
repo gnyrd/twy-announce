@@ -972,9 +972,18 @@ def run_suppression_setup_and_test(
     now: datetime | None = None,
     sleep_fn: Callable[[float], None],
     stats_attempts: int = 30,
+    contact_membership_attempts: int = 30,
+    contact_membership_poll_seconds: float = 5.0,
 ) -> dict[str, Any]:
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     _validate_setup_approval(plan, approval, current)
+    if (
+        contact_membership_attempts < 1
+        or contact_membership_poll_seconds <= 0
+    ):
+        raise SuppressionTestSafetyError(
+            "contact membership polling bounds are invalid"
+        )
     if plan.get("schema_version") != 2:
         raise SuppressionTestSafetyError(
             "setup plan schema is not supported"
@@ -1089,11 +1098,27 @@ def run_suppression_setup_and_test(
         ],
     )
     api.wait_contact_job(job_id, timeout_s=300)
-    contacts = api.list_contacts(list_id)
-    if {
-        _normalized_email(contact.get("email"))
-        for contact in contacts
-    } != {recipient, control_recipient} or len(contacts) != 2:
+    expected_members = {recipient, control_recipient}
+    membership_is_exact = False
+    for attempt in range(contact_membership_attempts):
+        contacts = api.list_contacts(list_id)
+        contact_emails = {
+            _normalized_email(contact.get("email"))
+            for contact in contacts
+        }
+        if (
+            not contact_emails.issubset(expected_members)
+            or len(contact_emails) != len(contacts)
+        ):
+            raise SuppressionTestSafetyError(
+                "temporary proof list membership is not exact"
+            )
+        if contact_emails == expected_members and len(contacts) == 2:
+            membership_is_exact = True
+            break
+        if attempt + 1 < contact_membership_attempts:
+            sleep_fn(contact_membership_poll_seconds)
+    if not membership_is_exact:
         raise SuppressionTestSafetyError(
             "temporary proof list membership is not exact"
         )

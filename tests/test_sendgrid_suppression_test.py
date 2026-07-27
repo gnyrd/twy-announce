@@ -713,6 +713,74 @@ def test_setup_rejects_unexpected_post_upsert_membership(tmp_path):
     assert not any(call[0] == "add_group_suppressions" for call in api.calls)
 
 
+def test_setup_waits_for_delayed_exact_membership_visibility(tmp_path):
+    class DelayedMembershipAPI(FakeSuppressionAPI):
+        def __init__(self):
+            super().__init__()
+            self.membership_reads = 0
+
+        def list_contacts(self, list_id):
+            self.membership_reads += 1
+            if self.membership_reads <= 2:
+                self.calls.append(("list_contacts", list_id))
+                return []
+            return super().list_contacts(list_id)
+
+    api = DelayedMembershipAPI()
+    plan = setup_plan_for()
+    sleeps = []
+
+    result = run_suppression_setup_and_test(
+        api,
+        plan,
+        setup_approval_for(plan),
+        EvidenceStore(tmp_path / "evidence"),
+        now=NOW,
+        sleep_fn=sleeps.append,
+        stats_attempts=1,
+        contact_membership_attempts=3,
+    )
+
+    assert result["stats"]["requests"] == 1
+    assert api.membership_reads >= 3
+    assert sleeps[:2] == [5.0, 5.0]
+
+
+def test_setup_membership_visibility_timeout_is_bounded_and_fails_closed(
+    tmp_path,
+):
+    class InvisibleMembershipAPI(FakeSuppressionAPI):
+        def list_contacts(self, list_id):
+            self.calls.append(("list_contacts", list_id))
+            return []
+
+    api = InvisibleMembershipAPI()
+    plan = setup_plan_for()
+    sleeps = []
+
+    with pytest.raises(SuppressionTestSafetyError, match="membership"):
+        run_suppression_setup_and_test(
+            api,
+            plan,
+            setup_approval_for(plan),
+            EvidenceStore(tmp_path / "evidence"),
+            now=NOW,
+            sleep_fn=sleeps.append,
+            stats_attempts=1,
+            contact_membership_attempts=3,
+        )
+
+    assert sleeps == [5.0, 5.0]
+    assert not any(
+        call[0] in {
+            "add_group_suppressions",
+            "create_single_send",
+            "schedule_single_send",
+        }
+        for call in api.calls
+    )
+
+
 @pytest.mark.parametrize("failure_point", ["wait_contact_job", "create_single_send"])
 def test_partial_setup_persists_digest_locked_recovery_cleanup(
     tmp_path,
