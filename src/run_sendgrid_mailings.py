@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         period = f"{year:04d}_{month:02d}"
         reports[period] = report
         for purpose, item in report.items():
-            if item["status"] in {"missing", "overdue"}:
+            if item["status"] in {"missing", "overdue", "unexpected"}:
                 problems.append(
                     f"{period}: {purpose}: {item['status']}"
                 )

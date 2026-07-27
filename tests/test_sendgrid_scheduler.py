@@ -29,10 +29,58 @@ class FakeCampaigns:
         }
 
 
-def test_scheduler_plans_every_future_mailing():
+def test_scheduler_keeps_draft_editable_before_scheduling_window():
+    campaigns = FakeCampaigns({
+        MailingPurpose.MONTHLY: "draft",
+    })
+    campaigns.expected_purposes = lambda: [MailingPurpose.MONTHLY]
+
+    results = schedule_month(
+        campaigns=campaigns,
+        year=2026,
+        month=8,
+        class_date=date(2026, 8, 8),
+        now=datetime(2026, 8, 2, 15, 38, tzinfo=timezone.utc),
+    )
+
+    assert campaigns.calls == []
+    assert results["Monthly"] == {
+        "id": "Monthly",
+        "status": "ready",
+        "provider_status": "draft",
+        "schedule_at": "2026-08-02T15:39:00+00:00",
+        "send_at": "2026-08-03T15:39:00+00:00",
+    }
+
+
+def test_scheduler_schedules_automatically_at_window_boundary():
+    campaigns = FakeCampaigns({
+        MailingPurpose.MONTHLY: "draft",
+    })
+    campaigns.expected_purposes = lambda: [MailingPurpose.MONTHLY]
+
+    results = schedule_month(
+        campaigns=campaigns,
+        year=2026,
+        month=8,
+        class_date=date(2026, 8, 8),
+        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+    )
+
+    assert campaigns.calls == [
+        (
+            MailingPurpose.MONTHLY,
+            datetime(2026, 8, 3, 15, 39, tzinfo=timezone.utc),
+        ),
+    ]
+    assert results["Monthly"]["status"] == "scheduled"
+
+
+def test_scheduler_applies_window_to_every_recurring_mailing():
     campaigns = FakeCampaigns({
         purpose: "draft" for purpose in MailingPurpose
     })
+
     results = schedule_month(
         campaigns=campaigns,
         year=2026,
@@ -40,8 +88,28 @@ def test_scheduler_plans_every_future_mailing():
         class_date=date(2026, 8, 8),
         now=datetime(2026, 8, 1, tzinfo=timezone.utc),
     )
-    assert len(campaigns.calls) == 7
-    assert {item["status"] for item in results.values()} == {"scheduled"}
+
+    assert campaigns.calls == []
+    assert {item["status"] for item in results.values()} == {"ready"}
+
+
+def test_scheduler_rejects_unexpected_provider_state_before_window():
+    campaigns = FakeCampaigns({
+        MailingPurpose.MONTHLY: "canceled",
+    })
+    campaigns.expected_purposes = lambda: [MailingPurpose.MONTHLY]
+
+    results = schedule_month(
+        campaigns=campaigns,
+        year=2026,
+        month=8,
+        class_date=date(2026, 8, 8),
+        now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+
+    assert campaigns.calls == []
+    assert results["Monthly"]["status"] == "unexpected"
+    assert results["Monthly"]["provider_status"] == "canceled"
 
 
 def test_scheduler_handles_monthly_only_without_a_habit_class():
@@ -53,7 +121,7 @@ def test_scheduler_handles_monthly_only_without_a_habit_class():
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
     )
 
     assert set(results) == {"Monthly"}

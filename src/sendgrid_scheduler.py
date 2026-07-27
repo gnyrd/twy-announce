@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sendgrid_mailings import MailingPurpose, mailing_schedule
+
+
+SCHEDULING_WINDOW = timedelta(hours=24)
 
 
 def schedule_month(
@@ -39,6 +42,24 @@ def schedule_month(
                     "triggered" if status == "triggered" else "overdue"
                 ),
                 "provider_status": status,
+                "send_at": target.isoformat(),
+            }
+            continue
+
+        schedule_at = target - SCHEDULING_WINDOW
+        if current < schedule_at:
+            provider_status = single_send.get("status")
+            if provider_status == "draft":
+                status = "ready"
+            elif provider_status == "scheduled":
+                status = "scheduled"
+            else:
+                status = "unexpected"
+            results[purpose.value] = {
+                "id": single_send.get("id"),
+                "status": status,
+                "provider_status": provider_status,
+                "schedule_at": schedule_at.isoformat(),
                 "send_at": target.isoformat(),
             }
             continue
