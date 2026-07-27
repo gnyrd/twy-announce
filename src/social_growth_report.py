@@ -26,6 +26,7 @@ DEFAULT_ZERNIO_LOOKBACK_HOURS = 72
 DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
 DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
+DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 
 
 def iso_z(value: datetime) -> str:
@@ -301,16 +302,75 @@ def collect_zernio_recent_status(
     }
 
 
-def collect_plausible_status() -> dict[str, Any]:
-    if os.getenv("PLAUSIBLE_API_KEY") and os.getenv("PLAUSIBLE_SITE_ID"):
+def collect_plausible_status(
+    *,
+    captured_at: datetime,
+    post_query: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    api_key = os.getenv("PLAUSIBLE_API_KEY", "").strip()
+    site_id = os.getenv("PLAUSIBLE_SITE_ID", "").strip()
+    if not api_key or not site_id:
         return {
-            "status": "configured_not_collected",
-            "reason": "Plausible API collection is not implemented in this collector yet",
+            "status": "not_configured",
+            "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
         }
-    return {
-        "status": "not_configured",
-        "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
+    if post_query is None:
+        base_url = os.getenv("PLAUSIBLE_BASE_URL", DEFAULT_PLAUSIBLE_BASE_URL).rstrip("/")
+
+        def post_query(body: dict[str, Any]) -> dict[str, Any]:
+            response = requests.post(
+                f"{base_url}/api/v2/query",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=30,
+            )
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"text": response.text[:200]}
+            if response.status_code >= 400:
+                raise RuntimeError(f"Plausible query failed: {response.status_code} {payload}")
+            return payload
+
+    queries = {
+        "day": "day",
+        "last_7_days": "7d",
+        "last_30_days": "30d",
     }
+    results: dict[str, Any] = {}
+    try:
+        for label, date_range in queries.items():
+            payload = post_query(
+                {
+                    "site_id": site_id,
+                    "metrics": ["visitors", "visits", "pageviews", "events"],
+                    "date_range": date_range,
+                }
+            )
+            row = (payload.get("results") or [{}])[0]
+            metrics = row.get("metrics") or []
+            results[label] = {
+                "visitors": metrics[0] if len(metrics) > 0 else None,
+                "visits": metrics[1] if len(metrics) > 1 else None,
+                "pageviews": metrics[2] if len(metrics) > 2 else None,
+                "events": metrics[3] if len(metrics) > 3 else None,
+                "query_date_range": (payload.get("query") or {}).get("date_range"),
+            }
+        return {
+            "status": "ok",
+            "site_id": site_id,
+            "captured_at": iso_z(captured_at),
+            "metrics": results,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "site_id": site_id,
+            "error": str(exc),
+        }
 
 
 def collect_socialblade_status() -> dict[str, Any]:
@@ -377,7 +437,7 @@ def collect_snapshot(
             lookahead_hours=zernio_lookahead_hours,
         ),
         "landing_page": {
-            "plausible": collect_plausible_status(),
+            "plausible": collect_plausible_status(captured_at=captured_at),
         },
         "external_benchmarks": {
             "socialblade": collect_socialblade_status(),

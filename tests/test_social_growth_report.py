@@ -57,7 +57,9 @@ def create_marvy_db(path):
     conn.close()
 
 
-def test_collect_snapshot_combines_available_growth_sources(tmp_path):
+def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatch):
+    monkeypatch.delenv("PLAUSIBLE_API_KEY", raising=False)
+    monkeypatch.delenv("PLAUSIBLE_SITE_ID", raising=False)
     twy_root = tmp_path
     data_root = tmp_path / "data"
     captured_at = datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc)
@@ -123,6 +125,55 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path):
     }
     assert snapshot["landing_page"]["plausible"]["status"] == "not_configured"
     assert snapshot["external_benchmarks"]["socialblade"]["status"] == "not_configured"
+
+
+def test_collect_plausible_status_queries_configured_site(monkeypatch):
+    monkeypatch.setenv("PLAUSIBLE_API_KEY", "test-key")
+    monkeypatch.setenv("PLAUSIBLE_SITE_ID", "habit.tiffanywoodyoga.com")
+    calls = []
+
+    def fake_post_query(body):
+        calls.append(body)
+        return {
+            "results": [{"metrics": [5, 5, 8, 8], "dimensions": []}],
+            "query": {"date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"]},
+        }
+
+    status = social_growth.collect_plausible_status(
+        captured_at=datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc),
+        post_query=fake_post_query,
+    )
+
+    assert status["status"] == "ok"
+    assert status["site_id"] == "habit.tiffanywoodyoga.com"
+    assert status["metrics"]["day"] == {
+        "visitors": 5,
+        "visits": 5,
+        "pageviews": 8,
+        "events": 8,
+        "query_date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"],
+    }
+    assert [call["date_range"] for call in calls] == ["day", "7d", "30d"]
+    assert all(call["site_id"] == "habit.tiffanywoodyoga.com" for call in calls)
+
+
+def test_collect_plausible_status_reports_api_errors(monkeypatch):
+    monkeypatch.setenv("PLAUSIBLE_API_KEY", "test-key")
+    monkeypatch.setenv("PLAUSIBLE_SITE_ID", "habit.tiffanywoodyoga.com")
+
+    def fake_post_query(body):
+        raise RuntimeError("Plausible query failed: 401 invalid")
+
+    status = social_growth.collect_plausible_status(
+        captured_at=datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc),
+        post_query=fake_post_query,
+    )
+
+    assert status == {
+        "status": "error",
+        "site_id": "habit.tiffanywoodyoga.com",
+        "error": "Plausible query failed: 401 invalid",
+    }
 
 
 def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):
