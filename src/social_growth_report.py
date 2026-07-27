@@ -35,6 +35,13 @@ PLAUSIBLE_FUNNEL_EVENTS = (
     "Habit Signup Error",
     "Habit Membership Click",
 )
+PLAUSIBLE_FUNNEL_DIMENSIONS = (
+    "event:name",
+    "event:props:source",
+    "event:props:content",
+    "event:props:page_state",
+    "event:props:path",
+)
 ZERNIO_ANALYTICS_METRICS = (
     "impressions",
     "reach",
@@ -536,20 +543,33 @@ def collect_plausible_status(
                     "site_id": site_id,
                     "metrics": ["events"],
                     "date_range": date_range,
-                    "dimensions": ["event:name"],
+                    "dimensions": list(PLAUSIBLE_FUNNEL_DIMENSIONS),
                     "filters": [["is", "event:name", list(PLAUSIBLE_FUNNEL_EVENTS)]],
-                    "pagination": {"limit": len(PLAUSIBLE_FUNNEL_EVENTS)},
+                    "pagination": {"limit": 100},
                 }
             )
             event_counts = {event_name: 0 for event_name in PLAUSIBLE_FUNNEL_EVENTS}
+            vector_rows: list[dict[str, Any]] = []
             for event_row in event_payload.get("results") or []:
                 dimensions = event_row.get("dimensions") or []
                 event_name = dimensions[0] if dimensions else ""
                 if event_name not in event_counts:
                     continue
                 event_metrics = event_row.get("metrics") or []
-                event_counts[event_name] = event_metrics[0] if event_metrics else 0
+                event_count = event_metrics[0] if event_metrics else 0
+                event_counts[event_name] += event_count
+                vector_rows.append(
+                    {
+                        "event": event_name,
+                        "source": dimensions[1] if len(dimensions) > 1 else "",
+                        "content": dimensions[2] if len(dimensions) > 2 else "",
+                        "page_state": dimensions[3] if len(dimensions) > 3 else "",
+                        "path": dimensions[4] if len(dimensions) > 4 else "",
+                        "events": event_count,
+                    }
+                )
             results[label]["funnel_events"] = event_counts
+            results[label]["funnel_by_vector"] = vector_rows
         return {
             "status": "ok",
             "site_id": site_id,

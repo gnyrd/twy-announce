@@ -134,11 +134,21 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
 
     def fake_post_query(body):
         calls.append(body)
-        if body.get("dimensions") == ["event:name"]:
+        if body.get("dimensions") == list(social_growth.PLAUSIBLE_FUNNEL_DIMENSIONS):
             return {
                 "results": [
-                    {"metrics": [2], "dimensions": ["Habit Register Click"]},
-                    {"metrics": [1], "dimensions": ["Habit Signup Success"]},
+                    {
+                        "metrics": [2],
+                        "dimensions": ["Habit Register Click", "instagram-bio", "bio", "pre_class", "/ig"],
+                    },
+                    {
+                        "metrics": [3],
+                        "dimensions": ["Habit Register Click", "instagram", "reel", "pre_class", "/ig"],
+                    },
+                    {
+                        "metrics": [1],
+                        "dimensions": ["Habit Signup Success", "instagram-bio", "bio", "pre_class", "/ig"],
+                    },
                 ],
                 "query": {"date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"]},
             }
@@ -161,20 +171,51 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
         "events": 8,
         "query_date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"],
         "funnel_events": {
-            "Habit Register Click": 2,
+            "Habit Register Click": 5,
             "Habit Newsletter Open": 0,
             "Habit Signup Submit": 0,
             "Habit Signup Success": 1,
             "Habit Signup Error": 0,
             "Habit Membership Click": 0,
         },
+        "funnel_by_vector": [
+            {
+                "event": "Habit Register Click",
+                "source": "instagram-bio",
+                "content": "bio",
+                "page_state": "pre_class",
+                "path": "/ig",
+                "events": 2,
+            },
+            {
+                "event": "Habit Register Click",
+                "source": "instagram",
+                "content": "reel",
+                "page_state": "pre_class",
+                "path": "/ig",
+                "events": 3,
+            },
+            {
+                "event": "Habit Signup Success",
+                "source": "instagram-bio",
+                "content": "bio",
+                "page_state": "pre_class",
+                "path": "/ig",
+                "events": 1,
+            },
+        ],
     }
     assert [call["date_range"] for call in calls] == ["day", "day", "7d", "7d", "30d", "30d"]
     assert all(call["site_id"] == "habit.tiffanywoodyoga.com" for call in calls)
-    event_calls = [call for call in calls if call.get("dimensions") == ["event:name"]]
+    event_calls = [
+        call
+        for call in calls
+        if call.get("dimensions") == list(social_growth.PLAUSIBLE_FUNNEL_DIMENSIONS)
+    ]
     assert len(event_calls) == 3
     assert all(call["metrics"] == ["events"] for call in event_calls)
     assert all(call["filters"][0][:2] == ["is", "event:name"] for call in event_calls)
+    assert all(call["pagination"] == {"limit": 100} for call in event_calls)
 
 
 def test_collect_plausible_status_reports_api_errors(monkeypatch):
