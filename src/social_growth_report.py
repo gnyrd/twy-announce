@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""Collect daily social growth evidence for TWY."""
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+import time
+from typing import Any
+
+import requests
+from twy_paths import data_root as default_data_root
+from twy_paths import load_env
+from twy_paths import twy_root as default_twy_root
+
+
+DEFAULT_ZERNIO_BASE_URL = "https://zernio.com/api/v1"
+DEFAULT_ZERNIO_LOOKBACK_HOURS = 72
+DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
+
+
+def iso_z(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def parse_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def read_json(path: Path) -> Any:
+    return json.loads(path.read_text())
+
+
+def latest_json_snapshot(history_dir: Path) -> dict[str, Any] | None:
+    for path in sorted(history_dir.glob("*.json"), reverse=True):
+        try:
+            return {"date": path.stem, "data": read_json(path)}
+        except Exception:
+            continue
+    return None
+
+
+def latest_instagram_followers(twy_root: Path) -> dict[str, Any] | None:
+    snapshot = latest_json_snapshot(twy_root / "announce/data/instagram/history")
+    if not snapshot:
+        return None
+    count = snapshot["data"].get("follower_count")
+    if count is None:
+        return None
+    return {"count": int(count), "snapshot_date": snapshot["date"]}
+
+
+def latest_email_subscribers(twy_root: Path) -> dict[str, Any] | None:
+    snapshot = latest_json_snapshot(twy_root / "announce/data/email/history")
+    if not snapshot:
+        return None
+    data = snapshot["data"]
+    count = data.get("subscriber_count")
+    if count is None:
+        return None
+    return {
+        "count": int(count),
+        "list_name": data.get("list_name"),
+        "snapshot_date": snapshot["date"],
+    }
+
+
+def next_habit_event(data_root: Path, captured_at: datetime) -> dict[str, Any] | None:
+    db_path = data_root / "marvy.db"
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT id, event_name, event_start_datetime, number_of_registrations
+            FROM events
+            WHERE (event_name LIKE 'Habit:%' OR event_name = 'The Yoga Habit')
+              AND is_cancelled = 0
+              AND event_start_datetime >= :now
+            ORDER BY event_start_datetime
+            LIMIT 1
+            """,
+            {"now": iso_z(captured_at)},
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "name": row["event_name"],
+        "start": row["event_start_datetime"],
+        "registrations": row["number_of_registrations"],
+    }
+
+
+def json_length(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    try:
+        payload = read_json(path)
+    except Exception:
+        return None
+    if isinstance(payload, list):
+        return len(payload)
+    return None
+
+
+def queue_snapshot(twy_root: Path) -> dict[str, Any]:
+    state_dir = twy_root / "clips/state"
+    scheduler_state_path = state_dir / "ig_scheduler_state.json"
+    scheduler_state = {}
+    if scheduler_state_path.exists():
+        try:
+            scheduler_state = read_json(scheduler_state_path)
+        except Exception:
+            scheduler_state = {}
+    return {
+        "ig_clip_queue": json_length(state_dir / "ig_queue.json"),
+        "ig_quote_queue": json_length(state_dir / "ig_quote_queue.json"),
+        "ig_history": json_length(state_dir / "ig_history.json"),
+        "clip_pool_warning_active": scheduler_state.get("clip_pool_warning_active"),
+        "clip_pool_warning_posted_to_slack": scheduler_state.get("clip_pool_warning_posted_to_slack"),
+    }
+
+
+def zernio_fetcher_from_env() -> Callable[[str], dict[str, Any]] | None:
+    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
+    if not api_key:
+        return None
+    base_url = os.getenv("ZERNIO_BASE_URL", DEFAULT_ZERNIO_BASE_URL).rstrip("/")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def fetch(post_id: str) -> dict[str, Any]:
+        url = f"{base_url}/posts/{post_id}"
+        last_payload: dict[str, Any] = {}
+        for attempt in range(3):
+            response = requests.get(url, headers=headers, timeout=30)
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"text": response.text[:200]}
+            last_payload = payload
+            if response.status_code == 429:
+                time.sleep(8 + attempt * 4)
+                continue
+            if response.status_code >= 400:
+                raise RuntimeError(f"Zernio GET /posts/{post_id} failed: {response.status_code} {payload}")
+            return payload
+        raise RuntimeError(f"Zernio GET /posts/{post_id} rate limited: {last_payload}")
+
+    return fetch
+
+
+def zernio_account_health_from_env() -> dict[str, Any] | None:
+    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
+    account_id = os.getenv("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
+    if not api_key or not account_id:
+        return None
+    base_url = os.getenv("ZERNIO_BASE_URL", DEFAULT_ZERNIO_BASE_URL).rstrip("/")
+    response = requests.get(
+        f"{base_url}/accounts/{account_id}/health",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    permissions = payload.get("permissions") or {}
+    token_status = payload.get("tokenStatus") or {}
+    return {
+        "account_id": payload.get("accountId"),
+        "username": payload.get("username"),
+        "display_name": payload.get("displayName"),
+        "platform": payload.get("platform"),
+        "status": payload.get("status"),
+        "can_post": permissions.get("canPost"),
+        "can_fetch_analytics": permissions.get("canFetchAnalytics"),
+        "missing_required": permissions.get("missingRequired"),
+        "token_status": {
+            "valid": token_status.get("valid"),
+            "needs_refresh": token_status.get("needsRefresh"),
+            "expires_at": token_status.get("expiresAt"),
+        },
+    }
+
+
+def zernio_post_row(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    post = payload.get("post") or payload
+    platforms = post.get("platforms") or []
+    platform = platforms[0] if platforms and isinstance(platforms[0], dict) else {}
+    platform_specific = platform.get("platformSpecificData") or {}
+    return {
+        "scheduled_for": entry.get("scheduled_for"),
+        "post_type": entry.get("post_type"),
+        "posted_for_class": entry.get("posted_for_class"),
+        "class_name": entry.get("class_name"),
+        "clip_name": entry.get("clip_name"),
+        "zernio_post_id": entry.get("zernio_post_id"),
+        "title": post.get("title"),
+        "post_status": post.get("status"),
+        "platform_status": platform.get("status"),
+        "content_type": platform_specific.get("contentType"),
+        "platform_post_url": platform.get("platformPostUrl"),
+        "published_at": platform.get("publishedAt"),
+        "publish_attempts": platform.get("publishAttempts"),
+        "error": platform.get("error") or post.get("error") or post.get("lastError") or post.get("failureReason"),
+        "content": (post.get("content") or "").replace("\n", " ")[:280],
+    }
+
+
+def collect_zernio_recent_status(
+    *,
+    history_path: Path,
+    captured_at: datetime,
+    fetch_post: Callable[[str], dict[str, Any]] | None,
+    lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
+    lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
+) -> dict[str, Any]:
+    if fetch_post is None:
+        return {
+            "status": "not_configured",
+            "reason": "ZERNIO_API_KEY is not configured",
+        }
+    if not history_path.exists():
+        return {
+            "status": "missing_history",
+            "history_path": str(history_path),
+        }
+    history = read_json(history_path)
+    window_start = captured_at - timedelta(hours=lookback_hours)
+    window_end = captured_at + timedelta(hours=lookahead_hours)
+    rows: list[dict[str, Any]] = []
+    api_errors: list[dict[str, Any]] = []
+    for entry in history:
+        post_id = entry.get("zernio_post_id")
+        scheduled_for = entry.get("scheduled_for")
+        if not post_id or not scheduled_for:
+            continue
+        try:
+            scheduled_at = parse_datetime(scheduled_for)
+        except ValueError:
+            continue
+        if scheduled_at < window_start or scheduled_at > window_end:
+            continue
+        try:
+            payload = fetch_post(post_id)
+        except Exception as exc:
+            api_errors.append(
+                {
+                    "zernio_post_id": post_id,
+                    "scheduled_for": scheduled_for,
+                    "error": str(exc),
+                }
+            )
+            continue
+        rows.append(zernio_post_row(entry, payload))
+    failed = [
+        row
+        for row in rows
+        if row.get("post_status") == "failed" or row.get("platform_status") == "failed"
+    ]
+    pending = [
+        row
+        for row in rows
+        if row.get("post_status") == "scheduled" or row.get("platform_status") == "pending"
+    ]
+    return {
+        "status": "ok",
+        "window_start": iso_z(window_start),
+        "window_end": iso_z(window_end),
+        "queried_count": len(rows),
+        "api_error_count": len(api_errors),
+        "api_errors": api_errors,
+        "by_post_status": dict(Counter(row.get("post_status") for row in rows)),
+        "by_platform_status": dict(Counter(row.get("platform_status") for row in rows)),
+        "by_content_type": dict(Counter(row.get("content_type") for row in rows)),
+        "failed_count": len(failed),
+        "failed": failed,
+        "pending_count": len(pending),
+        "pending": pending,
+    }
+
+
+def collect_plausible_status() -> dict[str, Any]:
+    if os.getenv("PLAUSIBLE_API_KEY") and os.getenv("PLAUSIBLE_SITE_ID"):
+        return {
+            "status": "configured_not_collected",
+            "reason": "Plausible API collection is not implemented in this collector yet",
+        }
+    return {
+        "status": "not_configured",
+        "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
+    }
+
+
+def collect_socialblade_status() -> dict[str, Any]:
+    export_path = os.getenv("SOCIALBLADE_EXPORT_PATH", "").strip()
+    if not export_path:
+        return {
+            "status": "not_configured",
+            "required": ["SOCIALBLADE_EXPORT_PATH or API integration"],
+        }
+    path = Path(export_path)
+    if not path.exists():
+        return {
+            "status": "missing_export",
+            "path": str(path),
+        }
+    try:
+        payload = read_json(path)
+    except Exception as exc:
+        return {
+            "status": "invalid_export",
+            "path": str(path),
+            "error": str(exc),
+        }
+    return {
+        "status": "loaded_export",
+        "path": str(path),
+        "data": payload,
+    }
+
+
+def collect_snapshot(
+    *,
+    captured_at: datetime,
+    twy_root: Path,
+    data_root: Path,
+    zernio_fetch_post: Callable[[str], dict[str, Any]] | None,
+    zernio_account_health: Callable[[], dict[str, Any] | None] | None,
+    zernio_lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
+    zernio_lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
+) -> dict[str, Any]:
+    try:
+        account_health = zernio_account_health() if zernio_account_health else None
+    except Exception as exc:
+        account_health = {"status": "error", "error": str(exc)}
+    return {
+        "date": captured_at.date().isoformat(),
+        "captured_at": iso_z(captured_at),
+        "instagram": {
+            "followers": latest_instagram_followers(twy_root),
+            "zernio_account": account_health,
+        },
+        "email": {
+            "subscribers": latest_email_subscribers(twy_root),
+        },
+        "habit": {
+            "next_event": next_habit_event(data_root, captured_at),
+        },
+        "queues": queue_snapshot(twy_root),
+        "zernio": collect_zernio_recent_status(
+            history_path=twy_root / "clips/state/ig_history.json",
+            captured_at=captured_at,
+            fetch_post=zernio_fetch_post,
+            lookback_hours=zernio_lookback_hours,
+            lookahead_hours=zernio_lookahead_hours,
+        ),
+        "landing_page": {
+            "plausible": collect_plausible_status(),
+        },
+        "external_benchmarks": {
+            "socialblade": collect_socialblade_status(),
+        },
+    }
+
+
+def save_snapshot(snapshot: dict[str, Any], *, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{snapshot['date']}.json"
+    path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Collect TWY social growth evidence")
+    parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing it")
+    parser.add_argument("--lookback-hours", type=int, default=DEFAULT_ZERNIO_LOOKBACK_HOURS)
+    parser.add_argument("--lookahead-hours", type=int, default=DEFAULT_ZERNIO_LOOKAHEAD_HOURS)
+    args = parser.parse_args()
+
+    load_env()
+    now = datetime.now(timezone.utc)
+    root = default_twy_root()
+    data_dir = default_data_root()
+    snapshot = collect_snapshot(
+        captured_at=now,
+        twy_root=root,
+        data_root=data_dir,
+        zernio_fetch_post=zernio_fetcher_from_env(),
+        zernio_account_health=zernio_account_health_from_env,
+        zernio_lookback_hours=args.lookback_hours,
+        zernio_lookahead_hours=args.lookahead_hours,
+    )
+    if args.dry_run:
+        print(json.dumps(snapshot, indent=2, sort_keys=True))
+        return 0
+    destination = save_snapshot(snapshot, output_dir=data_dir / "social_growth")
+    print(f"Saved social growth snapshot to {destination}")
+    zernio = snapshot.get("zernio") or {}
+    if zernio.get("failed_count"):
+        print(f"Zernio failed posts in window: {zernio['failed_count']}")
+    if zernio.get("api_error_count"):
+        print(f"Zernio API errors in window: {zernio['api_error_count']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
