@@ -134,6 +134,14 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
 
     def fake_post_query(body):
         calls.append(body)
+        if body.get("dimensions") == ["event:name"]:
+            return {
+                "results": [
+                    {"metrics": [2], "dimensions": ["Habit Register Click"]},
+                    {"metrics": [1], "dimensions": ["Habit Signup Success"]},
+                ],
+                "query": {"date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"]},
+            }
         return {
             "results": [{"metrics": [5, 5, 8, 8], "dimensions": []}],
             "query": {"date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"]},
@@ -152,9 +160,21 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
         "pageviews": 8,
         "events": 8,
         "query_date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"],
+        "funnel_events": {
+            "Habit Register Click": 2,
+            "Habit Newsletter Open": 0,
+            "Habit Signup Submit": 0,
+            "Habit Signup Success": 1,
+            "Habit Signup Error": 0,
+            "Habit Membership Click": 0,
+        },
     }
-    assert [call["date_range"] for call in calls] == ["day", "7d", "30d"]
+    assert [call["date_range"] for call in calls] == ["day", "day", "7d", "7d", "30d", "30d"]
     assert all(call["site_id"] == "habit.tiffanywoodyoga.com" for call in calls)
+    event_calls = [call for call in calls if call.get("dimensions") == ["event:name"]]
+    assert len(event_calls) == 3
+    assert all(call["metrics"] == ["events"] for call in event_calls)
+    assert all(call["filters"][0][:2] == ["is", "event:name"] for call in event_calls)
 
 
 def test_collect_plausible_status_reports_api_errors(monkeypatch):

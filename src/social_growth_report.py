@@ -27,6 +27,14 @@ DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
 DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
+PLAUSIBLE_FUNNEL_EVENTS = (
+    "Habit Register Click",
+    "Habit Newsletter Open",
+    "Habit Signup Submit",
+    "Habit Signup Success",
+    "Habit Signup Error",
+    "Habit Membership Click",
+)
 ZERNIO_ANALYTICS_METRICS = (
     "impressions",
     "reach",
@@ -523,6 +531,25 @@ def collect_plausible_status(
                 "events": metrics[3] if len(metrics) > 3 else None,
                 "query_date_range": (payload.get("query") or {}).get("date_range"),
             }
+            event_payload = post_query(
+                {
+                    "site_id": site_id,
+                    "metrics": ["events"],
+                    "date_range": date_range,
+                    "dimensions": ["event:name"],
+                    "filters": [["is", "event:name", list(PLAUSIBLE_FUNNEL_EVENTS)]],
+                    "pagination": {"limit": len(PLAUSIBLE_FUNNEL_EVENTS)},
+                }
+            )
+            event_counts = {event_name: 0 for event_name in PLAUSIBLE_FUNNEL_EVENTS}
+            for event_row in event_payload.get("results") or []:
+                dimensions = event_row.get("dimensions") or []
+                event_name = dimensions[0] if dimensions else ""
+                if event_name not in event_counts:
+                    continue
+                event_metrics = event_row.get("metrics") or []
+                event_counts[event_name] = event_metrics[0] if event_metrics else 0
+            results[label]["funnel_events"] = event_counts
         return {
             "status": "ok",
             "site_id": site_id,
