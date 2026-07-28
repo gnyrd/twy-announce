@@ -140,11 +140,111 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "landing_day_visitors": None,
         "landing_page_status": "not_configured",
         "next_habit_registrations": 4,
+        "recent_campaign_variants": [],
+        "upcoming_campaign_variants": [],
         "zernio_analytics_status": None,
         "zernio_api_errors": None,
         "zernio_failed_posts": None,
         "zernio_status": "not_configured",
     }
+
+
+def test_campaign_snapshot_groups_recent_and_upcoming_variants(tmp_path):
+    history_path = tmp_path / "clips/state/ig_history.json"
+    write_json(
+        history_path,
+        [
+            {
+                "post_type": "reel",
+                "posted_for_class": "2026-07-20",
+                "scheduled_for": "2026-07-19T17:30:00-06:00",
+                "zernio_post_id": "old",
+                "campaign": {
+                    "campaign": "habit_entry_regular_reels",
+                    "ctaVariant": "older",
+                    "habitTargetDate": "2026-08-08",
+                },
+            },
+            {
+                "post_type": "reel",
+                "posted_for_class": "2026-08-04",
+                "scheduled_for": "2026-08-03T08:00:00-06:00",
+                "zernio_post_id": "recent1",
+                "campaign": {
+                    "campaign": "habit_entry_regular_reels",
+                    "ctaVariant": "steady_first_step",
+                    "habitTargetDate": "2026-08-08",
+                },
+            },
+            {
+                "post_type": "reel",
+                "posted_for_class": "2026-08-06",
+                "scheduled_for": "2026-08-05T08:00:00-06:00",
+                "zernio_post_id": "recent2",
+                "campaign": {
+                    "campaign": "habit_entry_regular_reels",
+                    "ctaVariant": "steady_first_step",
+                    "habitTargetDate": "2026-08-08",
+                },
+            },
+            {
+                "post_type": "reel",
+                "posted_for_class": "2026-08-10",
+                "scheduled_for": "2026-08-09T17:30:00-06:00",
+                "zernio_post_id": "upcoming1",
+                "campaign": {
+                    "campaign": "habit_entry_regular_reels",
+                    "ctaVariant": "find_out",
+                    "habitTargetDate": "2026-09-12",
+                },
+            },
+            {
+                "post_type": "story",
+                "posted_for_class": "2026-08-06",
+                "scheduled_for": "2026-08-06T06:00:00-06:00",
+                "zernio_post_id": "story1",
+            },
+        ],
+    )
+
+    snapshot = social_growth.campaign_snapshot(
+        history_path=history_path,
+        captured_at=datetime(2026, 8, 6, 18, 0, tzinfo=timezone.utc),
+    )
+
+    assert snapshot["status"] == "ok"
+    assert snapshot["post_count"] == 3
+    assert [variant["key"] for variant in snapshot["recent_variants"]] == [
+        "habit_entry_regular_reels:steady_first_step"
+    ]
+    recent = snapshot["recent_variants"][0]
+    assert recent["post_count"] == 2
+    assert recent["habitTargetDate"] == "2026-08-08"
+    assert recent["posted_for_classes"] == ["2026-08-04", "2026-08-06"]
+    assert recent["zernio_post_ids"] == ["recent1", "recent2"]
+    assert [variant["key"] for variant in snapshot["upcoming_variants"]] == [
+        "habit_entry_regular_reels:find_out"
+    ]
+    assert snapshot["upcoming_variants"][0]["post_count"] == 1
+    assert snapshot["posts"][0]["zernio_post_id"] == "recent1"
+
+
+def test_summarize_snapshot_includes_campaign_variants():
+    summary = social_growth.summarize_snapshot(
+        {
+            "campaigns": {
+                "recent_variants": [
+                    {"key": "habit_entry_regular_reels:steady_first_step"},
+                ],
+                "upcoming_variants": [
+                    {"key": "habit_entry_regular_reels:find_out"},
+                ],
+            }
+        }
+    )
+
+    assert summary["recent_campaign_variants"] == ["habit_entry_regular_reels:steady_first_step"]
+    assert summary["upcoming_campaign_variants"] == ["habit_entry_regular_reels:find_out"]
 
 
 def test_collect_plausible_status_queries_configured_site(monkeypatch):

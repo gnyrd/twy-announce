@@ -26,6 +26,8 @@ DEFAULT_ZERNIO_LOOKBACK_HOURS = 72
 DEFAULT_ZERNIO_LOOKAHEAD_HOURS = 72
 DEFAULT_ZERNIO_TOKEN_WARNING_HOURS = 48
 DEFAULT_FOLLOWER_DROP_ALERT_THRESHOLD = 10
+DEFAULT_CAMPAIGN_LOOKBACK_DAYS = 7
+DEFAULT_CAMPAIGN_LOOKAHEAD_DAYS = 14
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 PLAUSIBLE_FUNNEL_EVENTS = (
@@ -57,6 +59,7 @@ ZERNIO_ANALYTICS_METRICS = (
     "igReelsVideoViewTotalTime",
     "engagementRate",
 )
+CAMPAIGN_METADATA_KEYS = ("campaign", "ctaVariant", "habitTargetDate")
 
 
 def iso_z(value: datetime) -> str:
@@ -628,6 +631,114 @@ def collect_socialblade_status() -> dict[str, Any]:
     }
 
 
+def campaign_metadata_from_history_entry(entry: dict[str, Any]) -> dict[str, str] | None:
+    campaign = entry.get("campaign")
+    if not isinstance(campaign, dict):
+        return None
+    campaign_name = str(campaign.get("campaign") or "").strip()
+    variant = str(campaign.get("ctaVariant") or "").strip()
+    if not campaign_name or not variant:
+        return None
+    row = {
+        "campaign": campaign_name,
+        "ctaVariant": variant,
+        "habitTargetDate": str(campaign.get("habitTargetDate") or "").strip(),
+    }
+    return row
+
+
+def _append_unique(values: list[str], value: Any) -> None:
+    text = str(value or "").strip()
+    if text and text not in values:
+        values.append(text)
+
+
+def group_campaign_variants(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = f"{row['campaign']}:{row['ctaVariant']}"
+        group = grouped.setdefault(
+            key,
+            {
+                "key": key,
+                "campaign": row["campaign"],
+                "ctaVariant": row["ctaVariant"],
+                "habitTargetDate": row.get("habitTargetDate"),
+                "post_count": 0,
+                "first_scheduled_for": row["scheduled_for"],
+                "last_scheduled_for": row["scheduled_for"],
+                "posted_for_classes": [],
+                "post_types": [],
+                "zernio_post_ids": [],
+            },
+        )
+        group["post_count"] += 1
+        group["last_scheduled_for"] = row["scheduled_for"]
+        _append_unique(group["posted_for_classes"], row.get("posted_for_class"))
+        _append_unique(group["post_types"], row.get("post_type"))
+        _append_unique(group["zernio_post_ids"], row.get("zernio_post_id"))
+    return sorted(grouped.values(), key=lambda item: (item["first_scheduled_for"], item["key"]))
+
+
+def campaign_snapshot(
+    *,
+    history_path: Path,
+    captured_at: datetime,
+    lookback_days: int = DEFAULT_CAMPAIGN_LOOKBACK_DAYS,
+    lookahead_days: int = DEFAULT_CAMPAIGN_LOOKAHEAD_DAYS,
+) -> dict[str, Any]:
+    if not history_path.exists():
+        return {
+            "status": "missing_history",
+            "history_path": str(history_path),
+        }
+    window_start = captured_at - timedelta(days=lookback_days)
+    window_end = captured_at + timedelta(days=lookahead_days)
+    rows: list[dict[str, Any]] = []
+    for entry in read_json(history_path):
+        campaign = campaign_metadata_from_history_entry(entry)
+        scheduled_for = entry.get("scheduled_for")
+        if not campaign or not scheduled_for:
+            continue
+        try:
+            scheduled_at = parse_datetime(str(scheduled_for))
+        except ValueError:
+            continue
+        if scheduled_at < window_start or scheduled_at > window_end:
+            continue
+        rows.append(
+            {
+                **campaign,
+                "scheduled_for": str(scheduled_for),
+                "post_type": entry.get("post_type"),
+                "posted_for_class": entry.get("posted_for_class"),
+                "class_name": entry.get("class_name"),
+                "clip_name": entry.get("clip_name"),
+                "zernio_post_id": entry.get("zernio_post_id"),
+            }
+        )
+    rows = sorted(rows, key=lambda row: row["scheduled_for"])
+    recent = [
+        row
+        for row in rows
+        if parse_datetime(row["scheduled_for"]) <= captured_at
+    ]
+    upcoming = [
+        row
+        for row in rows
+        if parse_datetime(row["scheduled_for"]) > captured_at
+    ]
+    return {
+        "status": "ok",
+        "window_start": iso_z(window_start),
+        "window_end": iso_z(window_end),
+        "post_count": len(rows),
+        "recent_variants": group_campaign_variants(recent),
+        "upcoming_variants": group_campaign_variants(upcoming),
+        "posts": rows,
+    }
+
+
 def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     followers = (snapshot.get("instagram") or {}).get("followers") or {}
     subscribers = (snapshot.get("email") or {}).get("subscribers") or {}
@@ -638,6 +749,7 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     plausible = ((snapshot.get("landing_page") or {}).get("plausible") or {})
     day = ((plausible.get("metrics") or {}).get("day") or {})
     funnel_events = day.get("funnel_events") or {}
+    campaigns = snapshot.get("campaigns") or {}
     return {
         "instagram_followers": followers.get("count"),
         "instagram_follower_delta": followers.get("delta_since_previous"),
@@ -654,6 +766,16 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "landing_day_pageviews": day.get("pageviews"),
         "habit_register_clicks_day": funnel_events.get("Habit Register Click"),
         "habit_signup_success_day": funnel_events.get("Habit Signup Success"),
+        "recent_campaign_variants": [
+            variant.get("key")
+            for variant in campaigns.get("recent_variants") or []
+            if variant.get("key")
+        ],
+        "upcoming_campaign_variants": [
+            variant.get("key")
+            for variant in campaigns.get("upcoming_variants") or []
+            if variant.get("key")
+        ],
     }
 
 
@@ -686,6 +808,10 @@ def collect_snapshot(
             "next_event": next_habit_event(data_root, captured_at),
         },
         "queues": queue_snapshot(twy_root),
+        "campaigns": campaign_snapshot(
+            history_path=twy_root / "clips/state/ig_history.json",
+            captured_at=captured_at,
+        ),
         "zernio": collect_zernio_recent_status(
             history_path=twy_root / "clips/state/ig_history.json",
             captured_at=captured_at,
