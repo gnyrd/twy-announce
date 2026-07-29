@@ -17,7 +17,23 @@ from twy_paths import load_env
 
 DEFAULT_DAYS = 7
 MIN_POST_AGE_HOURS = 24
+MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION = 10
 SLACK_STATE_FILE = ".weekly_slack_state.json"
+
+WEBSITE_PROPERTIES = {
+    "main": {
+        "site_id": "tiffanywoodyoga.com",
+        "role": "discovery",
+    },
+    "studio": {
+        "site_id": "studio.tiffanywoodyoga.com",
+        "role": "customer_service",
+    },
+    "habit": {
+        "site_id": "habit.tiffanywoodyoga.com",
+        "role": "campaign_conversion",
+    },
+}
 
 
 def parse_date(value: str) -> date:
@@ -29,7 +45,6 @@ def read_json(path: Path) -> Any:
 
 
 def load_daily_snapshots(snapshot_dir: Path, *, week_end: date, days: int = DEFAULT_DAYS) -> list[dict[str, Any]]:
-    week_start = week_end - timedelta(days=days - 1)
     snapshots: list[dict[str, Any]] = []
     for path in sorted(snapshot_dir.glob("*.json")):
         if path.name.startswith("."):
@@ -38,7 +53,7 @@ def load_daily_snapshots(snapshot_dir: Path, *, week_end: date, days: int = DEFA
             snapshot_date = parse_date(path.stem)
         except ValueError:
             continue
-        if snapshot_date < week_start or snapshot_date > week_end:
+        if snapshot_date > week_end:
             continue
         try:
             snapshot = read_json(path)
@@ -46,6 +61,16 @@ def load_daily_snapshots(snapshot_dir: Path, *, week_end: date, days: int = DEFA
             continue
         snapshots.append(snapshot)
     return snapshots
+
+
+def _snapshot_date(snapshot: dict[str, Any]) -> date | None:
+    value = snapshot.get("date") or snapshot.get("captured_at")
+    if not value:
+        return None
+    try:
+        return parse_date(str(value)[:10])
+    except ValueError:
+        return None
 
 
 def _summary(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -322,6 +347,148 @@ def _post_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _website_property(snapshot: dict[str, Any], role: str) -> dict[str, Any] | None:
+    properties = ((snapshot.get("websites") or {}).get("properties") or {})
+    property_snapshot = properties.get(role)
+    if isinstance(property_snapshot, dict):
+        return property_snapshot
+    if role != "habit":
+        return None
+    legacy_property = ((snapshot.get("landing_page") or {}).get("plausible") or {})
+    return legacy_property if isinstance(legacy_property, dict) else None
+
+
+def _website_captured_at(snapshot: dict[str, Any], property_snapshot: dict[str, Any]) -> str | None:
+    captured_at = property_snapshot.get("captured_at") or snapshot.get("captured_at")
+    return str(captured_at) if captured_at else None
+
+
+def _daily_website_trend(snapshots: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+    trend: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        property_snapshot = _website_property(snapshot, role)
+        metrics = (property_snapshot or {}).get("metrics") or {}
+        day = metrics.get("day") or {}
+        if property_snapshot is None or property_snapshot.get("status") != "ok" or not isinstance(day, dict):
+            continue
+        trend.append(
+            {
+                "date": snapshot.get("date"),
+                "visitors": day.get("visitors"),
+                "visits": day.get("visits"),
+                "pageviews": day.get("pageviews"),
+                "events": day.get("events"),
+            }
+        )
+    return trend
+
+
+def _website_performance_for_role(snapshots: list[dict[str, Any]], role: str) -> dict[str, Any]:
+    definition = WEBSITE_PROPERTIES[role]
+    latest_property: dict[str, Any] | None = None
+    last_good_property: dict[str, Any] | None = None
+    last_good_snapshot: dict[str, Any] | None = None
+    for snapshot in snapshots:
+        property_snapshot = _website_property(snapshot, role)
+        if property_snapshot is None:
+            continue
+        latest_property = property_snapshot
+        if property_snapshot.get("status") == "ok" and isinstance(property_snapshot.get("metrics"), dict):
+            last_good_property = property_snapshot
+            last_good_snapshot = snapshot
+
+    status = "not_collected"
+    stale = False
+    failure_message = None
+    if latest_property is not None:
+        status = str(latest_property.get("status") or "unknown")
+    if latest_property is not None and status == "error" and last_good_property is not None:
+        status = "stale"
+        stale = True
+        failure_message = str(latest_property.get("error") or "") or None
+
+    source_property = (
+        last_good_property
+        if status in {"ok", "stale"}
+        else latest_property or {}
+    )
+    metrics = source_property.get("metrics") or {}
+    latest_7_days = metrics.get("last_7_days") or {}
+    latest_30_days = metrics.get("last_30_days") or {}
+    result: dict[str, Any] = {
+        **definition,
+        "status": status,
+        "stale": stale,
+        "latest_7_days": latest_7_days,
+        "latest_30_days": latest_30_days,
+        "daily_trend": _daily_website_trend(snapshots, role),
+        "top_sources": latest_7_days.get("sources") or [],
+        "top_entry_pages": latest_7_days.get("entry_pages") or [],
+        "utm_sources": latest_7_days.get("utm_sources") or [],
+        "tracked_events": latest_7_days.get("tracked_events") or [],
+    }
+    if stale:
+        result["failure_message"] = failure_message
+        result["last_good_at"] = _website_captured_at(last_good_snapshot or {}, last_good_property or {})
+    elif status != "ok" and latest_property is not None:
+        result["failure_message"] = str(latest_property.get("error") or "") or None
+    if role == "habit":
+        result["funnel_events"] = latest_7_days.get("funnel_events") or {}
+        result["funnel_by_vector"] = latest_7_days.get("funnel_by_vector") or []
+    return result
+
+
+def _website_performance(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        role: _website_performance_for_role(snapshots, role)
+        for role in WEBSITE_PROPERTIES
+    }
+
+
+def _website_visitors(property_performance: dict[str, Any]) -> int | float | None:
+    visitors = (property_performance.get("latest_7_days") or {}).get("visitors")
+    if isinstance(visitors, bool) or not isinstance(visitors, (int, float)):
+        return None
+    return visitors
+
+
+def _first_dimension(rows: list[dict[str, Any]]) -> str | None:
+    if not rows:
+        return None
+    dimensions = rows[0].get("dimensions") or []
+    if not dimensions:
+        return None
+    text = str(dimensions[0] or "").strip()
+    return text or None
+
+
+def _website_recommendations(website_performance: dict[str, Any]) -> list[str]:
+    recommendations: list[str] = []
+    main = website_performance["main"]
+    main_visitors = _website_visitors(main)
+    if main["status"] == "ok" and main_visitors is not None and main_visitors >= MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION:
+        source = _first_dimension(main["top_sources"])
+        entry_page = _first_dimension(main["top_entry_pages"])
+        if source and entry_page:
+            recommendations.append(
+                f"Main discovery recorded {main_visitors:g} rolling 7-day unique visitors; review {source} traffic to {entry_page} before changing acquisition emphasis."
+            )
+
+    habit = website_performance["habit"]
+    habit_visitors = _website_visitors(habit)
+    register_clicks = (habit.get("funnel_events") or {}).get("Habit Register Click")
+    if (
+        habit["status"] == "ok"
+        and habit_visitors is not None
+        and habit_visitors >= MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION
+        and register_clicks == 0
+    ):
+        recommendations.append(
+            f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click; review the /ig CTA path."
+        )
+    return recommendations
+
+
 def _recommendations(report: dict[str, Any]) -> list[str]:
     if report["status"] == "insufficient_data":
         return ["Collect at least two daily snapshots before changing the campaign."]
@@ -372,6 +539,7 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
             recommendations.append(
                 f"Review {variant['key']} by reach, watch time, and growth actions separately; its result is mixed."
             )
+    recommendations.extend(_website_recommendations(report["website_performance"]))
     if not recommendations:
         recommendations.append("Keep the current campaign running until the next weekly review has published-post evidence.")
     return recommendations
@@ -379,7 +547,13 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
 
 def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS) -> dict[str, Any]:
     week_start = week_end - timedelta(days=days - 1)
-    snapshots = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
+    history = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
+    snapshots = [
+        snapshot
+        for snapshot in history
+        if (snapshot_date := _snapshot_date(snapshot)) is not None
+        and week_start <= snapshot_date <= week_end
+    ]
     posts = _post_rows(snapshots, week_start=week_start, week_end=week_end)
     report: dict[str, Any] = {
         "status": "ok" if len(snapshots) >= 2 else "insufficient_data",
@@ -405,6 +579,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         },
         "post_performance": _post_performance(posts),
         "campaign_performance": _campaign_performance(posts),
+        "website_performance": _website_performance(history),
     }
     report["recommendations"] = _recommendations(report)
     return report

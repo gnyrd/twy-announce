@@ -6,7 +6,7 @@ from datetime import date
 import social_growth_weekly as weekly
 
 
-def write_snapshot(path, snapshot_date, summary, *, analytics=None, campaign_posts=None):
+def write_snapshot(path, snapshot_date, summary, *, analytics=None, campaign_posts=None, websites=None):
     path.mkdir(parents=True, exist_ok=True)
     (path / f"{snapshot_date}.json").write_text(
         json.dumps(
@@ -16,10 +16,126 @@ def write_snapshot(path, snapshot_date, summary, *, analytics=None, campaign_pos
                 "summary": summary,
                 "campaigns": {"posts": campaign_posts or []},
                 "zernio": {"analytics": {"posts": analytics or []}},
+                "websites": websites or {},
             }
         )
         + "\n"
     )
+
+
+def website_property(site_id, *, day_visitors=2, status="ok", error=None, funnel_by_vector=None):
+    if status != "ok":
+        return {
+            "status": status,
+            "site_id": site_id,
+            "error": error,
+        }
+
+    day = {
+        "visitors": day_visitors,
+        "visits": day_visitors + 1,
+        "pageviews": day_visitors + 2,
+        "events": day_visitors + 3,
+    }
+    last_7_days = {
+        "visitors": day_visitors * 7,
+        "visits": (day_visitors + 1) * 7,
+        "pageviews": (day_visitors + 2) * 7,
+        "events": (day_visitors + 3) * 7,
+        "sources": [{"dimensions": ["instagram"], "metrics": [day_visitors * 3, day_visitors * 3]}],
+        "entry_pages": [{"dimensions": ["/ig"], "metrics": [day_visitors * 2, day_visitors * 2]}],
+        "utm_sources": [{"dimensions": ["instagram", "social"], "metrics": [day_visitors, day_visitors]}],
+        "tracked_events": [{"dimensions": ["Habit Register Click"], "metrics": [day_visitors]}],
+    }
+    if funnel_by_vector is not None:
+        last_7_days["funnel_events"] = {"Habit Register Click": day_visitors}
+        last_7_days["funnel_by_vector"] = funnel_by_vector
+    return {
+        "status": "ok",
+        "site_id": site_id,
+        "metrics": {
+            "day": day,
+            "last_7_days": last_7_days,
+            "last_30_days": {"visitors": day_visitors * 30},
+        },
+    }
+
+
+def write_snapshot_with_websites(path, snapshot_date, *, studio_status="ok", funnel_by_vector=None):
+    write_snapshot(
+        path,
+        snapshot_date,
+        {},
+        websites={
+            "status": "partial" if studio_status != "ok" else "ok",
+            "properties": {
+                "main": website_property("tiffanywoodyoga.com"),
+                "studio": website_property(
+                    "studio.tiffanywoodyoga.com",
+                    status=studio_status,
+                    error="studio unavailable" if studio_status != "ok" else None,
+                ),
+                "habit": website_property(
+                    "habit.tiffanywoodyoga.com",
+                    funnel_by_vector=funnel_by_vector,
+                ),
+            },
+        },
+    )
+
+
+def test_weekly_report_keeps_websites_separate(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    write_snapshot_with_websites(snapshot_dir, "2026-07-28")
+    write_snapshot_with_websites(snapshot_dir, "2026-07-29")
+
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 7, 29))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 7, 29))
+
+    websites = report["website_performance"]
+    assert websites["main"]["site_id"] == "tiffanywoodyoga.com"
+    assert websites["studio"]["site_id"] == "studio.tiffanywoodyoga.com"
+    assert websites["habit"]["site_id"] == "habit.tiffanywoodyoga.com"
+    assert "combined_visitors" not in report
+    assert "combined_visitors" not in websites
+
+
+def test_weekly_report_preserves_habit_vector_funnel(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    vector = [
+        {
+            "event": "Habit Register Click",
+            "source": "instagram",
+            "content": "cue",
+            "page_state": "class_defined",
+            "path": "/ig",
+            "events": 3,
+        }
+    ]
+    write_snapshot_with_websites(snapshot_dir, "2026-07-28", funnel_by_vector=vector)
+    write_snapshot_with_websites(snapshot_dir, "2026-07-29", funnel_by_vector=vector)
+
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 7, 29))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 7, 29))
+
+    assert report["website_performance"]["habit"]["funnel_by_vector"] == vector
+
+
+def test_weekly_report_marks_failed_property_stale_and_uses_last_good_data(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    write_snapshot_with_websites(snapshot_dir, "2026-07-21")
+    write_snapshot_with_websites(snapshot_dir, "2026-07-29", studio_status="error")
+
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 7, 29))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 7, 29))
+
+    studio = report["website_performance"]["studio"]
+    assert report["snapshot_count"] == 1
+    assert studio["status"] == "stale"
+    assert studio["stale"] is True
+    assert studio["failure_message"] == "studio unavailable"
+    assert studio["last_good_at"] == "2026-07-21T13:20:00Z"
+    assert studio["latest_7_days"]["visitors"] == 14
 
 
 def test_weekly_review_requires_two_snapshots(tmp_path):
