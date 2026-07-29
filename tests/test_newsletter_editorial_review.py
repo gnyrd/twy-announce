@@ -53,6 +53,39 @@ def test_identical_content_produces_stable_review_and_candidate_ids():
     assert len(first["review_id"]) == 32
 
 
+@pytest.mark.parametrize(
+    "audience",
+    [
+        "lifestyle",
+        "non_lifestyle",
+        "non_opener",
+        "gentle_nudge",
+        "reminder",
+        "ph1",
+        "ph2",
+    ],
+)
+def test_all_active_audiences_can_produce_preheader_learning(audience):
+    record = build_review_record(
+        mailing_name="2026_08: Yoga Habit: Follow Up 1",
+        audience_key=audience,
+        captured_at="2026-08-04T10:15:00-06:00",
+        provider_single_send_id=f"single-{audience}",
+        provider_design_id=None,
+        provider_ui_url=None,
+        generated_subject="Same subject",
+        generated_preheader="A generic preview",
+        generated_body="Same body.",
+        sent_subject="Same subject",
+        sent_preheader="A more compelling preview",
+        sent_body="Same body.",
+    )
+
+    assert record["generated"]["preheader"] == "A generic preview"
+    assert record["sent"]["preheader"] == "A more compelling preview"
+    assert [item["kind"] for item in record["candidates"]] == ["preheader"]
+
+
 def test_compiler_includes_only_done_reusable_approvals(monkeypatch, tmp_path):
     diffs, reviews = _patch_locations(monkeypatch, tmp_path)
     comparison = {

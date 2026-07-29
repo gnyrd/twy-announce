@@ -22,6 +22,10 @@ EXPECTED_SENDER_EMAIL = "hello@tiffanywoodyoga.com"
 UNSUBSCRIBE_GROUP_NAME = "Email: Unsubscribed"
 
 
+class ProviderVerificationError(ValueError):
+    """Provider content or state does not match the locked mailing."""
+
+
 class SendGridRegistry:
     def __init__(self, path: Path, payload: dict):
         self.path = path
@@ -139,13 +143,180 @@ class SendGridCampaigns:
     def _purpose_key(purpose: MailingPurpose) -> str:
         return purpose.value
 
+    @staticmethod
+    def _normalized_send_to(value: dict | None) -> dict:
+        value = value or {}
+        return {
+            "list_ids": sorted(str(item) for item in value.get("list_ids") or []),
+            "segment_ids": sorted(
+                str(item) for item in value.get("segment_ids") or []
+            ),
+            "all": bool(value.get("all")),
+        }
+
+    @staticmethod
+    def _content_hash(subject: str, preheader: str, body: str) -> str:
+        return hashlib.sha256(
+            f"{subject}\n{preheader}\n{body}".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _rendered_hash(payload: dict) -> str:
+        email_config = payload["email_config"]
+        source = json.dumps(
+            {
+                "subject": email_config["subject"],
+                "html_content": email_config["html_content"],
+                "plain_content": email_config["plain_content"],
+                "send_to": payload["send_to"],
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+    def _expected_single_send_payload(
+        self,
+        *,
+        name: str,
+        subject: str,
+        body: str,
+        preheader: str,
+        send_to: dict,
+    ) -> dict:
+        normalized_send_to = self._normalized_send_to(send_to)
+        if normalized_send_to["all"] or not (
+            normalized_send_to["list_ids"]
+            or normalized_send_to["segment_ids"]
+        ):
+            raise ValueError("Single Send must use bounded recipients")
+        rendered = render_newsletter(
+            body,
+            use_template=True,
+            preheader=preheader,
+        )
+        return {
+            "name": name,
+            "send_to": normalized_send_to,
+            "email_config": {
+                "subject": subject,
+                "html_content": rendered.html,
+                "plain_content": rendered.plain_text,
+                "generate_plain_content": False,
+                "editor": "design",
+                "suppression_group_id": self.registry.suppression_group_id,
+                "sender_id": self.registry.sender_id,
+            },
+        }
+
+    def _verification_mismatches(
+        self,
+        single_send: dict,
+        expected: dict,
+    ) -> list[str]:
+        mismatches: list[str] = []
+        if single_send.get("name") != expected["name"]:
+            mismatches.append("name")
+        if self._normalized_send_to(
+            single_send.get("send_to")
+        ) != self._normalized_send_to(expected["send_to"]):
+            mismatches.append("send_to")
+        actual_config = single_send.get("email_config") or {}
+        for field in (
+            "subject",
+            "html_content",
+            "plain_content",
+            "generate_plain_content",
+            "editor",
+            "suppression_group_id",
+            "sender_id",
+        ):
+            if actual_config.get(field) != expected["email_config"][field]:
+                mismatches.append(f"email_config.{field}")
+        return mismatches
+
+    def _cleanup_single_send(self, single_send: dict) -> None:
+        identifier = str(single_send.get("id") or "")
+        status = single_send.get("status")
+        if not identifier:
+            raise ProviderVerificationError(
+                "cannot clean up a Single Send without an ID"
+            )
+        if status == "triggered":
+            raise ProviderVerificationError(
+                f"refusing to delete triggered Single Send {identifier}"
+            )
+        if status == "scheduled":
+            self.api.unschedule_single_send(identifier)
+        elif status != "draft":
+            raise ProviderVerificationError(
+                f"refusing to delete Single Send {identifier} "
+                f"with unexpected status {status}"
+            )
+        self.api.delete_single_send(identifier)
+
+    def _record_single_send(
+        self,
+        *,
+        state: dict,
+        key: str,
+        single_send: dict,
+        expected: dict,
+        source_sha256: str,
+    ) -> None:
+        state.setdefault("single_sends", {})[key] = {
+            "id": str(single_send["id"]),
+            "name": expected["name"],
+            "source_sha256": source_sha256,
+            "rendered_sha256": self._rendered_hash(expected),
+            "send_to": expected["send_to"],
+            "provider_status": single_send.get("status"),
+            "verification_status": "verified",
+            "verified_at": self.now_fn().astimezone(timezone.utc).isoformat(),
+        }
+        self._save_state(state)
+
+    def _provider_sends_with_name(self, name: str) -> list[dict]:
+        rows = self.api.single_sends_by_name(name)
+        details: list[dict] = []
+        seen: set[str] = set()
+        for row in rows:
+            identifier = str(row.get("id") or "")
+            if not identifier or identifier in seen:
+                continue
+            seen.add(identifier)
+            details.append(self.api.get_single_send(identifier))
+        return details
+
+    @staticmethod
+    def _keeper_sort_key(single_send: dict) -> tuple[int, str, str]:
+        status_order = {
+            "triggered": 0,
+            "scheduled": 1,
+            "draft": 2,
+        }
+        return (
+            status_order.get(str(single_send.get("status")), 9),
+            str(single_send.get("created_at") or ""),
+            str(single_send.get("id") or ""),
+        )
+
     def ensure_list(self, name: str) -> str:
         validate_sendgrid_name(name)
         try:
             return self.registry.list_id(name)
         except KeyError:
-            created = self.api.create_list(name)
-            identifier = str(created.get("id") or "")
+            matches = [
+                item
+                for item in self.api.marketing_lists()
+                if item.get("name") == name
+            ]
+            if len(matches) > 1:
+                raise ProviderVerificationError(
+                    f"multiple SendGrid lists use locked name: {name}"
+                )
+            item = matches[0] if matches else self.api.create_list(name)
+            identifier = str(item.get("id") or "")
             if not identifier:
                 raise ValueError("SendGrid list returned no immutable ID")
             self.registry.register_list(name, identifier)
@@ -170,54 +341,87 @@ class SendGridCampaigns:
         name = mailing_name(year, month, purpose)
         state = self._load_state()
         key = self._purpose_key(purpose)
-        existing = (state.get("single_sends") or {}).get(key)
-        if existing:
-            single_send = self.api.get_single_send(existing["id"])
-            if single_send.get("name") != name:
-                raise ValueError("persisted Single Send name mismatch")
-            return single_send
-
-        list_ids = list(send_to.get("list_ids") or [])
-        segment_ids = list(send_to.get("segment_ids") or [])
-        if send_to.get("all") or not (list_ids or segment_ids):
-            raise ValueError("Single Send must use bounded recipients")
-
-        rendered = render_newsletter(
-            clean_body,
-            use_template=True,
+        payload = self._expected_single_send_payload(
+            name=name,
+            subject=clean_subject,
+            body=clean_body,
             preheader=clean_preheader,
+            send_to=send_to,
         )
-        payload = {
-            "name": name,
-            "send_to": {
-                "list_ids": list_ids,
-                "segment_ids": segment_ids,
-                "all": False,
-            },
-            "email_config": {
-                "subject": clean_subject,
-                "html_content": rendered.html,
-                "plain_content": rendered.plain_text,
-                "generate_plain_content": False,
-                "editor": "design",
-                "suppression_group_id": self.registry.suppression_group_id,
-                "sender_id": self.registry.sender_id,
-            },
-        }
-        single_send = self.api.create_single_send(payload)
-        identifier = str(single_send.get("id") or "")
-        if not identifier:
-            raise ValueError("SendGrid draft returned no immutable ID")
-        state.setdefault("single_sends", {})[key] = {
-            "id": identifier,
-            "name": name,
-            "source_sha256": hashlib.sha256(
-                f"{clean_subject}\n{clean_preheader}\n{clean_body}".encode()
-            ).hexdigest(),
-            "send_to": payload["send_to"],
-        }
-        self._save_state(state)
-        return single_send
+        source_sha256 = self._content_hash(
+            clean_subject,
+            clean_preheader,
+            clean_body,
+        )
+
+        provider_sends = self._provider_sends_with_name(name)
+        verified = [
+            item
+            for item in provider_sends
+            if not self._verification_mismatches(item, payload)
+        ]
+        triggered = [
+            item for item in provider_sends
+            if item.get("status") == "triggered"
+        ]
+        mismatched_triggered = [
+            item for item in triggered if item not in verified
+        ]
+        if mismatched_triggered:
+            identifiers = ", ".join(
+                str(item.get("id")) for item in mismatched_triggered
+            )
+            raise ProviderVerificationError(
+                f"triggered Single Send content mismatch: {identifiers}"
+            )
+        verified_triggered = [
+            item for item in verified
+            if item.get("status") == "triggered"
+        ]
+        if len(verified_triggered) > 1:
+            raise ProviderVerificationError(
+                "multiple triggered Single Sends match the locked mailing"
+            )
+
+        keeper = min(verified, key=self._keeper_sort_key) if verified else None
+        for item in provider_sends:
+            if keeper is not None and item.get("id") == keeper.get("id"):
+                continue
+            self._cleanup_single_send(item)
+
+        if keeper is None:
+            if provider_sends:
+                raise ProviderVerificationError(
+                    "conflicting Single Sends were cleaned; "
+                    "refusing creation on the same run"
+                )
+            if self.api.single_sends_by_name(name):
+                raise ProviderVerificationError(
+                    "provider cleanup left conflicting Single Sends"
+                )
+            created = self.api.create_single_send(payload)
+            identifier = str(created.get("id") or "")
+            if not identifier:
+                raise ProviderVerificationError(
+                    "SendGrid draft returned no immutable ID"
+                )
+            keeper = self.api.get_single_send(identifier)
+            mismatches = self._verification_mismatches(keeper, payload)
+            if mismatches:
+                self._cleanup_single_send(keeper)
+                raise ProviderVerificationError(
+                    "created Single Send verification failed: "
+                    + ", ".join(mismatches)
+                )
+
+        self._record_single_send(
+            state=state,
+            key=key,
+            single_send=keeper,
+            expected=payload,
+            source_sha256=source_sha256,
+        )
+        return keeper
 
     def ensure_segment(
         self,
@@ -253,11 +457,34 @@ class SendGridCampaigns:
                 self._save_state(state)
             return segment
 
-        segment = self.api.create_segment(
-            name=name,
-            query_dsl=query_dsl,
-            parent_list_ids=parent_list_ids,
-        )
+        matches = [
+            item
+            for item in self.api.segments()
+            if item.get("name") == name
+        ]
+        if len(matches) > 1:
+            raise ProviderVerificationError(
+                f"multiple SendGrid segments use locked name: {name}"
+            )
+        if matches:
+            segment = self.api.segment(str(matches[0]["id"]))
+            if (
+                segment.get("query_dsl") != query_dsl
+                or list(segment.get("parent_list_ids") or [])
+                != list(parent_list_ids or [])
+            ):
+                segment = self.api.update_segment(
+                    str(segment["id"]),
+                    name=name,
+                    query_dsl=query_dsl,
+                    parent_list_ids=parent_list_ids,
+                )
+        else:
+            segment = self.api.create_segment(
+                name=name,
+                query_dsl=query_dsl,
+                parent_list_ids=parent_list_ids,
+            )
         identifier = str(segment.get("id") or "")
         if not identifier:
             raise ValueError("SendGrid segment returned no immutable ID")
@@ -277,7 +504,54 @@ class SendGridCampaigns:
         )
         if not entry:
             raise KeyError(f"SendGrid draft is not registered: {purpose.value}")
-        return self.api.get_single_send(entry["id"])
+        single_send = self.api.get_single_send(entry["id"])
+        mismatches: list[str] = []
+        if single_send.get("name") != entry.get("name"):
+            mismatches.append("name")
+        if self._normalized_send_to(
+            single_send.get("send_to")
+        ) != self._normalized_send_to(entry.get("send_to")):
+            mismatches.append("send_to")
+        try:
+            rendered_sha256 = self._rendered_hash(single_send)
+        except (KeyError, TypeError):
+            mismatches.append("rendered_content")
+        else:
+            if rendered_sha256 != entry.get("rendered_sha256"):
+                mismatches.append("rendered_content")
+        if mismatches:
+            raise ProviderVerificationError(
+                "recorded Single Send verification failed: "
+                + ", ".join(mismatches)
+            )
+        return single_send
+
+    def _schedule_verification_mismatches(
+        self,
+        *,
+        single_send: dict,
+        entry: dict,
+        expected_send_at: str,
+    ) -> list[str]:
+        mismatches: list[str] = []
+        if single_send.get("status") != "scheduled":
+            mismatches.append("status")
+        if single_send.get("send_at") != expected_send_at:
+            mismatches.append("send_at")
+        if single_send.get("name") != entry.get("name"):
+            mismatches.append("name")
+        if self._normalized_send_to(
+            single_send.get("send_to")
+        ) != self._normalized_send_to(entry.get("send_to")):
+            mismatches.append("send_to")
+        try:
+            rendered_sha256 = self._rendered_hash(single_send)
+        except (KeyError, TypeError):
+            mismatches.append("rendered_content")
+        else:
+            if rendered_sha256 != entry.get("rendered_sha256"):
+                mismatches.append("rendered_content")
+        return mismatches
 
     def schedule(
         self,
@@ -290,7 +564,12 @@ class SendGridCampaigns:
         now = self.now_fn().astimezone(timezone.utc)
         if target <= now:
             raise ValueError("refusing to schedule a SendGrid mailing in the past")
-        single_send = self.single_send(purpose)
+        state = self._load_state()
+        key = self._purpose_key(purpose)
+        entry = (state.get("single_sends") or {}).get(key)
+        if not entry:
+            raise KeyError(f"SendGrid draft is not registered: {purpose.value}")
+        single_send = self.api.get_single_send(entry["id"])
         status = single_send.get("status")
         if status == "triggered":
             return single_send
@@ -300,6 +579,33 @@ class SendGridCampaigns:
         formatted = target.strftime("%Y-%m-%dT%H:%M:%SZ")
         if status == "scheduled":
             if single_send.get("send_at") == formatted:
-                return single_send
+                mismatches = self._schedule_verification_mismatches(
+                    single_send=single_send,
+                    entry=entry,
+                    expected_send_at=formatted,
+                )
+                if not mismatches:
+                    return single_send
             self.api.unschedule_single_send(single_send["id"])
-        return self.api.schedule_single_send(single_send["id"], formatted)
+        self.api.schedule_single_send(single_send["id"], formatted)
+        scheduled = self.api.get_single_send(single_send["id"])
+        mismatches = self._schedule_verification_mismatches(
+            single_send=scheduled,
+            entry=entry,
+            expected_send_at=formatted,
+        )
+        if mismatches:
+            self._cleanup_single_send(scheduled)
+            state.setdefault("single_sends", {}).pop(key, None)
+            self._save_state(state)
+            raise ProviderVerificationError(
+                "Single Send schedule verification failed: "
+                + ", ".join(mismatches)
+            )
+        entry.update({
+            "provider_status": "scheduled",
+            "send_at": formatted,
+            "verified_at": self.now_fn().astimezone(timezone.utc).isoformat(),
+        })
+        self._save_state(state)
+        return scheduled

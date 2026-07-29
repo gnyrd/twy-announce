@@ -19,6 +19,14 @@ from sendgrid_campaigns import (
     SendGridCampaigns,
     SendGridRegistry,
 )
+from sendgrid_newsletter_workflow import (
+    PURPOSE_SECTIONS,
+    apply_provider_report,
+    lock_due_sections,
+    mark_provider_error,
+    provision_drafts,
+    read_local_sections,
+)
 from sendgrid_scheduler import schedule_month
 from slack import post_slack
 from twy_paths import data_root, load_env, newsletters_dir
@@ -26,6 +34,8 @@ from twy_paths import data_root, load_env, newsletters_dir
 
 MOUNTAIN = ZoneInfo("America/Denver")
 CLASSES_API = "http://localhost:5003"
+
+
 def habit_class_date(year: int, month: int) -> date | None:
     first = date(year, month, 1)
     if month == 12:
@@ -79,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
         "SLACK_STATUS_CHANNEL",
         "#status-newsletters",
     )
+    slack_warning_channel = os.getenv(
+        "SLACK_SYSTEM_WARNINGS_CHANNEL",
+        "#system-warnings",
+    )
     api_key = os.getenv("SENDGRID_API_KEY", "")
     if not api_key:
         raise SystemExit("SENDGRID_API_KEY is not configured")
@@ -110,20 +124,76 @@ def main(argv: list[str] | None = None) -> int:
             / ".sendgrid.json"
         )
         if not state_path.exists() and not explicit:
+            local_sections = read_local_sections(year, month)
+            if not local_sections:
+                continue
+        else:
+            local_sections = read_local_sections(year, month)
+        class_day = habit_class_date(year, month)
+        locked_sections = lock_due_sections(
+            year=year,
+            month=month,
+            class_date=class_day,
+            now=now,
+        )
+        if (
+            not explicit
+            and not state_path.exists()
+            and local_sections
+            and not locked_sections
+        ):
             continue
         campaigns = SendGridCampaigns(
             api=api,
             registry=registry,
             state_path=state_path,
         )
-        class_day = habit_class_date(year, month)
-        report = schedule_month(
-            campaigns=campaigns,
-            year=year,
-            month=month,
-            class_date=class_day,
-            now=now,
-        )
+        try:
+            if locked_sections:
+                provision_drafts(
+                    campaigns=campaigns,
+                    year=year,
+                    month=month,
+                    class_date=class_day,
+                    sections=locked_sections,
+                )
+            report = schedule_month(
+                campaigns=campaigns,
+                year=year,
+                month=month,
+                class_date=class_day,
+                now=now,
+            )
+            apply_provider_report(
+                year=year,
+                month=month,
+                report=report,
+                now=now,
+            )
+        except Exception as exc:
+            affected = set(locked_sections)
+            if not affected:
+                affected = {
+                    PURPOSE_SECTIONS[purpose.value]
+                    for purpose in campaigns.expected_purposes()
+                    if purpose.value in PURPOSE_SECTIONS
+                }
+            mark_provider_error(
+                year=year,
+                month=month,
+                audiences=affected,
+                error=str(exc),
+                now=now,
+            )
+            period = f"{year:04d}_{month:02d}"
+            reports[period] = {
+                "Workflow": {
+                    "status": "error",
+                    "error": str(exc),
+                }
+            }
+            problems.append(f"{period}: workflow: {exc}")
+            continue
         period = f"{year:04d}_{month:02d}"
         reports[period] = report
         for purpose, item in report.items():
@@ -139,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
             + "\n".join(problems)
         )
         post_slack(slack_status_channel, message)
+        if slack_warning_channel != slack_status_channel:
+            post_slack(slack_warning_channel, message)
         return 1
     return 0
 

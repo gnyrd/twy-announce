@@ -20,6 +20,10 @@ class FakeAPI:
         self.updated_segments = []
         self.scheduled = []
         self.unscheduled = []
+        self.deleted = []
+        self.schedule_status = "scheduled"
+        self.list_rows = []
+        self.created_lists = []
 
     def create_single_send(self, payload):
         identifier = f"send{len(self.created_sends) + 1}"
@@ -36,6 +40,17 @@ class FakeAPI:
 
     def get_single_send(self, identifier):
         return self.single_sends[identifier]
+
+    def single_sends_by_name(self, name):
+        return [
+            {"id": item["id"], "name": item["name"]}
+            for item in self.single_sends.values()
+            if item["name"] == name
+        ]
+
+    def delete_single_send(self, identifier):
+        self.deleted.append(identifier)
+        self.single_sends.pop(identifier, None)
 
     def create_segment(self, **payload):
         identifier = f"segment{len(self.created_segments) + 1}"
@@ -59,7 +74,7 @@ class FakeAPI:
 
     def schedule_single_send(self, identifier, send_at):
         self.scheduled.append((identifier, send_at))
-        self.single_sends[identifier]["status"] = "scheduled"
+        self.single_sends[identifier]["status"] = self.schedule_status
         self.single_sends[identifier]["send_at"] = send_at
         return self.single_sends[identifier]
 
@@ -67,6 +82,18 @@ class FakeAPI:
         self.unscheduled.append(identifier)
         self.single_sends[identifier]["status"] = "draft"
         return self.single_sends[identifier]
+
+    def marketing_lists(self):
+        return list(self.list_rows)
+
+    def create_list(self, name):
+        item = {"id": f"list{len(self.created_lists) + 1}", "name": name}
+        self.created_lists.append(item)
+        self.list_rows.append(item)
+        return item
+
+    def segments(self):
+        return list(self.segments_by_id.values())
 
 
 
@@ -189,7 +216,9 @@ def test_create_draft_includes_preheader_in_rendered_html(monkeypatch, tmp_path)
     assert "A useful inbox preview" not in api.created_sends[0]["email_config"]["plain_content"]
 
 
-def test_create_draft_is_idempotent_and_preserves_existing_content(tmp_path):
+def test_create_draft_reuses_matching_content_and_stops_after_changed_cleanup(
+    tmp_path,
+):
     registry = _registry(tmp_path / "registry.json")
     state_path = tmp_path / "state.json"
     api = FakeAPI()
@@ -211,22 +240,277 @@ def test_create_draft_is_idempotent_and_preserves_existing_content(tmp_path):
         purpose=MailingPurpose.MONTHLY,
         year=2026,
         month=8,
-        subject="Changed",
-        body_md="Changed body",
-        preheader="Changed preview",
+        subject="August",
+        body_md="First body",
         send_to={"list_ids": ["lifestyle1"], "all": False},
     )
+    with pytest.raises(ValueError, match="conflicting"):
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="Changed",
+            body_md="Changed body",
+            preheader="Changed preview",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
 
     assert reused["id"] == created["id"]
     assert len(api.created_sends) == 1
+    assert created["id"] in api.deleted
     assert api.created_sends[0]["email_config"]["editor"] == "design"
     assert api.created_sends[0]["email_config"]["sender_id"] == 9423402
     assert api.created_sends[0]["email_config"][
         "suppression_group_id"
     ] == 35187
     persisted = json.loads(state_path.read_text())
-    assert persisted["single_sends"]["Monthly"]["id"] == "send1"
+    assert persisted["single_sends"]["Monthly"]["id"] == created["id"]
     assert persisted["single_sends"]["Monthly"]["source_sha256"] != ""
+
+
+def test_create_draft_adopts_verified_provider_send_after_local_state_loss(
+    tmp_path,
+):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    existing = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+    campaigns.state_path.unlink()
+    api.created_sends.clear()
+
+    adopted = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+
+    assert adopted["id"] == existing["id"]
+    assert api.created_sends == []
+    persisted = json.loads(campaigns.state_path.read_text())
+    assert persisted["single_sends"]["Monthly"]["id"] == existing["id"]
+    assert persisted["single_sends"]["Monthly"]["verification_status"] == (
+        "verified"
+    )
+
+
+def test_create_draft_deletes_duplicate_verified_drafts_before_adopting(
+    tmp_path,
+):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    first = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+    duplicate = dict(first)
+    duplicate["id"] = "send2"
+    api.single_sends["send2"] = duplicate
+    campaigns.state_path.unlink()
+    api.created_sends.clear()
+
+    adopted = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+
+    assert adopted["id"] == "send1"
+    assert api.deleted == ["send2"]
+    assert set(api.single_sends) == {"send1"}
+
+
+def test_create_draft_cleans_mismatched_scheduled_send_and_stops(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    name = mailing_name(2026, 8, MailingPurpose.MONTHLY)
+    api.single_sends["stale"] = {
+        "id": "stale",
+        "name": name,
+        "status": "scheduled",
+        "send_at": "2026-08-03T15:39:00Z",
+        "send_to": {"list_ids": ["wrong"], "segment_ids": [], "all": False},
+        "email_config": {
+            "subject": "Wrong",
+            "html_content": "<p>Wrong</p>",
+            "plain_content": "Wrong\n",
+            "generate_plain_content": False,
+            "editor": "design",
+            "suppression_group_id": 35187,
+            "sender_id": 9423402,
+        },
+    }
+
+    with pytest.raises(ValueError, match="conflicting"):
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="August",
+            body_md="First body",
+            preheader="A useful preview",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
+
+    assert api.unscheduled == ["stale"]
+    assert api.deleted == ["stale"]
+    assert api.created_sends == []
+
+
+def test_create_draft_blocks_when_triggered_provider_send_mismatches(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    name = mailing_name(2026, 8, MailingPurpose.MONTHLY)
+    api.single_sends["sent"] = {
+        "id": "sent",
+        "name": name,
+        "status": "triggered",
+        "send_to": {"list_ids": ["wrong"], "segment_ids": [], "all": False},
+        "email_config": {
+            "subject": "Wrong",
+            "html_content": "<p>Wrong</p>",
+            "plain_content": "Wrong\n",
+            "generate_plain_content": False,
+            "editor": "design",
+            "suppression_group_id": 35187,
+            "sender_id": 9423402,
+        },
+    }
+
+    with pytest.raises(ValueError, match="triggered"):
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="August",
+            body_md="First body",
+            preheader="A useful preview",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
+
+    assert api.deleted == []
+    assert api.created_sends == []
+
+
+def test_single_send_reverifies_recorded_provider_content(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    created = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+    api.single_sends[created["id"]]["email_config"]["subject"] = "Changed"
+
+    with pytest.raises(ValueError, match="recorded Single Send"):
+        campaigns.single_send(MailingPurpose.MONTHLY)
+
+
+def test_ensure_list_adopts_unique_provider_list_after_local_state_loss(
+    tmp_path,
+):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    api.list_rows.append({
+        "id": "existing-list",
+        "name": "Yoga Habit: Interested: 2026_09",
+    })
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+
+    identifier = campaigns.ensure_list(
+        "Yoga Habit: Interested: 2026_09"
+    )
+
+    assert identifier == "existing-list"
+    assert api.created_lists == []
+    assert SendGridRegistry.load(registry.path).list_id(
+        "Yoga Habit: Interested: 2026_09"
+    ) == "existing-list"
+
+
+def test_ensure_segment_adopts_unique_provider_segment_after_state_loss(
+    tmp_path,
+):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    name = mailing_name(2026, 8, MailingPurpose.GENERAL_INVITATION)
+    api.segments_by_id["existing-segment"] = {
+        "id": "existing-segment",
+        "name": name,
+        "query_dsl": "SELECT contact_id FROM contact_data",
+        "parent_list_ids": ["subscribed1"],
+        "status": {"query_validation": "VALID"},
+    }
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+
+    segment = campaigns.ensure_segment(
+        purpose=MailingPurpose.GENERAL_INVITATION,
+        year=2026,
+        month=8,
+        query_dsl="SELECT contact_id FROM contact_data",
+        parent_list_ids=["subscribed1"],
+    )
+
+    assert segment["id"] == "existing-segment"
+    assert api.created_segments == []
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["segments"]["General Invitation"]["id"] == "existing-segment"
 
 
 def test_segment_is_idempotent_by_persisted_provider_id(tmp_path):
@@ -329,6 +613,34 @@ def test_schedule_refuses_past_and_reschedules_exact_time(tmp_path):
     campaigns.schedule(MailingPurpose.MONTHLY, target)
     assert api.unscheduled == ["send1"]
     assert api.scheduled[-1] == ("send1", "2026-08-03T15:39:00Z")
+
+
+def test_schedule_verifies_provider_state_and_cleans_failed_send(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = FakeAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+        now_fn=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="Body",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+    api.schedule_status = "draft"
+
+    with pytest.raises(ValueError, match="schedule verification"):
+        campaigns.schedule(
+            MailingPurpose.MONTHLY,
+            datetime(2026, 8, 3, 15, 39, tzinfo=timezone.utc),
+        )
+
+    assert api.deleted == ["send1"]
 
 
 def test_expected_purposes_are_persisted_and_accumulate(tmp_path):

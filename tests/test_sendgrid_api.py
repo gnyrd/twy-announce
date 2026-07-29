@@ -66,6 +66,59 @@ def test_delete_single_send_uses_exact_marketing_endpoint():
     )
 
 
+def test_single_sends_by_name_paginates_and_returns_every_exact_match():
+    api, fake = make_api(
+        FakeResponse(
+            200,
+            {
+                "result": [
+                    {"id": "send-1", "name": "2026_08: Yoga Lifestyle: Monthly"},
+                    {"id": "other", "name": "Other"},
+                ],
+                "_metadata": {
+                    "next": (
+                        "https://api.sendgrid.com/v3/marketing/singlesends"
+                        "?page_size=100&page_token=next"
+                    )
+                },
+            },
+        ),
+        FakeResponse(
+            200,
+            {
+                "result": [
+                    {"id": "send-2", "name": "2026_08: Yoga Lifestyle: Monthly"},
+                ],
+                "_metadata": {},
+            },
+        ),
+    )
+
+    rows = api.single_sends_by_name("2026_08: Yoga Lifestyle: Monthly")
+
+    assert [row["id"] for row in rows] == ["send-1", "send-2"]
+    assert len(fake.calls) == 2
+    assert fake.calls[1]["url"].endswith(
+        "/v3/marketing/singlesends?page_size=100&page_token=next"
+    )
+
+
+def test_single_sends_by_name_rejects_pagination_loop():
+    next_path = "/marketing/singlesends?page_size=100"
+    api, _ = make_api(
+        FakeResponse(
+            200,
+            {
+                "result": [],
+                "_metadata": {"next": next_path},
+            },
+        ),
+    )
+
+    with pytest.raises(SendGridAPIError, match="pagination loop"):
+        api.single_sends_by_name("2026_08: Yoga Lifestyle: Monthly")
+
+
 def test_marketing_lists_return_complete_inventory():
     api, fake = make_api(FakeResponse(200, {
         "result": [{"id": "list-1", "name": "TWY Marketing"}],

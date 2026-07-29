@@ -98,7 +98,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--audience-key",
         required=True,
-        choices=("lifestyle", "non_lifestyle"),
+        choices=(
+            "lifestyle",
+            "non_lifestyle",
+            "non_opener",
+            "gentle_nudge",
+            "reminder",
+            "ph1",
+            "ph2",
+        ),
     )
     parser.add_argument("--captured-at", required=True)
     return parser

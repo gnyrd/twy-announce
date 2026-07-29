@@ -141,7 +141,15 @@ def _require_index_fields(
         raise NewsletterApprovalError(
             f"invalid newsletter approval item: {path}"
         )
-    if item["audience_key"] not in {"lifestyle", "non_lifestyle"}:
+    if item["audience_key"] not in {
+        "lifestyle",
+        "non_lifestyle",
+        "non_opener",
+        "gentle_nudge",
+        "reminder",
+        "ph1",
+        "ph2",
+    }:
         raise NewsletterApprovalError(
             f"invalid newsletter approval audience: {path}"
         )
@@ -207,9 +215,16 @@ def _format_recent_references(
         return ""
     sections = ["APPROVED REFERENCE NEWSLETTERS:"]
     for item in selected:
+        preheader = item.get("preheader")
+        preheader_line = (
+            f'Preheader: {preheader}\n'
+            if isinstance(preheader, str) and preheader.strip()
+            else ""
+        )
         sections.append(
             f'\n## {item["mailing_name"]}\n'
-            f'Subject: {item["subject"]}\n\n{item["body"]}'
+            f'Subject: {item["subject"]}\n'
+            f'{preheader_line}\n{item["body"]}'
         )
     return "\n".join(sections)
 

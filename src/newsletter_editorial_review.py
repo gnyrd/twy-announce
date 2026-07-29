@@ -23,10 +23,19 @@ from twy_paths import (
 from twy_platform import locked_create, locked_write
 
 
-ALLOWED_AUDIENCES = {"lifestyle", "non_lifestyle"}
+ALLOWED_AUDIENCES = {
+    "lifestyle",
+    "non_lifestyle",
+    "non_opener",
+    "gentle_nudge",
+    "reminder",
+    "ph1",
+    "ph2",
+}
 ALLOWED_PROVIDERS = {"sendgrid", "historical"}
 ALLOWED_KINDS = {
     "subject",
+    "preheader",
     "voice",
     "structure",
     "call to action",
@@ -78,15 +87,19 @@ def _content_digest(
     generated_body: str,
     sent_subject: str,
     sent_body: str,
+    generated_preheader: str = "",
+    sent_preheader: str = "",
 ) -> str:
     source = json.dumps(
         {
             "generated": {
                 "subject": generated_subject,
+                "preheader": generated_preheader,
                 "body": generated_body,
             },
             "sent": {
                 "subject": sent_subject,
+                "preheader": sent_preheader,
                 "body": sent_body,
             },
         },
@@ -224,6 +237,8 @@ def _build_candidates(
     generated_body: str,
     sent_subject: str,
     sent_body: str,
+    generated_preheader: str = "",
+    sent_preheader: str = "",
 ) -> list[dict[str, str]]:
     removed, added = diff_phrases(generated_body, sent_body)
     signals = detect_structural_signals(
@@ -232,7 +247,7 @@ def _build_candidates(
         sent_subject,
         sent_body,
     )
-    return _build_candidates_from_diffs(
+    candidates = _build_candidates_from_diffs(
         review_id=review_id,
         generated_subject=generated_subject,
         generated_body=generated_body,
@@ -242,6 +257,20 @@ def _build_candidates(
         added=added,
         signals=signals,
     )
+    if _normalized(generated_preheader) != _normalized(sent_preheader):
+        candidates.append(
+            _candidate(
+                review_id=review_id,
+                kind="preheader",
+                generated_excerpt=generated_preheader,
+                sent_excerpt=sent_preheader,
+                guideline=(
+                    "Prefer Tiff's sent preheader as the stronger inbox "
+                    "preview example for this audience."
+                ),
+            )
+        )
+    return candidates
 
 
 def build_review_record(
@@ -256,6 +285,8 @@ def build_review_record(
     generated_body: str,
     sent_subject: str,
     sent_body: str,
+    generated_preheader: str = "",
+    sent_preheader: str = "",
 ) -> dict[str, Any]:
     if audience_key not in ALLOWED_AUDIENCES:
         raise ValueError("unsupported newsletter audience")
@@ -264,6 +295,8 @@ def build_review_record(
         generated_body,
         sent_subject,
         sent_body,
+        generated_preheader,
+        sent_preheader,
     )
     review_id = _opaque_id(provider_single_send_id, digest)
     return validate_comparison(
@@ -280,10 +313,12 @@ def build_review_record(
             "content_digest": digest,
             "generated": {
                 "subject": generated_subject,
+                "preheader": generated_preheader,
                 "body": generated_body,
             },
             "sent": {
                 "subject": sent_subject,
+                "preheader": sent_preheader,
                 "body": sent_body,
             },
             "candidates": _build_candidates(
@@ -292,6 +327,8 @@ def build_review_record(
                 generated_body=generated_body,
                 sent_subject=sent_subject,
                 sent_body=sent_body,
+                generated_preheader=generated_preheader,
+                sent_preheader=sent_preheader,
             ),
         }
     )
@@ -547,6 +584,7 @@ def compile_approved_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
                     "audience_key": comparison["audience_key"],
                     "mailing_name": comparison["mailing_name"],
                     "subject": comparison["sent"]["subject"],
+                    "preheader": comparison["sent"].get("preheader", ""),
                     "body": comparison["sent"]["body"],
                     "completed_at": approval["completed_at"],
                 }

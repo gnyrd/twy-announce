@@ -430,15 +430,24 @@ class SendGridAPI:
     def get_design(self, design_id: str) -> dict:
         return self._request("GET", f"/designs/{design_id}")
 
-    def find_single_send_by_name(self, name: str) -> dict | None:
+    def single_sends_by_name(self, name: str) -> list[dict]:
         path = "/marketing/singlesends?page_size=100"
+        result: list[dict] = []
+        seen: set[str] = set()
         while path:
+            if path in seen:
+                raise SendGridAPIError("SendGrid Single Send pagination loop")
+            seen.add(path)
             payload = self._request("GET", path)
             for single_send in payload.get("result") or []:
                 if single_send.get("name") == name:
-                    return single_send
+                    result.append(single_send)
             path = payload.get("_metadata", {}).get("next")
-        return None
+        return result
+
+    def find_single_send_by_name(self, name: str) -> dict | None:
+        matches = self.single_sends_by_name(name)
+        return matches[0] if matches else None
 
     def schedule_single_send(self, single_send_id: str, send_at: str) -> dict:
         return self._request(
