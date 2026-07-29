@@ -136,6 +136,7 @@ def test_weekly_report_marks_failed_property_stale_and_uses_last_good_data(tmp_p
     assert studio["failure_message"] == "studio unavailable"
     assert studio["last_good_at"] == "2026-07-21T13:20:00Z"
     assert studio["latest_7_days"]["visitors"] == 14
+    assert studio["daily_trend"] == []
 
 
 def test_weekly_review_requires_two_snapshots(tmp_path):

@@ -383,12 +383,17 @@ def _daily_website_trend(snapshots: list[dict[str, Any]], role: str) -> list[dic
     return trend
 
 
-def _website_performance_for_role(snapshots: list[dict[str, Any]], role: str) -> dict[str, Any]:
+def _website_performance_for_role(
+    history: list[dict[str, Any]],
+    *,
+    trend_snapshots: list[dict[str, Any]],
+    role: str,
+) -> dict[str, Any]:
     definition = WEBSITE_PROPERTIES[role]
     latest_property: dict[str, Any] | None = None
     last_good_property: dict[str, Any] | None = None
     last_good_snapshot: dict[str, Any] | None = None
-    for snapshot in snapshots:
+    for snapshot in history:
         property_snapshot = _website_property(snapshot, role)
         if property_snapshot is None:
             continue
@@ -421,7 +426,7 @@ def _website_performance_for_role(snapshots: list[dict[str, Any]], role: str) ->
         "stale": stale,
         "latest_7_days": latest_7_days,
         "latest_30_days": latest_30_days,
-        "daily_trend": _daily_website_trend(snapshots, role),
+        "daily_trend": _daily_website_trend(trend_snapshots, role),
         "top_sources": latest_7_days.get("sources") or [],
         "top_entry_pages": latest_7_days.get("entry_pages") or [],
         "utm_sources": latest_7_days.get("utm_sources") or [],
@@ -438,9 +443,17 @@ def _website_performance_for_role(snapshots: list[dict[str, Any]], role: str) ->
     return result
 
 
-def _website_performance(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+def _website_performance(
+    history: list[dict[str, Any]],
+    *,
+    trend_snapshots: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
-        role: _website_performance_for_role(snapshots, role)
+        role: _website_performance_for_role(
+            history,
+            trend_snapshots=trend_snapshots,
+            role=role,
+        )
         for role in WEBSITE_PROPERTIES
     }
 
@@ -579,7 +592,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         },
         "post_performance": _post_performance(posts),
         "campaign_performance": _campaign_performance(posts),
-        "website_performance": _website_performance(history),
+        "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["recommendations"] = _recommendations(report)
     return report
