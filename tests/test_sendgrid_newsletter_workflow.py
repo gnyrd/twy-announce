@@ -405,21 +405,21 @@ def test_sections_due_for_materialization_waits_until_24_hour_window():
         month=8,
         class_date=None,
         sections=sections,
-        now=datetime(2026, 8, 2, 15, 38, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 48, tzinfo=timezone.utc),
     )
     at_window = sections_due_for_materialization(
         year=2026,
         month=8,
         class_date=None,
         sections=sections,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
     after_send_time = sections_due_for_materialization(
         year=2026,
         month=8,
         class_date=None,
         sections=sections,
-        now=datetime(2026, 8, 3, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 3, 15, 49, tzinfo=timezone.utc),
     )
 
     assert before == {}
@@ -468,7 +468,7 @@ def test_lock_due_sections_waits_until_materialization_window(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 38, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 48, tzinfo=timezone.utc),
     )
 
     assert sections == {}
@@ -488,14 +488,14 @@ def test_lock_due_sections_creates_immutable_snapshot_at_window(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     assert sections["lifestyle"]["subject"] == "August subject"
     metadata = json.loads((period / ".metadata.json").read_text())
     entry = metadata["drafts"]["lifestyle"]
     assert entry["state"] == "locked"
-    assert entry["locked_at"] == "2026-08-02T15:39:00+00:00"
+    assert entry["locked_at"] == "2026-08-02T15:49:00+00:00"
     assert entry["original_snapshot"]
     assert entry["generation_history"] == [entry["original_snapshot"]]
     snapshot = period / entry["locked_snapshot"]
@@ -511,7 +511,7 @@ def test_lock_due_sections_creates_immutable_snapshot_at_window(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 45, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 55, tzinfo=timezone.utc),
     )
     assert resumed == sections
     assert json.loads(snapshot.read_text()) == payload
@@ -528,7 +528,7 @@ def test_lock_due_sections_ignores_legacy_hold_and_sends_current_draft(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     assert sections["lifestyle"]["subject"] == "August subject"
@@ -576,7 +576,7 @@ def test_lock_due_sections_uses_tiff_approved_snapshot(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     assert sections["lifestyle"] == {
@@ -600,7 +600,7 @@ def test_apply_provider_report_tracks_schedule_and_immutable_sent_snapshot(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     apply_provider_report(
@@ -611,10 +611,10 @@ def test_apply_provider_report_tracks_schedule_and_immutable_sent_snapshot(
                 "id": "send1",
                 "status": "scheduled",
                 "provider_status": "scheduled",
-                "send_at": "2026-08-03T15:39:00+00:00",
+                "send_at": "2026-08-03T15:49:00+00:00",
             },
         },
-        now=datetime(2026, 8, 2, 15, 40, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 50, tzinfo=timezone.utc),
     )
     metadata = json.loads((period / ".metadata.json").read_text())
     entry = metadata["drafts"]["lifestyle"]
@@ -629,10 +629,10 @@ def test_apply_provider_report_tracks_schedule_and_immutable_sent_snapshot(
                 "id": "send1",
                 "status": "triggered",
                 "provider_status": "triggered",
-                "send_at": "2026-08-03T15:39:00+00:00",
+                "send_at": "2026-08-03T15:49:00+00:00",
             },
         },
-        now=datetime(2026, 8, 3, 15, 40, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 3, 15, 50, tzinfo=timezone.utc),
     )
     metadata = json.loads((period / ".metadata.json").read_text())
     entry = metadata["drafts"]["lifestyle"]
@@ -650,10 +650,10 @@ def test_apply_provider_report_tracks_schedule_and_immutable_sent_snapshot(
                 "id": "send1",
                 "status": "triggered",
                 "provider_status": "triggered",
-                "send_at": "2026-08-03T15:39:00+00:00",
+                "send_at": "2026-08-03T15:49:00+00:00",
             },
         },
-        now=datetime(2026, 8, 3, 15, 55, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 3, 16, 5, tzinfo=timezone.utc),
     )
     assert json.loads(sent_snapshot.read_text()) == sent
 
@@ -696,7 +696,7 @@ def test_sent_snapshot_creates_pending_review_from_original_tweee_draft(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     apply_provider_report(
@@ -707,10 +707,10 @@ def test_sent_snapshot_creates_pending_review_from_original_tweee_draft(
                 "id": "send1",
                 "status": "triggered",
                 "provider_status": "triggered",
-                "send_at": "2026-08-03T15:39:00+00:00",
+                "send_at": "2026-08-03T15:49:00+00:00",
             },
         },
-        now=datetime(2026, 8, 3, 15, 40, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 3, 15, 50, tzinfo=timezone.utc),
     )
 
     reviews = list(
@@ -738,7 +738,7 @@ def test_provider_failure_moves_locked_draft_to_error(
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     mark_provider_error(
@@ -746,7 +746,7 @@ def test_provider_failure_moves_locked_draft_to_error(
         month=8,
         audiences={"lifestyle"},
         error="provider verification failed",
-        now=datetime(2026, 8, 2, 15, 40, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 50, tzinfo=timezone.utc),
     )
 
     metadata = json.loads((period / ".metadata.json").read_text())

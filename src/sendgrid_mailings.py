@@ -88,7 +88,7 @@ def mailing_schedule(
     class_date: date | None,
 ) -> datetime:
     if purpose is MailingPurpose.MONTHLY:
-        return _at_mountain(_first_business_day(year, month), 9, 39)
+        return _at_mountain(_first_business_day(year, month), 9, 49)
     if class_date is None:
         raise ValueError("Habit mailing requires a class date")
     if (class_date.year, class_date.month) != (year, month):
@@ -97,26 +97,26 @@ def mailing_schedule(
         return _at_mountain(
             _previous_weekday_strictly_before(class_date, 0),
             9,
-            39,
+            49,
         )
     if purpose is MailingPurpose.RESEND:
         return _at_mountain(
             _previous_weekday_strictly_before(class_date, 2),
             9,
-            39,
+            49,
         )
     if purpose is MailingPurpose.GENTLE_REMINDER:
         return _at_mountain(
             _previous_weekday_strictly_before(class_date, 4),
             17,
-            0,
+            17,
         )
     if purpose is MailingPurpose.REGISTERED_REMINDER:
-        return _at_mountain(class_date - timedelta(days=1), 10, 0)
+        return _at_mountain(class_date - timedelta(days=1), 10, 17)
     if purpose is MailingPurpose.FOLLOW_UP_1:
-        return _at_mountain(class_date + timedelta(days=1), 10, 0)
+        return _at_mountain(class_date + timedelta(days=1), 10, 17)
     if purpose is MailingPurpose.FOLLOW_UP_2:
-        return _at_mountain(class_date + timedelta(days=7), 10, 0)
+        return _at_mountain(class_date + timedelta(days=7), 10, 17)
     raise ValueError("unsupported mailing purpose")
 
 

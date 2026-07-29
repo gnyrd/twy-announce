@@ -40,7 +40,7 @@ def test_scheduler_keeps_draft_editable_before_scheduling_window():
         year=2026,
         month=8,
         class_date=date(2026, 8, 8),
-        now=datetime(2026, 8, 2, 15, 38, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 48, tzinfo=timezone.utc),
     )
 
     assert campaigns.calls == []
@@ -48,8 +48,8 @@ def test_scheduler_keeps_draft_editable_before_scheduling_window():
         "id": "Monthly",
         "status": "ready",
         "provider_status": "draft",
-        "schedule_at": "2026-08-02T15:39:00+00:00",
-        "send_at": "2026-08-03T15:39:00+00:00",
+        "schedule_at": "2026-08-02T15:49:00+00:00",
+        "send_at": "2026-08-03T15:49:00+00:00",
     }
 
 
@@ -64,13 +64,13 @@ def test_scheduler_schedules_automatically_at_window_boundary():
         year=2026,
         month=8,
         class_date=date(2026, 8, 8),
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     assert campaigns.calls == [
         (
             MailingPurpose.MONTHLY,
-            datetime(2026, 8, 3, 15, 39, tzinfo=timezone.utc),
+            datetime(2026, 8, 3, 15, 49, tzinfo=timezone.utc),
         ),
     ]
     assert results["Monthly"]["status"] == "scheduled"
@@ -121,7 +121,7 @@ def test_scheduler_handles_monthly_only_without_a_habit_class():
         year=2026,
         month=8,
         class_date=None,
-        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
     )
 
     assert set(results) == {"Monthly"}

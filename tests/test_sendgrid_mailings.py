@@ -46,25 +46,25 @@ def test_august_schedule_is_calculated_in_mountain_time():
     class_date = date(2026, 8, 8)
     assert mailing_schedule(
         2026, 8, MailingPurpose.MONTHLY, class_date
-    ).isoformat() == "2026-08-03T15:39:00+00:00"
+    ).isoformat() == "2026-08-03T15:49:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.GENERAL_INVITATION, class_date
-    ).isoformat() == "2026-08-03T15:39:00+00:00"
+    ).isoformat() == "2026-08-03T15:49:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.RESEND, class_date
-    ).isoformat() == "2026-08-05T15:39:00+00:00"
+    ).isoformat() == "2026-08-05T15:49:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.REGISTERED_REMINDER, class_date
-    ).isoformat() == "2026-08-07T16:00:00+00:00"
+    ).isoformat() == "2026-08-07T16:17:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.GENTLE_REMINDER, class_date
-    ).isoformat() == "2026-08-07T23:00:00+00:00"
+    ).isoformat() == "2026-08-07T23:17:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.FOLLOW_UP_1, class_date
-    ).isoformat() == "2026-08-09T16:00:00+00:00"
+    ).isoformat() == "2026-08-09T16:17:00+00:00"
     assert mailing_schedule(
         2026, 8, MailingPurpose.FOLLOW_UP_2, class_date
-    ).isoformat() == "2026-08-15T16:00:00+00:00"
+    ).isoformat() == "2026-08-15T16:17:00+00:00"
 
 
 def test_monthly_schedule_does_not_require_a_habit_class():
@@ -73,7 +73,7 @@ def test_monthly_schedule_does_not_require_a_habit_class():
         8,
         MailingPurpose.MONTHLY,
         None,
-    ).isoformat() == "2026-08-03T15:39:00+00:00"
+    ).isoformat() == "2026-08-03T15:49:00+00:00"
 
 
 def test_general_invitation_uses_subscriber_parent_and_excludes_members():
