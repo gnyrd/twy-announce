@@ -1,10 +1,13 @@
 """Provider-neutral rendering for TWY newsletters."""
 
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 import re
 
 from bs4 import BeautifulSoup
 import markdown as md
+from twy_paths import newsletters_dir
 
 
 @dataclass(frozen=True)
@@ -65,7 +68,107 @@ def _render_plain_text(html: str) -> str:
     return "\n".join(line for line in lines if line) + "\n"
 
 
-def render_newsletter(body_md: str) -> RenderedNewsletter:
-    html = _render_html(body_md)
-    plain_text = _render_plain_text(html)
+def _template_path() -> Path:
+    return newsletters_dir() / "twy_newsletter_template.html"
+
+
+def _load_template_html() -> str | None:
+    path = _template_path()
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _find_main_content(soup: BeautifulSoup):
+    return soup.find(attrs={"mc:edit": "main_content"})
+
+
+def _adapt_newsletter_template_for_sendgrid(template: str) -> str:
+    html = re.sub(
+        r"<!--\*\|IF:MC_PREVIEW_TEXT\|\*-->.*?<!--\*\|END:IF\|\*-->",
+        "",
+        template,
+        flags=re.DOTALL,
+    )
+    html = re.sub(
+        r"\*\|IFNOT:ARCHIVE_PAGE\|\*.*?\*\|END:IF\|\*",
+        "",
+        html,
+        flags=re.DOTALL,
+    )
+    replacements = {
+        "*|MC:SUBJECT|*": "Tiffany Wood Yoga",
+        "*|MC_PREVIEW_TEXT|*": "",
+        "*|UPDATE_PROFILE|*": "<%asm_preferences_raw_url%>",
+        "*|UNSUB|*": "<%asm_group_unsubscribe_raw_url%>",
+        "*|CURRENT_YEAR|*": str(datetime.now().year),
+        "*|LIST:COMPANY|*": "Tiffany Wood Yoga",
+        "*|LIST:DESCRIPTION|*": "",
+        "*|HTML:LIST_ADDRESS_HTML|*": "",
+        "*|FORWARD|*": "",
+        "*|EMAIL|*": "",
+    }
+    for source, target in replacements.items():
+        html = html.replace(source, target)
+    return re.sub(r"\*\|[^|]+\|\*", "", html)
+
+
+def _wrap_with_newsletter_template(body_html: str) -> str:
+    template = _load_template_html()
+    if not template:
+        return body_html
+    template = _adapt_newsletter_template_for_sendgrid(template)
+    soup = BeautifulSoup(template, "html.parser")
+    main_content = _find_main_content(soup)
+    if main_content is None:
+        return body_html
+    body_soup = BeautifulSoup(body_html, "html.parser")
+    main_content.clear()
+    del main_content["mc:edit"]
+    for child in list(body_soup.contents):
+        main_content.append(child)
+    return (
+        str(soup)
+        .replace(
+            "&lt;%asm_preferences_raw_url%&gt;",
+            "<%asm_preferences_raw_url%>",
+        )
+        .replace(
+            "&lt;%asm_group_unsubscribe_raw_url%&gt;",
+            "<%asm_group_unsubscribe_raw_url%>",
+        )
+    )
+
+
+def _with_hidden_preheader(html: str, preheader: str) -> str:
+    clean_preheader = preheader.strip()
+    if not clean_preheader:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    hidden = soup.new_tag("div")
+    hidden["style"] = (
+        "display:none;max-height:0;overflow:hidden;opacity:0;"
+        "color:transparent;mso-hide:all;"
+    )
+    hidden.string = clean_preheader
+    if soup.body:
+        soup.body.insert(0, hidden)
+        return str(soup)
+    return f"{hidden}{html}"
+
+
+def render_newsletter(
+    body_md: str,
+    *,
+    use_template: bool = False,
+    preheader: str = "",
+) -> RenderedNewsletter:
+    body_html = _render_html(body_md)
+    html = (
+        _wrap_with_newsletter_template(body_html)
+        if use_template
+        else body_html
+    )
+    html = _with_hidden_preheader(html, preheader)
+    plain_text = _render_plain_text(body_html)
     return RenderedNewsletter(html=html, plain_text=plain_text)

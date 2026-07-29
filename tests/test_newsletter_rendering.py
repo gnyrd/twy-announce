@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 from pathlib import Path
 
 from newsletter_rendering import render_newsletter
@@ -22,12 +23,72 @@ EXPECTED_SAMPLE_HTML = (
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+def _write_newsletter_template(tmp_path):
+    root = tmp_path / "newsletters"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "twy_newsletter_template.html").write_text(
+        '<html><head><title>*|MC:SUBJECT|*</title></head>'
+        '<body style="background-color:#5d8399;">'
+        '<div class="before">Header</div>'
+        '<div mc:edit="main_content"><p>Newsletter content goes here.</p></div>'
+        '<div class="after">'
+        '<a href="*|UPDATE_PROFILE|*">Update your preferences</a>'
+        '<a href="*|UNSUB|*">Unsubscribe</a>'
+        '*|CURRENT_YEAR|* *|LIST:COMPANY|*'
+        '</div>'
+        '</body></html>'
+    )
+
 CORPUS_HASHES = {
     FIXTURE_DIR / "newsletter_lifestyle.md":
         "e6818fffd893a3bb51c1add69b25ea759ab47af60d321bd7f4eb6d72cca5cf05",
     FIXTURE_DIR / "newsletter_non_lifestyle.md":
         "3cc131d9da9ae97b85abc1ca7bef44e4f1d94a5eef11deff72ef17cf8c4868f9",
 }
+
+
+
+def test_render_newsletter_wraps_body_in_twy_template(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+
+    rendered = render_newsletter(
+        "Opening paragraph.\n\n[Register](https://habit.tiffanywoodyoga.com/)",
+        use_template=True,
+    )
+
+    assert rendered.html.startswith("<html>")
+    assert "background-color:#5d8399" in rendered.html
+    assert "Opening paragraph." in rendered.html
+    assert "Register" in rendered.html
+    assert "Newsletter content goes here" not in rendered.html
+    assert "*|" not in rendered.html
+    assert "mc:" not in rendered.html
+    assert "<%asm_preferences_raw_url%>" in rendered.html
+    assert "<%asm_group_unsubscribe_raw_url%>" in rendered.html
+    assert rendered.plain_text == (
+        "Opening paragraph.\n"
+        "Register (https://habit.tiffanywoodyoga.com/)\n"
+    )
+
+
+def test_render_newsletter_includes_hidden_preheader_only_in_html(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+    assert "preheader" in inspect.signature(render_newsletter).parameters
+
+    rendered = render_newsletter(
+        "Opening paragraph.",
+        use_template=True,
+        preheader="A clear August note",
+    )
+
+    assert "A clear August note" in rendered.html
+    assert "display:none" in rendered.html
+    assert "A clear August note" not in rendered.plain_text
+    assert rendered.plain_text == "Opening paragraph.\n"
 
 
 def test_render_newsletter_builds_html_and_text():

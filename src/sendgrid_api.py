@@ -415,8 +415,17 @@ class SendGridAPI:
             json=payload,
         )
 
+    def delete_single_send(self, single_send_id: str) -> None:
+        self._request(
+            "DELETE",
+            f"/marketing/singlesends/{single_send_id}",
+        )
+
     def get_single_send(self, single_send_id: str) -> dict:
         return self._request("GET", f"/marketing/singlesends/{single_send_id}")
+
+    def send_mail(self, payload: dict) -> None:
+        self._request("POST", "/mail/send", json=payload)
 
     def get_design(self, design_id: str) -> dict:
         return self._request("GET", f"/designs/{design_id}")

@@ -48,7 +48,7 @@ def mailing_name(
         else "Yoga Habit"
     )
     return validate_sendgrid_name(
-        f"{program}: {year:04d}_{month:02d}: {purpose.value}"
+        f"{year:04d}_{month:02d}: {program}: {purpose.value}"
     )
 
 

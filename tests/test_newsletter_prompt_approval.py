@@ -8,7 +8,13 @@ import habit_newsletter_prompt
 from habit_newsletter_prompt import (
     NewsletterApprovalError,
     _format_recent_references,
+    assemble_gentle_nudge_prompt,
+    assemble_lifestyle_prompt,
     assemble_non_lifestyle_prompt,
+    assemble_non_opener_prompt,
+    assemble_ph1_prompt,
+    assemble_ph2_prompt,
+    assemble_reminder_prompt,
 )
 
 
@@ -55,7 +61,7 @@ def prompt_inputs(monkeypatch, tmp_path):
                         "review_id": "a" * 32,
                         "audience_key": "non_lifestyle",
                         "mailing_name": (
-                            "Yoga Habit: 2026_08: General Invitation"
+                            "2026_08: Yoga Habit: General Invitation"
                         ),
                         "subject": "Approved reference subject",
                         "body": "Approved reference sentinel",
@@ -132,6 +138,50 @@ def test_prompt_includes_only_matching_approved_inputs(
     assert "Approved guideline sentinel" in prompt
     assert "Approved reference sentinel" in prompt
     assert "Other audience sentinel" not in prompt
+
+
+def test_prompt_requires_preheader_output(
+    prompt_inputs,
+    sample_overview,
+    sample_plans,
+):
+    prompt = assemble_non_lifestyle_prompt(
+        sample_overview,
+        sample_plans,
+        2026,
+        4,
+    )
+
+    assert "subject, preheader, and body" in prompt
+    assert "inbox preview" in prompt
+    assert "do not repeat the subject" in prompt.lower()
+    assert "Output ONLY a subject line and a body" not in prompt
+
+
+@pytest.mark.parametrize(
+    ("assembler", "subject_job"),
+    [
+        (assemble_lifestyle_prompt, "Member monthly story"),
+        (assemble_non_lifestyle_prompt, "General invitation"),
+        (assemble_non_opener_prompt, "Non-opener resend"),
+        (assemble_reminder_prompt, "Registered-attendee reminder"),
+        (assemble_gentle_nudge_prompt, "Gentle nudge"),
+        (assemble_ph1_prompt, "First post-class follow-up"),
+        (assemble_ph2_prompt, "Second post-class follow-up"),
+    ],
+)
+def test_each_audience_prompt_has_its_own_subject_job(
+    assembler,
+    subject_job,
+    prompt_inputs,
+    sample_overview,
+    sample_plans,
+):
+    prompt = assembler(sample_overview, sample_plans, 2026, 4)
+
+    assert f"SUBJECT JOB: {subject_job}" in prompt
+    assert "Use it EXACTLY in the SUBJECT line" not in prompt
+    assert "Do not invent or rename the canonical monthly theme" in prompt
 
 
 def test_recent_references_do_not_glob_newsletter_directory(

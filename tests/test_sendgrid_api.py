@@ -55,6 +55,17 @@ def test_delete_list_uses_exact_marketing_endpoint():
     assert fake.calls[-1]["url"].endswith("/v3/marketing/lists/list-1")
 
 
+def test_delete_single_send_uses_exact_marketing_endpoint():
+    api, fake = make_api(FakeResponse(204, None))
+
+    api.delete_single_send("single-send-1")
+
+    assert fake.calls[-1]["method"] == "DELETE"
+    assert fake.calls[-1]["url"].endswith(
+        "/v3/marketing/singlesends/single-send-1"
+    )
+
+
 def test_marketing_lists_return_complete_inventory():
     api, fake = make_api(FakeResponse(200, {
         "result": [{"id": "list-1", "name": "TWY Marketing"}],
@@ -579,7 +590,7 @@ def test_segment_v2_lifecycle_uses_documented_endpoints():
     )
     assert api.segments()[0]["id"] == "segment-1"
     created = api.create_segment(
-        name="Yoga Habit: 2026_08: General Invitation",
+        name="2026_08: Yoga Habit: General Invitation",
         query_dsl="SELECT contact_id, updated_at FROM contact_data",
         parent_list_ids=["list-1"],
     )
@@ -613,3 +624,25 @@ def test_single_send_update_and_unschedule():
     assert fake.calls[1]["url"].endswith(
         "/v3/marketing/singlesends/send-1/schedule"
     )
+
+
+def test_send_mail_posts_direct_content_to_mail_send_endpoint():
+    payload = {
+        "personalizations": [
+            {"to": [{"email": "tiffany@tiffanywoodyoga.com"}]}
+        ],
+        "from": {"email": "hello@tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
+        "subject": "Test - August",
+        "content": [
+            {"type": "text/plain", "value": "Plain body\n"},
+            {"type": "text/html", "value": "<p>HTML body</p>"},
+        ],
+    }
+    api, fake = make_api(FakeResponse(202, None))
+    assert hasattr(api, "send_mail")
+
+    api.send_mail(payload)
+
+    assert fake.calls[-1]["method"] == "POST"
+    assert fake.calls[-1]["url"].endswith("/v3/mail/send")
+    assert fake.calls[-1]["json"] == payload

@@ -40,7 +40,7 @@ def test_collect_review_requires_triggered_single_send(tmp_path):
             api=api,
             single_send_id="sg-id",
             generated_path=_generated_file(tmp_path),
-            mailing_name="Yoga Habit: 2026_08: General Invitation",
+            mailing_name="2026_08: Yoga Habit: General Invitation",
             audience_key="non_lifestyle",
             captured_at="2026-08-04T10:15:00-06:00",
         )
@@ -67,7 +67,7 @@ def test_collect_review_reads_design_and_writes_provider_neutral_record(
         single_send={
             "id": "sg-id",
             "status": "triggered",
-            "name": "Yoga Habit: 2026_08: General Invitation",
+            "name": "2026_08: Yoga Habit: General Invitation",
             "send_at": "2026-08-04T16:00:00Z",
             "email_config": {"design_id": "design-id"},
         },
@@ -82,7 +82,7 @@ def test_collect_review_reads_design_and_writes_provider_neutral_record(
         api=api,
         single_send_id="sg-id",
         generated_path=_generated_file(tmp_path),
-        mailing_name="Yoga Habit: 2026_08: General Invitation",
+        mailing_name="2026_08: Yoga Habit: General Invitation",
         audience_key="non_lifestyle",
         captured_at="2026-08-04T10:15:00-06:00",
     )
@@ -119,7 +119,7 @@ def test_collect_review_supports_api_created_inline_content(
         single_send={
             "id": "sg-id",
             "status": "triggered",
-            "name": "Yoga Habit: 2026_08: General Invitation",
+            "name": "2026_08: Yoga Habit: General Invitation",
             "send_at": "2026-08-04T16:00:00Z",
             "email_config": {
                 "subject": "Tiff subject",
@@ -132,7 +132,7 @@ def test_collect_review_supports_api_created_inline_content(
         api=api,
         single_send_id="sg-id",
         generated_path=_generated_file(tmp_path),
-        mailing_name="Yoga Habit: 2026_08: General Invitation",
+        mailing_name="2026_08: Yoga Habit: General Invitation",
         audience_key="non_lifestyle",
         captured_at="2026-08-04T10:15:00-06:00",
     )
@@ -149,7 +149,7 @@ def test_collect_review_rejects_mismatched_mailing_name(tmp_path):
         single_send={
             "id": "sg-id",
             "status": "triggered",
-            "name": "Yoga Lifestyle: 2026_08: Monthly",
+            "name": "2026_08: Yoga Lifestyle: Monthly",
         }
     )
 
@@ -158,7 +158,7 @@ def test_collect_review_rejects_mismatched_mailing_name(tmp_path):
             api=api,
             single_send_id="sg-id",
             generated_path=_generated_file(tmp_path),
-            mailing_name="Yoga Habit: 2026_08: General Invitation",
+            mailing_name="2026_08: Yoga Habit: General Invitation",
             audience_key="non_lifestyle",
             captured_at="2026-08-04T10:15:00-06:00",
         )

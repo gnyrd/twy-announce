@@ -31,7 +31,7 @@ def _patch_locations(monkeypatch, tmp_path):
 
 def test_identical_content_produces_stable_review_and_candidate_ids():
     arguments = {
-        "mailing_name": "Yoga Habit: 2026_08: General Invitation",
+        "mailing_name": "2026_08: Yoga Habit: General Invitation",
         "audience_key": "non_lifestyle",
         "captured_at": "2026-08-04T10:15:00-06:00",
         "provider_single_send_id": "sg-single-send",
@@ -58,7 +58,7 @@ def test_compiler_includes_only_done_reusable_approvals(monkeypatch, tmp_path):
     comparison = {
         "schema_version": 1,
         "review_id": "a" * 32,
-        "mailing_name": "Yoga Habit: 2026_08: General Invitation",
+        "mailing_name": "2026_08: Yoga Habit: General Invitation",
         "audience_key": "non_lifestyle",
         "captured_at": "2026-08-04T10:15:00-06:00",
         "provider": "sendgrid",
@@ -142,7 +142,7 @@ def test_compiler_includes_only_done_reusable_approvals(monkeypatch, tmp_path):
 def test_compiler_rejects_incomplete_reusable_decisions(monkeypatch, tmp_path):
     diffs, reviews = _patch_locations(monkeypatch, tmp_path)
     comparison = build_review_record(
-        mailing_name="Yoga Lifestyle: 2026_08: Monthly",
+        mailing_name="2026_08: Yoga Lifestyle: Monthly",
         audience_key="lifestyle",
         captured_at="2026-08-03T09:39:00-06:00",
         provider_single_send_id="single-send",
@@ -181,7 +181,7 @@ def test_compiler_rejects_incomplete_reusable_decisions(monkeypatch, tmp_path):
 def test_empty_reusable_review_is_completed_automatically(monkeypatch, tmp_path):
     _, reviews = _patch_locations(monkeypatch, tmp_path)
     comparison = build_review_record(
-        mailing_name="Yoga Lifestyle: 2026_08: Monthly",
+        mailing_name="2026_08: Yoga Lifestyle: Monthly",
         audience_key="lifestyle",
         captured_at="2026-08-03T09:39:00-06:00",
         provider_single_send_id="single-send",

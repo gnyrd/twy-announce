@@ -18,13 +18,13 @@ from sendgrid_mailings import (
 
 def test_locked_mailing_names_use_approved_shape():
     assert mailing_name(2026, 8, MailingPurpose.MONTHLY) == (
-        "Yoga Lifestyle: 2026_08: Monthly"
+        "2026_08: Yoga Lifestyle: Monthly"
     )
     assert mailing_name(2026, 8, MailingPurpose.GENERAL_INVITATION) == (
-        "Yoga Habit: 2026_08: General Invitation"
+        "2026_08: Yoga Habit: General Invitation"
     )
     assert mailing_name(2026, 8, MailingPurpose.FOLLOW_UP_2) == (
-        "Yoga Habit: 2026_08: Follow Up 2"
+        "2026_08: Yoga Habit: Follow Up 2"
     )
     assert EMAIL_SUBSCRIBED == "Email: Subscribed"
     assert MEMBER_YOGA_LIFESTYLE == "Member: Yoga Lifestyle"

@@ -55,6 +55,10 @@ class SendGridRegistry:
         return int(self.payload["sender"]["id"])
 
     @property
+    def sender_email(self) -> str:
+        return str(self.payload["sender"]["email"])
+
+    @property
     def suppression_group_id(self) -> int:
         return int(self.payload["suppression_group"]["id"])
 
@@ -155,10 +159,12 @@ class SendGridCampaigns:
         month: int,
         subject: str,
         body_md: str,
+        preheader: str = "",
         send_to: dict,
     ) -> dict:
         clean_subject = subject.strip()
         clean_body = body_md.strip()
+        clean_preheader = preheader.strip()
         if not clean_subject or not clean_body:
             raise ValueError("SendGrid draft requires subject and body")
         name = mailing_name(year, month, purpose)
@@ -176,7 +182,11 @@ class SendGridCampaigns:
         if send_to.get("all") or not (list_ids or segment_ids):
             raise ValueError("Single Send must use bounded recipients")
 
-        rendered = render_newsletter(clean_body)
+        rendered = render_newsletter(
+            clean_body,
+            use_template=True,
+            preheader=clean_preheader,
+        )
         payload = {
             "name": name,
             "send_to": {
@@ -202,7 +212,7 @@ class SendGridCampaigns:
             "id": identifier,
             "name": name,
             "source_sha256": hashlib.sha256(
-                f"{clean_subject}\n{clean_body}".encode()
+                f"{clean_subject}\n{clean_preheader}\n{clean_body}".encode()
             ).hexdigest(),
             "send_to": payload["send_to"],
         }
@@ -230,7 +240,17 @@ class SendGridCampaigns:
                 raise ValueError("persisted SendGrid segment name mismatch")
             persisted_query = segment.get("query_dsl")
             if persisted_query and persisted_query != query_dsl:
-                raise ValueError("persisted SendGrid segment query mismatch")
+                segment = self.api.update_segment(
+                    existing["id"],
+                    name=name,
+                    query_dsl=query_dsl,
+                    parent_list_ids=parent_list_ids,
+                )
+                state.setdefault("segments", {})[key].update({
+                    "query_sha256": hashlib.sha256(query_dsl.encode()).hexdigest(),
+                    "parent_list_ids": list(parent_list_ids or []),
+                })
+                self._save_state(state)
             return segment
 
         segment = self.api.create_segment(

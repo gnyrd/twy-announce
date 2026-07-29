@@ -23,13 +23,35 @@ Never write from the curriculum. Always write from the student's lived experienc
 Answer "why does this matter in my life?", never "what is Tiffany teaching?" The overview, teaching notes, UPAs, apex pose, and teaching lens are TEACHER'S NOTES: they tell you what the month is about so you can write from the student's lived experience. Never quote, transcribe, or describe them as curriculum in the body."""
 
 _HARD_RULES = """RULES (mandatory, no exceptions). Read first, follow without exception:
-1. Output ONLY a subject line and a body. NO markdown headers anywhere -- no `#`, no `##`, no decorative title line above or inside the body. The body is flowing prose, not a document with sections. The submission API rejects any body that begins with `#`.
-2. The Theme title below is the canonical theme. Use it EXACTLY in the SUBJECT line. Do NOT invent a different theme name, layer a poetic umbrella over it, or substitute a parallel framing. In the body the theme is the silent throughline, not a stated heading and not a described topic.
+1. Output exactly three top-level fields for the API: subject, preheader, and body. The preheader is required inbox preview text. It should make the email worth opening by teasing the lived moment, body relevance, or specific invitation inside the email. Keep it short, specific, and human. Do not repeat the subject. Do not use clickbait, fake urgency, or a rhetorical-question hook. NO markdown headers anywhere in the body -- no `#`, no `##`, no decorative title line above or inside the body. The body is flowing prose, not a document with sections. The submission API rejects any body that begins with `#`.
+2. Do not invent or rename the canonical monthly theme when one is provided. The theme is source context, not a universal subject line. Follow the audience-specific SUBJECT JOB below. In the body the theme is the silent throughline, not a stated heading and not a described topic.
 3. Do NOT introduce outside content -- no CHANI astrology references, no invented season names, no umbrella themes from external sources. The astrology disclaimer (where present below) is the only authorization to mention astrology, and only as a felt quality with no planet names, dates, or events.
 
 4. No em-dashes, no en-dashes, and no semicolons anywhere in your output, in the subject or the body. They are banned from TWY copy, even when the reference exemplars below use them. Replace each with a period and a new sentence, a comma, parentheses, or a reworded phrase. A plain hyphen joining words is fine. The long em-dash and medium en-dash characters and the semicolon are not.
 
 These rules apply to ALL output. The submission API will reject violations of rule 1 and you will be asked to resubmit."""
+
+_SUBJECT_JOBS = {
+    "lifestyle": """SUBJECT JOB: Member monthly story
+Write a descriptive subject for current Yoga Lifestyle members. Signal the monthly member note and include the canonical monthly theme in a natural way. Do not use the bare theme title by itself.""",
+    "non_lifestyle": """SUBJECT JOB: General invitation
+Invite an established practitioner into the free Yoga Habit class through one specific lived benefit, body experience, or class angle. Do not use the monthly theme by itself. Do not duplicate the member monthly subject.""",
+    "non_opener": """SUBJECT JOB: Non-opener resend
+Give the unopened general invitation a genuinely different subject and angle. Keep it low-key or use one concrete body moment from the class. Do not repeat the general invitation subject and do not use the monthly theme by itself.""",
+    "reminder": """SUBJECT JOB: Registered-attendee reminder
+Write a warm, functional subject for someone who is already registered. Signal tomorrow, readiness, or the class title. Do not market the class and do not use the monthly theme by itself.""",
+    "gentle_nudge": """SUBJECT JOB: Gentle nudge
+Write a soft in-case-you-meant-to subject for someone who opened the invitation but did not register. Do not manufacture urgency. Do not repeat either non-member invitation subject and do not use the monthly theme by itself.""",
+    "ph1": """SUBJECT JOB: First post-class follow-up
+Write a direct thank-you or immediate reflection subject for someone who attended yesterday. It should sound like the conversation after class, not a monthly campaign. Do not use the monthly theme by itself.""",
+    "ph2": """SUBJECT JOB: Second post-class follow-up
+Write a week-later continuation subject that reopens the invitation without forced urgency. It must differ from the first follow-up subject and must not use the monthly theme by itself.""",
+}
+
+
+def _subject_job(audience: str) -> str:
+    return _SUBJECT_JOBS[audience]
+
 
 _VOICE_GUARDRAILS = """VOICE NOTES (guidance, not rigid rules):
 
@@ -283,6 +305,8 @@ def assemble_lifestyle_prompt(overview: dict, plans: dict, year: int, month: int
 
 {_VOICE_GUARDRAILS}
 
+{_subject_job("lifestyle")}
+
 {approved_guidance}
 
 Month: {habit_date.strftime('%B %Y')}
@@ -318,7 +342,7 @@ OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted
 - {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
 
 Hard limit: 300 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body). The theme name belongs in the subject line, not as a line in the body. No bullets except for event details.
+Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body). No bullets except for event details.
 
 {recent_refs}"""
 
@@ -338,6 +362,8 @@ def assemble_non_lifestyle_prompt(overview: dict, plans: dict, year: int, month:
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
+
+{_subject_job("non_lifestyle")}
 
 {approved_guidance}
 
@@ -364,7 +390,7 @@ OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
 Hard limit: 175 words. Subject line included, not counted.
-Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. The theme name belongs in the subject line, not as a line in the body. No bullets.
+Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. No bullets.
 
 {recent_refs}"""
 
@@ -446,6 +472,8 @@ def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 
 {_VOICE_GUARDRAILS}
 
+{_subject_job("ph1")}
+
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
@@ -487,6 +515,8 @@ def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
+
+{_subject_job("ph2")}
 
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
@@ -530,6 +560,8 @@ def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: in
 
 {_VOICE_GUARDRAILS}
 
+{_subject_job("non_opener")}
+
 These readers have NO prior context about this class. They did not see the first email. DO NOT write as a reminder. DO NOT use phrases like "still time," "last call," "don't forget," "just a reminder," or "Yoga Habit is coming up." Write as if introducing the class to them fresh.
 
 The first send opened with: "If your practice has been feeling stuck... this is usually why. You're trying to open without support." Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
@@ -571,6 +603,8 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
 
 {_VOICE_GUARDRAILS}
 
+{_subject_job("reminder")}
+
 This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT invite them to bring a friend. Do NOT include a Register CTA button — they are already registered.
 
 Yoga Habit class details — use ONLY these. Do not invent or embellish:
@@ -608,6 +642,8 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
 {_HARD_RULES}
 
 {_VOICE_GUARDRAILS}
+
+{_subject_job("gentle_nudge")}
 
 They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently — in case they meant to register and forgot. If they decided not to come, that is also fine.
 
