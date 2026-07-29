@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 
 import social_growth_report as social_growth
 
+CAPTURED_AT = datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc)
+
+
 
 def write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +63,7 @@ def create_marvy_db(path):
 def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatch):
     monkeypatch.delenv("PLAUSIBLE_API_KEY", raising=False)
     monkeypatch.delenv("PLAUSIBLE_SITE_ID", raising=False)
+    monkeypatch.delenv("PLAUSIBLE_SITE_IDS", raising=False)
     twy_root = tmp_path
     data_root = tmp_path / "data"
     captured_at = datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc)
@@ -125,6 +129,17 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "ig_history": 3,
         "clip_pool_warning_active": False,
         "clip_pool_warning_posted_to_slack": True,
+    }
+    assert snapshot["websites"] == {
+        "status": "not_configured",
+        "captured_at": "2026-07-27T20:15:00Z",
+        "properties": {
+            "habit": {
+                "status": "not_configured",
+                "site_id": "habit.tiffanywoodyoga.com",
+                "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_IDS"],
+            }
+        },
     }
     assert snapshot["landing_page"]["plausible"]["status"] == "not_configured"
     assert snapshot["external_benchmarks"]["socialblade"]["status"] == "not_configured"
@@ -290,6 +305,8 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
         "visits": 5,
         "pageviews": 8,
         "events": 8,
+        "utm_sources": [{"metrics": [5, 5, 8, 8], "dimensions": []}],
+        "tracked_events": [{"metrics": [5, 5, 8, 8], "dimensions": []}],
         "query_date_range": ["2026-07-20T00:00:00-06:00", "2026-07-26T23:59:59-06:00"],
         "funnel_events": {
             "Habit Register Click": 5,
@@ -326,7 +343,9 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
             },
         ],
     }
-    assert [call["date_range"] for call in calls] == ["day", "day", "7d", "7d", "30d", "30d"]
+    assert [call["date_range"] for call in calls] == (
+        ["day"] * 4 + ["7d"] * 6 + ["30d"] * 6
+    )
     assert all(call["site_id"] == "habit.tiffanywoodyoga.com" for call in calls)
     event_calls = [
         call
@@ -336,6 +355,18 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
     assert len(event_calls) == 3
     assert all(call["metrics"] == ["events"] for call in event_calls)
     assert all(call["filters"][0][:2] == ["is", "event:name"] for call in event_calls)
+    breakdown_calls = [
+        call
+        for call in calls
+        if call.get("dimensions") in (
+            ["visit:source"],
+            ["visit:entry_page"],
+            ["visit:utm_source", "visit:utm_medium"],
+            ["event:name"],
+        )
+    ]
+    assert all(call["order_by"] for call in breakdown_calls)
+    assert all(call["pagination"] == {"limit": 20} for call in breakdown_calls)
     assert all(call["pagination"] == {"limit": 100} for call in event_calls)
 
 
@@ -356,6 +387,51 @@ def test_collect_plausible_status_reports_api_errors(monkeypatch):
         "site_id": "habit.tiffanywoodyoga.com",
         "error": "Plausible query failed: 401 invalid",
     }
+
+
+def test_plausible_sites_collect_each_property_independently():
+    queried_site_ids = []
+
+    def fake_query_by_site(site_id):
+        def query(body):
+            queried_site_ids.append(body["site_id"])
+            assert body["site_id"] == site_id
+            return {"results": [{"metrics": [5, 5, 8, 8], "dimensions": []}]}
+
+        return query
+
+    result = social_growth.collect_plausible_sites(
+        captured_at=CAPTURED_AT,
+        site_ids=list(social_growth.PLAUSIBLE_PROPERTY_ROLES),
+        post_query_for_site=fake_query_by_site,
+    )
+
+    assert set(result["properties"]) == {"main", "studio", "habit"}
+    assert result["properties"]["main"]["site_id"] == "tiffanywoodyoga.com"
+    assert result["properties"]["studio"]["site_id"] == "studio.tiffanywoodyoga.com"
+    assert result["properties"]["habit"]["site_id"] == "habit.tiffanywoodyoga.com"
+    assert set(queried_site_ids) == set(social_growth.PLAUSIBLE_PROPERTY_ROLES)
+
+
+def test_one_plausible_property_failure_is_partial_not_total():
+    def query_with_studio_failure(site_id):
+        def query(body):
+            if site_id == "studio.tiffanywoodyoga.com":
+                raise RuntimeError("studio unavailable")
+            return {"results": [{"metrics": [5, 5, 8, 8], "dimensions": []}]}
+
+        return query
+
+    result = social_growth.collect_plausible_sites(
+        captured_at=CAPTURED_AT,
+        site_ids=list(social_growth.PLAUSIBLE_PROPERTY_ROLES),
+        post_query_for_site=query_with_studio_failure,
+    )
+
+    assert result["status"] == "partial"
+    assert result["properties"]["main"]["status"] == "ok"
+    assert result["properties"]["studio"]["status"] == "error"
+    assert result["properties"]["habit"]["status"] == "ok"
 
 
 def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):

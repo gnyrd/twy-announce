@@ -34,6 +34,11 @@ DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 CONTENT_EXCERPT_CHARS = 280
 REQUIRED_REEL_HASHTAGS = ("#anusara", "#anusarayoga")
 GENERIC_FALLBACK_OPENER = "A short practice cue from Tiff's teaching library."
+PLAUSIBLE_PROPERTY_ROLES = {
+    "tiffanywoodyoga.com": "main",
+    "studio.tiffanywoodyoga.com": "studio",
+    "habit.tiffanywoodyoga.com": "habit",
+}
 PLAUSIBLE_FUNNEL_EVENTS = (
     "Habit Register Click",
     "Habit Newsletter Open",
@@ -532,19 +537,31 @@ def collect_zernio_recent_status(
     }
 
 
-def collect_plausible_status(
+
+
+def plausible_site_ids_from_env() -> list[str]:
+    return [
+        site_id.strip()
+        for site_id in os.getenv("PLAUSIBLE_SITE_IDS", "").split(",")
+        if site_id.strip()
+    ]
+
+
+def collect_plausible_property(
     *,
+    site_id: str,
+    role: str,
     captured_at: datetime,
     post_query: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    api_key = os.getenv("PLAUSIBLE_API_KEY", "").strip()
-    site_id = os.getenv("PLAUSIBLE_SITE_ID", "").strip()
-    if not api_key or not site_id:
-        return {
-            "status": "not_configured",
-            "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
-        }
     if post_query is None:
+        api_key = os.getenv("PLAUSIBLE_API_KEY", "").strip()
+        if not api_key:
+            return {
+                "status": "not_configured",
+                "site_id": site_id,
+                "required": ["PLAUSIBLE_API_KEY"],
+            }
         base_url = os.getenv("PLAUSIBLE_BASE_URL", DEFAULT_PLAUSIBLE_BASE_URL).rstrip("/")
 
         def post_query(body: dict[str, Any]) -> dict[str, Any]:
@@ -589,6 +606,57 @@ def collect_plausible_status(
                 "events": metrics[3] if len(metrics) > 3 else None,
                 "query_date_range": (payload.get("query") or {}).get("date_range"),
             }
+            utm_payload = post_query(
+                {
+                    "site_id": site_id,
+                    "metrics": ["visitors", "visits"],
+                    "date_range": date_range,
+                    "dimensions": ["visit:utm_source", "visit:utm_medium"],
+                    "order_by": [["visitors", "desc"]],
+                    "pagination": {"limit": 20},
+                }
+            )
+            results[label]["utm_sources"] = utm_payload.get("results") or []
+
+            events_payload = post_query(
+                {
+                    "site_id": site_id,
+                    "metrics": ["events"],
+                    "date_range": date_range,
+                    "dimensions": ["event:name"],
+                    "order_by": [["events", "desc"]],
+                    "pagination": {"limit": 20},
+                }
+            )
+            results[label]["tracked_events"] = events_payload.get("results") or []
+
+            if date_range in {"7d", "30d"}:
+                source_payload = post_query(
+                    {
+                        "site_id": site_id,
+                        "metrics": ["visitors", "visits"],
+                        "date_range": date_range,
+                        "dimensions": ["visit:source"],
+                        "order_by": [["visitors", "desc"]],
+                        "pagination": {"limit": 20},
+                    }
+                )
+                results[label]["sources"] = source_payload.get("results") or []
+                entry_page_payload = post_query(
+                    {
+                        "site_id": site_id,
+                        "metrics": ["visitors", "visits"],
+                        "date_range": date_range,
+                        "dimensions": ["visit:entry_page"],
+                        "order_by": [["visitors", "desc"]],
+                        "pagination": {"limit": 20},
+                    }
+                )
+                results[label]["entry_pages"] = entry_page_payload.get("results") or []
+
+            if role != "habit":
+                continue
+
             event_payload = post_query(
                 {
                     "site_id": site_id,
@@ -633,6 +701,79 @@ def collect_plausible_status(
             "site_id": site_id,
             "error": str(exc),
         }
+
+
+def collect_plausible_sites(
+    *,
+    captured_at: datetime,
+    site_ids: list[str] | None = None,
+    post_query_for_site=None,
+) -> dict[str, Any]:
+    configured = site_ids or plausible_site_ids_from_env()
+    if not configured:
+        return {
+            "status": "not_configured",
+            "captured_at": iso_z(captured_at),
+            "properties": {
+                "habit": {
+                    "status": "not_configured",
+                    "site_id": "habit.tiffanywoodyoga.com",
+                    "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_IDS"],
+                }
+            },
+        }
+
+    properties = {}
+    for site_id in configured:
+        if site_id not in PLAUSIBLE_PROPERTY_ROLES:
+            raise ValueError(f"Unknown Plausible site ID: {site_id}")
+        role = PLAUSIBLE_PROPERTY_ROLES[site_id]
+        properties[role] = collect_plausible_property(
+            site_id=site_id,
+            role=role,
+            captured_at=captured_at,
+            post_query=(
+                post_query_for_site(site_id)
+                if post_query_for_site
+                else None
+            ),
+        )
+    statuses = {item["status"] for item in properties.values()}
+    status = "ok" if statuses == {"ok"} else (
+        "error" if statuses == {"error"} else "partial"
+    )
+    return {
+        "status": status,
+        "captured_at": iso_z(captured_at),
+        "properties": properties,
+    }
+
+
+def collect_plausible_status(
+    *,
+    captured_at: datetime,
+    post_query: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    api_key = os.getenv("PLAUSIBLE_API_KEY", "").strip()
+    site_id = os.getenv("PLAUSIBLE_SITE_ID", "").strip()
+    if not api_key or not site_id:
+        return {
+            "status": "not_configured",
+            "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
+        }
+    role = PLAUSIBLE_PROPERTY_ROLES.get(site_id)
+    if role is None:
+        return {
+            "status": "error",
+            "site_id": site_id,
+            "error": f"Unknown Plausible site ID: {site_id}",
+        }
+    return collect_plausible_property(
+        site_id=site_id,
+        role=role,
+        captured_at=captured_at,
+        post_query=post_query,
+    )
 
 
 def collect_socialblade_status() -> dict[str, Any]:
@@ -827,6 +968,8 @@ def collect_snapshot(
         account_health = zernio_account_health() if zernio_account_health else None
     except Exception as exc:
         account_health = {"status": "error", "error": str(exc)}
+    websites = collect_plausible_sites(captured_at=captured_at)
+    habit_plausible = websites["properties"].get("habit", {})
     snapshot = {
         "date": captured_at.date().isoformat(),
         "captured_at": iso_z(captured_at),
@@ -853,9 +996,8 @@ def collect_snapshot(
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
         ),
-        "landing_page": {
-            "plausible": collect_plausible_status(captured_at=captured_at),
-        },
+        "websites": websites,
+        "landing_page": {"plausible": habit_plausible},
         "external_benchmarks": {
             "socialblade": collect_socialblade_status(),
         },
