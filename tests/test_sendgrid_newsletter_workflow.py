@@ -517,13 +517,12 @@ def test_lock_due_sections_creates_immutable_snapshot_at_window(
     assert json.loads(snapshot.read_text()) == payload
 
 
-def test_lock_due_sections_respects_hold_without_mutation(
+def test_lock_due_sections_ignores_legacy_hold_and_sends_current_draft(
     monkeypatch,
     tmp_path,
 ):
     monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
     period = _write_local_newsletter(tmp_path, hold=True)
-    original = (period / ".metadata.json").read_text()
 
     sections = lock_due_sections(
         year=2026,
@@ -532,9 +531,63 @@ def test_lock_due_sections_respects_hold_without_mutation(
         now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
     )
 
-    assert sections == {}
-    assert (period / ".metadata.json").read_text() == original
-    assert not (period / "snapshots").exists()
+    assert sections["lifestyle"]["subject"] == "August subject"
+    metadata = json.loads((period / ".metadata.json").read_text())
+    assert metadata["drafts"]["lifestyle"]["state"] == "locked"
+
+
+def test_lock_due_sections_uses_tiff_approved_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    period = _write_local_newsletter(
+        tmp_path,
+        subject="Changed after approval",
+        body="This must not replace Tiff's approval.",
+    )
+    approved_path = (
+        period / "snapshots" / "lifestyle" / "approved-example.json"
+    )
+    approved_path.parent.mkdir(parents=True)
+    approved_path.write_text(json.dumps({
+        "version": 1,
+        "kind": "approved",
+        "audience": "lifestyle",
+        "captured_at": "20260729T120000Z",
+        "content_sha256": "unused-by-reader",
+        "content": {
+            "subject": "Tiff approved subject",
+            "preheader": "Tiff approved preheader",
+            "body": "Tiff approved body.",
+        },
+    }))
+    metadata = json.loads((period / ".metadata.json").read_text())
+    metadata["drafts"]["lifestyle"].update({
+        "approved_at": "20260729T120000Z",
+        "approved_snapshot": str(
+            approved_path.relative_to(period)
+        ),
+        "edited_at": "20260729T120000Z",
+    })
+    (period / ".metadata.json").write_text(json.dumps(metadata))
+
+    sections = lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 39, tzinfo=timezone.utc),
+    )
+
+    assert sections["lifestyle"] == {
+        "subject": "Tiff approved subject",
+        "preheader": "Tiff approved preheader",
+        "body": "Tiff approved body.",
+    }
+    metadata = json.loads((period / ".metadata.json").read_text())
+    locked_path = period / metadata["drafts"]["lifestyle"]["locked_snapshot"]
+    locked = json.loads(locked_path.read_text())
+    assert locked["content"]["subject"] == "Tiff approved subject"
 
 
 def test_apply_provider_report_tracks_schedule_and_immutable_sent_snapshot(

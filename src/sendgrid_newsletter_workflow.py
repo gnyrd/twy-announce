@@ -308,7 +308,7 @@ def lock_due_sections(
                 _read_snapshot(year, month, snapshot_path)
             )
             continue
-        if state != "draft" or bool(entry.get("hold")):
+        if state != "draft":
             continue
 
         due = sections_due_for_materialization(
@@ -320,7 +320,21 @@ def lock_due_sections(
         )
         if key not in due:
             continue
-        _validate_sections_before_provider({key: section})
+        materialization_section = section
+        if entry.get("approved_at"):
+            approved_snapshot = str(
+                entry.get("approved_snapshot") or ""
+            )
+            if not approved_snapshot:
+                raise ValueError(
+                    f"{key} is approved without an approved snapshot"
+                )
+            materialization_section = _snapshot_content(
+                _read_snapshot(year, month, approved_snapshot)
+            )
+        _validate_sections_before_provider({
+            key: materialization_section,
+        })
         send_at = mailing_schedule(
             year,
             month,
@@ -328,7 +342,11 @@ def lock_due_sections(
             class_date,
         )
         captured_at = current.isoformat()
-        if not entry.get("original_snapshot") and not entry.get("edited_at"):
+        if (
+            not entry.get("original_snapshot")
+            and not entry.get("edited_at")
+            and not entry.get("approved_at")
+        ):
             generated_snapshot = _write_snapshot(
                 year=year,
                 month=month,
@@ -349,7 +367,7 @@ def lock_due_sections(
             month=month,
             key=key,
             kind="locked",
-            content=section,
+            content=materialization_section,
             captured_at=captured_at,
         )
         entry.update({
@@ -359,7 +377,7 @@ def lock_due_sections(
             "send_at": send_at.isoformat(),
         })
         changed = True
-        locked[key] = section
+        locked[key] = materialization_section
 
     if changed:
         metadata["drafts"] = drafts
