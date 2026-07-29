@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import pytest
 import social_growth_weekly as weekly
 
 
@@ -526,3 +527,48 @@ def test_slack_dm_targets_jp_and_is_idempotent(tmp_path, monkeypatch):
     assert calls[0]["url"] == "https://slack.com/api/chat.postMessage"
     assert calls[0]["json"]["channel"] == "UJP"
     assert calls[0]["headers"]["Authorization"] == "Bearer bot-token"
+    assert "https://stats.tiffanywoodyoga.com/" in calls[0]["json"]["text"]
+    assert "Cconfigured" not in json.dumps(calls[0])
+    assert calls[0]["json"]["client_msg_id"] == weekly.deterministic_client_msg_id(report["week_end"])
+
+
+def test_slack_dm_http_error_does_not_write_state(tmp_path):
+    report = weekly.build_weekly_review([], week_end=date(2026, 7, 28))
+    state_path = tmp_path / weekly.SLACK_STATE_FILE
+
+    def fake_post(url, **kwargs):
+        raise weekly.requests.HTTPError("Slack unavailable")
+
+    with pytest.raises(weekly.requests.HTTPError, match="Slack unavailable"):
+        weekly.post_slack_dm_once(
+            report,
+            state_path=state_path,
+            token="bot-token",
+            user_id="UJP",
+            post=fake_post,
+        )
+
+    assert not state_path.exists()
+
+
+def test_slack_dm_rejection_does_not_write_state(tmp_path):
+    report = weekly.build_weekly_review([], week_end=date(2026, 7, 28))
+    state_path = tmp_path / weekly.SLACK_STATE_FILE
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": False, "error": "channel_not_found"}
+
+    with pytest.raises(RuntimeError, match="channel_not_found"):
+        weekly.post_slack_dm_once(
+            report,
+            state_path=state_path,
+            token="bot-token",
+            user_id="UJP",
+            post=lambda url, **kwargs: Response(),
+        )
+
+    assert not state_path.exists()
