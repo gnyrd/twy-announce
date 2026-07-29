@@ -144,6 +144,7 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "upcoming_campaign_variants": [],
         "zernio_analytics_status": None,
         "zernio_api_errors": None,
+        "zernio_content_issues": None,
         "zernio_failed_posts": None,
         "zernio_status": "not_configured",
     }
@@ -441,6 +442,113 @@ def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):
     assert status["failed"][0]["zernio_post_id"] == "failed1"
     assert status["pending"][0]["zernio_post_id"] == "scheduled1"
     assert status["analytics"]["status"] == "not_configured"
+
+
+def test_zernio_post_row_checks_full_reel_caption_before_storing_excerpt():
+    long_caption = (
+        "Open the body without forcing the shape. " * 12
+        + "\n\n#anusara #anusarayoga #tiffanywoodyoga"
+    )
+    row = social_growth.zernio_post_row(
+        {
+            "scheduled_for": "2026-08-05T08:00:00-06:00",
+            "post_type": "reel",
+            "posted_for_class": "2026-08-06",
+            "class_name": "2026-07-22_breath",
+            "clip_name": "02_teaching_score8_15s",
+            "zernio_post_id": "post1",
+        },
+        {
+            "post": {
+                "title": "TWY IG Reel for 2026-08-06",
+                "status": "scheduled",
+                "content": long_caption,
+                "platforms": [
+                    {
+                        "status": "pending",
+                        "publishAttempts": 0,
+                        "platformSpecificData": {"contentType": "reels"},
+                    }
+                ],
+            }
+        },
+    )
+
+    assert row["content_length"] == len(long_caption)
+    assert row["content_truncated"] is True
+    assert len(row["content"]) == 280
+    assert row["content_issues"] == []
+
+
+def test_zernio_post_row_reports_missing_reel_hashtags_and_generic_fallback():
+    row = social_growth.zernio_post_row(
+        {
+            "scheduled_for": "2026-07-28T08:00:00-06:00",
+            "post_type": "reel",
+            "posted_for_class": "2026-07-29",
+            "class_name": "2026-07-13_strength",
+            "clip_name": "07_wisdom_score8_24s",
+            "zernio_post_id": "post1",
+        },
+        {
+            "post": {
+                "title": "TWY IG Reel for 2026-07-29",
+                "status": "scheduled",
+                "content": (
+                    "A short practice cue from Tiff's teaching library.\n\n"
+                    "Upcoming live class: Breath as Medicine, Wednesday, July 29.\n\n"
+                    "#anusara #tiffanywoodyoga"
+                ),
+                "platforms": [
+                    {
+                        "status": "pending",
+                        "publishAttempts": 0,
+                        "platformSpecificData": {"contentType": "reels"},
+                    }
+                ],
+            }
+        },
+    )
+
+    assert row["content_issues"] == [
+        {
+            "code": "missing_required_hashtags",
+            "missing": ["#anusarayoga"],
+        },
+        {"code": "generic_fallback_opener"},
+    ]
+
+
+def test_warning_events_include_zernio_content_issues():
+    snapshot = {
+        "captured_at": "2026-07-27T20:00:00Z",
+        "instagram": {"zernio_account": {}},
+        "zernio": {
+            "content_issues": [
+                {
+                    "zernio_post_id": "post1",
+                    "title": "TWY IG Reel for 2026-07-29",
+                    "scheduled_for": "2026-07-28T08:00:00-06:00",
+                    "content_issues": [
+                        {
+                            "code": "missing_required_hashtags",
+                            "missing": ["#anusarayoga"],
+                        },
+                        {"code": "generic_fallback_opener"},
+                    ],
+                }
+            ],
+        },
+    }
+
+    events = social_growth.warning_events(snapshot, token_warning_hours=48)
+
+    assert [event["key"] for event in events] == [
+        "zernio_content_issue:post1:2026-07-28T08:00:00-06:00"
+    ]
+    assert "TWY IG Reel for 2026-07-29" in events[0]["text"]
+    assert "missing required hashtags #anusarayoga" in events[0]["text"]
+    assert "generic fallback opener" in events[0]["text"]
 
 
 def test_collect_zernio_post_analytics_reports_blocked_addon():

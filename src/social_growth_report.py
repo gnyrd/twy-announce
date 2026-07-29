@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 import time
@@ -30,6 +31,9 @@ DEFAULT_CAMPAIGN_LOOKBACK_DAYS = 7
 DEFAULT_CAMPAIGN_LOOKAHEAD_DAYS = 14
 DEFAULT_SYSTEM_WARNINGS_CHANNEL = "C0ASG1EU0HL"
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
+CONTENT_EXCERPT_CHARS = 280
+REQUIRED_REEL_HASHTAGS = ("#anusara", "#anusarayoga")
+GENERIC_FALLBACK_OPENER = "A short practice cue from Tiff's teaching library."
 PLAUSIBLE_FUNNEL_EVENTS = (
     "Habit Register Click",
     "Habit Newsletter Open",
@@ -60,6 +64,7 @@ ZERNIO_ANALYTICS_METRICS = (
     "engagementRate",
 )
 CAMPAIGN_METADATA_KEYS = ("campaign", "ctaVariant", "habitTargetDate")
+HASHTAG_RE = re.compile(r"#[A-Za-z0-9_]+")
 
 
 def iso_z(value: datetime) -> str:
@@ -293,6 +298,10 @@ def zernio_post_row(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str,
     platforms = post.get("platforms") or []
     platform = platforms[0] if platforms and isinstance(platforms[0], dict) else {}
     platform_specific = platform.get("platformSpecificData") or {}
+    content = str(post.get("content") or "")
+    content_for_storage = content.replace("\n", " ")
+    content_excerpt = content_for_storage[:CONTENT_EXCERPT_CHARS]
+    content_type = platform_specific.get("contentType")
     return {
         "scheduled_for": entry.get("scheduled_for"),
         "post_type": entry.get("post_type"),
@@ -303,13 +312,29 @@ def zernio_post_row(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str,
         "title": post.get("title"),
         "post_status": post.get("status"),
         "platform_status": platform.get("status"),
-        "content_type": platform_specific.get("contentType"),
+        "content_type": content_type,
         "platform_post_url": platform.get("platformPostUrl"),
         "published_at": platform.get("publishedAt"),
         "publish_attempts": platform.get("publishAttempts"),
         "error": platform.get("error") or post.get("error") or post.get("lastError") or post.get("failureReason"),
-        "content": (post.get("content") or "").replace("\n", " ")[:280],
+        "content": content_excerpt,
+        "content_length": len(content),
+        "content_truncated": len(content_for_storage) > CONTENT_EXCERPT_CHARS,
+        "content_issues": zernio_content_issues(content, content_type),
     }
+
+
+def zernio_content_issues(content: str, content_type: str | None) -> list[dict[str, Any]]:
+    if content_type != "reels":
+        return []
+    issues: list[dict[str, Any]] = []
+    tags = {tag.lower() for tag in HASHTAG_RE.findall(content)}
+    missing = [tag for tag in REQUIRED_REEL_HASHTAGS if tag not in tags]
+    if missing:
+        issues.append({"code": "missing_required_hashtags", "missing": missing})
+    if content.startswith(GENERIC_FALLBACK_OPENER):
+        issues.append({"code": "generic_fallback_opener"})
+    return issues
 
 
 def zernio_analytics_metrics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -482,6 +507,11 @@ def collect_zernio_recent_status(
         for row in rows
         if row.get("post_status") == "scheduled" or row.get("platform_status") == "pending"
     ]
+    content_issues = [
+        row
+        for row in pending
+        if row.get("content_issues")
+    ]
     return {
         "status": "ok",
         "window_start": iso_z(window_start),
@@ -496,6 +526,8 @@ def collect_zernio_recent_status(
         "failed": failed,
         "pending_count": len(pending),
         "pending": pending,
+        "content_issue_count": len(content_issues),
+        "content_issues": content_issues,
         "analytics": collect_zernio_post_analytics(rows=rows, fetch_analytics=fetch_analytics),
     }
 
@@ -760,6 +792,7 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "zernio_status": zernio.get("status"),
         "zernio_failed_posts": zernio.get("failed_count"),
         "zernio_api_errors": zernio.get("api_error_count"),
+        "zernio_content_issues": zernio.get("content_issue_count"),
         "zernio_analytics_status": zernio_analytics.get("status"),
         "landing_page_status": plausible.get("status"),
         "landing_day_visitors": day.get("visitors"),
@@ -931,6 +964,30 @@ def warning_events(
                     ":warning: TWY social growth: Zernio status check "
                     f"failed for post {post_id} scheduled {scheduled_for}: "
                     f"{error}"
+                ),
+            }
+        )
+    for row in zernio.get("content_issues") or []:
+        post_id = row.get("zernio_post_id") or "unknown"
+        title = row.get("title") or "untitled post"
+        scheduled_for = row.get("scheduled_for") or "unknown time"
+        issue_labels: list[str] = []
+        for issue in row.get("content_issues") or []:
+            if issue.get("code") == "missing_required_hashtags":
+                missing = ", ".join(str(tag) for tag in issue.get("missing") or [])
+                issue_labels.append(f"missing required hashtags {missing}")
+            elif issue.get("code") == "generic_fallback_opener":
+                issue_labels.append("generic fallback opener")
+            else:
+                issue_labels.append(str(issue.get("code") or "unknown content issue"))
+        details = "; ".join(label for label in issue_labels if label) or "content issue"
+        events.append(
+            {
+                "key": f"zernio_content_issue:{post_id}:{scheduled_for}",
+                "text": (
+                    ":warning: TWY social growth: scheduled Zernio content issue "
+                    f"for {title} scheduled {scheduled_for}. Post id {post_id}: "
+                    f"{details}."
                 ),
             }
         )
