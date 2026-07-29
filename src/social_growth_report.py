@@ -711,16 +711,11 @@ def collect_plausible_sites(
 ) -> dict[str, Any]:
     configured = site_ids or plausible_site_ids_from_env()
     if not configured:
+        habit = collect_plausible_status(captured_at=captured_at)
         return {
-            "status": "not_configured",
+            "status": habit["status"],
             "captured_at": iso_z(captured_at),
-            "properties": {
-                "habit": {
-                    "status": "not_configured",
-                    "site_id": "habit.tiffanywoodyoga.com",
-                    "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_IDS"],
-                }
-            },
+            "properties": {"habit": habit},
         }
 
     properties = {}
@@ -1148,17 +1143,36 @@ def warning_events(
                 ),
             }
         )
-    plausible = ((snapshot.get("landing_page") or {}).get("plausible") or {})
-    if plausible.get("status") == "error":
+    website_properties = ((snapshot.get("websites") or {}).get("properties") or {})
+    if website_properties:
+        plausible_properties = website_properties.items()
+    else:
+        plausible = ((snapshot.get("landing_page") or {}).get("plausible") or {})
+        plausible_properties = [(None, plausible)]
+
+    for role, plausible in plausible_properties:
+        if plausible.get("status") != "error":
+            continue
         site_id = plausible.get("site_id") or "unknown site"
         error = plausible.get("error") or "unknown error"
+        property_label = f"{role.title()} property" if role else None
+        key_prefix = f"{role}:" if role else ""
+        if property_label:
+            key = f"plausible_error:{key_prefix}{site_id}"
+            text = (
+                ":warning: TWY social growth: Plausible funnel collection "
+                f"failed for {site_id} ({property_label}): {error}"
+            )
+        else:
+            key = f"plausible_error:{site_id}:{error}"
+            text = (
+                ":warning: TWY social growth: Plausible funnel collection "
+                f"failed for {site_id}: {error}"
+            )
         events.append(
             {
-                "key": f"plausible_error:{site_id}:{error}",
-                "text": (
-                    ":warning: TWY social growth: Plausible funnel collection "
-                    f"failed for {site_id}: {error}"
-                ),
+                "key": key,
+                "text": text,
             }
         )
     followers = ((snapshot.get("instagram") or {}).get("followers") or {})

@@ -136,8 +136,7 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "properties": {
             "habit": {
                 "status": "not_configured",
-                "site_id": "habit.tiffanywoodyoga.com",
-                "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_IDS"],
+                "required": ["PLAUSIBLE_API_KEY", "PLAUSIBLE_SITE_ID"],
             }
         },
     }
@@ -782,6 +781,85 @@ def test_warning_events_include_zernio_failures_api_errors_and_token_expiry():
     assert "rate limited" in events[1]["text"]
     assert "analytics timeout" in events[2]["text"]
     assert "expires within 48 hours" in events[3]["text"]
+
+
+def test_collect_snapshot_uses_legacy_habit_when_site_ids_are_absent(tmp_path, monkeypatch):
+    captured_at = datetime(2026, 7, 27, 20, 15, tzinfo=timezone.utc)
+    legacy_habit = {
+        "status": "ok",
+        "site_id": "habit.tiffanywoodyoga.com",
+        "captured_at": "2026-07-27T20:15:00Z",
+        "metrics": {"day": {"visitors": 5, "funnel_events": {"Habit Register Click": 2}}},
+    }
+    calls = []
+
+    monkeypatch.setenv("PLAUSIBLE_API_KEY", "test-key")
+    monkeypatch.setenv("PLAUSIBLE_SITE_ID", "habit.tiffanywoodyoga.com")
+    monkeypatch.delenv("PLAUSIBLE_SITE_IDS", raising=False)
+
+    def fake_collect_legacy(*, captured_at, post_query=None):
+        calls.append((captured_at, post_query))
+        return legacy_habit
+
+    monkeypatch.setattr(social_growth, "collect_plausible_status", fake_collect_legacy)
+
+    snapshot = social_growth.collect_snapshot(
+        captured_at=captured_at,
+        twy_root=tmp_path,
+        data_root=tmp_path / "data",
+        zernio_fetch_post=None,
+        zernio_account_health=None,
+    )
+
+    assert calls == [(captured_at, None)]
+    assert snapshot["websites"] == {
+        "status": "ok",
+        "captured_at": "2026-07-27T20:15:00Z",
+        "properties": {"habit": legacy_habit},
+    }
+    assert snapshot["landing_page"]["plausible"] == legacy_habit
+
+
+def test_warning_events_include_each_errored_website_property():
+    snapshot = {
+        "captured_at": "2026-07-27T20:00:00Z",
+        "instagram": {"zernio_account": {}},
+        "zernio": {},
+        "websites": {
+            "properties": {
+                "main": {
+                    "status": "error",
+                    "site_id": "tiffanywoodyoga.com",
+                    "error": "main timeout",
+                },
+                "studio": {
+                    "status": "error",
+                    "site_id": "studio.tiffanywoodyoga.com",
+                    "error": "studio timeout",
+                },
+                "habit": {
+                    "status": "ok",
+                    "site_id": "habit.tiffanywoodyoga.com",
+                },
+            }
+        },
+        "landing_page": {
+            "plausible": {
+                "status": "error",
+                "site_id": "habit.tiffanywoodyoga.com",
+                "error": "legacy alias must not duplicate website warnings",
+            }
+        },
+    }
+
+    events = social_growth.warning_events(snapshot, token_warning_hours=48)
+
+    assert [event["key"] for event in events] == [
+        "plausible_error:main:tiffanywoodyoga.com",
+        "plausible_error:studio:studio.tiffanywoodyoga.com",
+    ]
+    assert "Main property" in events[0]["text"]
+    assert "Studio property" in events[1]["text"]
 
 
 def test_warning_events_include_plausible_collection_errors():
