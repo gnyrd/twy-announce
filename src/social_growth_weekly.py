@@ -7,6 +7,7 @@ import argparse
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -744,11 +745,17 @@ def save_weekly_review(report: dict[str, Any], *, output_dir: Path) -> tuple[Pat
     return json_path, markdown_path
 
 
-def post_slack_once(
+def deterministic_client_msg_id(week_end: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"twy-social-growth-weekly:{week_end}"))
+
+
+def post_slack_dm_once(
     report: dict[str, Any],
     *,
     state_path: Path,
-    webhook_url: str,
+    token: str,
+    user_id: str,
+    post: Any | None = None,
 ) -> bool:
     if state_path.exists():
         try:
@@ -757,13 +764,26 @@ def post_slack_once(
             state = {}
         if state.get("last_week_end") == report["week_end"]:
             return False
-    response = requests.post(
-        webhook_url,
-        json={"text": render_slack(report)},
-        headers={"Content-Type": "application/json"},
+
+    if post is None:
+        post = requests.post
+    response = post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "channel": user_id,
+            "text": render_slack(report) + "\n\nhttps://stats.tiffanywoodyoga.com/",
+            "client_msg_id": deterministic_client_msg_id(report["week_end"]),
+        },
         timeout=15,
     )
     response.raise_for_status()
+    payload = response.json()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Slack API error: {payload.get('error')}")
     state_path.write_text(
         json.dumps(
             {
@@ -783,7 +803,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing it")
     parser.add_argument("--week-end", help="Week-end date, YYYY-MM-DD. Default is today in UTC.")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS)
-    parser.add_argument("--slack", action="store_true", help="Post the saved review to the configured Slack webhook")
+    parser.add_argument("--slack", action="store_true", help="Send the saved review to JP by Slack direct message")
     args = parser.parse_args()
 
     load_env()
@@ -801,15 +821,17 @@ def main() -> int:
     if report["status"] == "insufficient_data":
         print("Weekly social growth review has insufficient data.")
     if args.slack:
-        webhook_url = os.getenv("SOCIAL_GROWTH_SLACK_WEBHOOK_URL") or os.getenv("SLACK_WEBHOOK_URL")
-        if not webhook_url:
-            raise RuntimeError("No Slack webhook configured for weekly social growth review")
-        posted = post_slack_once(
+        token = os.getenv("TWY_REPORTER_BOT_TOKEN") or os.getenv("SLACK_BOT_TOKEN")
+        user_id = os.getenv("SLACK_USER_JP")
+        if not token or not user_id:
+            raise RuntimeError("Slack bot token and JP Slack user ID are required for weekly social growth review")
+        posted = post_slack_dm_once(
             report,
             state_path=output_dir / SLACK_STATE_FILE,
-            webhook_url=webhook_url,
+            token=token,
+            user_id=user_id,
         )
-        print("Posted weekly social growth review to Slack." if posted else "Slack review already posted.")
+        print("Sent weekly social growth review to JP." if posted else "Slack review already posted.")
     return 0
 
 

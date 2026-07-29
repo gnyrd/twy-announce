@@ -491,7 +491,7 @@ def test_weekly_review_excludes_posts_younger_than_24_hours(tmp_path):
     assert report["post_performance"]["posts"][0]["zernio_post_id"] == "mature-post"
 
 
-def test_slack_post_is_idempotent_for_week_end(tmp_path, monkeypatch):
+def test_slack_dm_targets_jp_and_is_idempotent(tmp_path, monkeypatch):
     report = weekly.build_weekly_review([], week_end=date(2026, 7, 28))
     calls = []
 
@@ -499,23 +499,30 @@ def test_slack_post_is_idempotent_for_week_end(tmp_path, monkeypatch):
         def raise_for_status(self):
             return None
 
-    def fake_post(url, **kwargs):
-        calls.append((url, kwargs))
+        def json(self):
+            return {"ok": True}
+
+    def fake_slack_ok(url, **kwargs):
+        calls.append({"url": url, **kwargs})
         return Response()
 
-    monkeypatch.setattr(weekly.requests, "post", fake_post)
+    monkeypatch.setattr(weekly.requests, "post", fake_slack_ok)
+    monkeypatch.setenv("SLACK_CHANNEL", "Cconfigured")
     state_path = tmp_path / "weekly" / weekly.SLACK_STATE_FILE
     state_path.parent.mkdir(parents=True)
 
-    assert weekly.post_slack_once(
+    assert weekly.post_slack_dm_once(
         report,
         state_path=state_path,
-        webhook_url="https://slack.example/hook",
+        token="bot-token",
+        user_id="UJP",
     )
-    assert not weekly.post_slack_once(
+    assert not weekly.post_slack_dm_once(
         report,
         state_path=state_path,
-        webhook_url="https://slack.example/hook",
+        token="bot-token",
+        user_id="UJP",
     )
-    assert len(calls) == 1
-    assert "*TWY audience growth review*" in calls[0][1]["json"]["text"]
+    assert calls[0]["url"] == "https://slack.com/api/chat.postMessage"
+    assert calls[0]["json"]["channel"] == "UJP"
+    assert calls[0]["headers"]["Authorization"] == "Bearer bot-token"
