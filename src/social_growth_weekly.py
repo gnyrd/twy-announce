@@ -6,14 +6,18 @@ from __future__ import annotations
 import argparse
 from datetime import date, datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+import requests
 from twy_paths import data_root as default_data_root
 from twy_paths import load_env
 
 
 DEFAULT_DAYS = 7
+MIN_POST_AGE_HOURS = 24
+SLACK_STATE_FILE = ".weekly_slack_state.json"
 
 
 def parse_date(value: str) -> date:
@@ -84,6 +88,240 @@ def _unique_summary_values(snapshots: list[dict[str, Any]], key: str) -> list[st
     return seen
 
 
+def _metric(metrics: dict[str, Any], key: str) -> float:
+    value = metrics.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return float(value)
+
+
+def _post_date(row: dict[str, Any]) -> date | None:
+    value = str(row.get("scheduled_for") or "").strip()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _campaign_metadata(snapshots: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    metadata: dict[str, dict[str, str]] = {}
+    for snapshot in snapshots:
+        for row in (snapshot.get("campaigns") or {}).get("posts") or []:
+            post_id = str(row.get("zernio_post_id") or "").strip()
+            campaign = str(row.get("campaign") or "").strip()
+            variant = str(row.get("ctaVariant") or "").strip()
+            if not post_id or not campaign or not variant:
+                continue
+            metadata[post_id] = {
+                "campaign": campaign,
+                "ctaVariant": variant,
+                "habitTargetDate": str(row.get("habitTargetDate") or "").strip(),
+            }
+    return metadata
+
+
+def _post_rows(
+    snapshots: list[dict[str, Any]],
+    *,
+    week_start: date,
+    week_end: date,
+) -> list[dict[str, Any]]:
+    campaigns = _campaign_metadata(snapshots)
+    captured_times = [
+        parsed
+        for parsed in (_parse_datetime(snapshot.get("captured_at")) for snapshot in snapshots)
+        if parsed is not None
+    ]
+    analysis_at = max(captured_times) if captured_times else datetime.now(timezone.utc)
+    latest: dict[str, dict[str, Any]] = {}
+    for snapshot in sorted(snapshots, key=lambda item: item.get("captured_at") or item.get("date") or ""):
+        for row in ((snapshot.get("zernio") or {}).get("analytics") or {}).get("posts") or []:
+            post_id = str(row.get("zernio_post_id") or "").strip()
+            scheduled_date = _post_date(row)
+            if not post_id or scheduled_date is None:
+                continue
+            if scheduled_date < week_start or scheduled_date > week_end:
+                continue
+            scheduled_at = _parse_datetime(row.get("scheduled_for"))
+            if scheduled_at is None:
+                continue
+            age_hours = (analysis_at - scheduled_at).total_seconds() / 3600
+            if age_hours < MIN_POST_AGE_HOURS:
+                continue
+            metrics = row.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            latest[post_id] = {
+                **row,
+                **campaigns.get(post_id, {}),
+            }
+    return sorted(
+        latest.values(),
+        key=lambda row: (
+            _metric(row.get("metrics") or {}, "reach"),
+            str(row.get("scheduled_for") or ""),
+        ),
+        reverse=True,
+    )
+
+
+def _growth_actions(metrics: dict[str, Any]) -> int:
+    return int(
+        sum(
+            _metric(metrics, key)
+            for key in ("follows", "saves", "shares", "clicks")
+        )
+    )
+
+
+def _aggregate_posts(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    totals = {
+        key: int(sum(_metric(row.get("metrics") or {}, key) for row in posts))
+        for key in (
+            "reach",
+            "views",
+            "impressions",
+            "likes",
+            "comments",
+            "follows",
+            "saves",
+            "shares",
+            "clicks",
+        )
+    }
+    totals["growth_actions"] = sum(_growth_actions(row.get("metrics") or {}) for row in posts)
+    count = len(posts)
+    averages = {
+        "reach": round(totals["reach"] / count, 2) if count else 0,
+        "views": round(totals["views"] / count, 2) if count else 0,
+        "engagement_rate": round(
+            sum(_metric(row.get("metrics") or {}, "engagementRate") for row in posts) / count,
+            2,
+        )
+        if count
+        else 0,
+        "watch_time_seconds": round(
+            sum(_metric(row.get("metrics") or {}, "igReelsAvgWatchTime") for row in posts)
+            / count
+            / 1000,
+            2,
+        )
+        if count
+        else 0,
+        "growth_actions": round(totals["growth_actions"] / count, 2) if count else 0,
+    }
+    return {
+        "post_count": count,
+        "totals": totals,
+        "averages": averages,
+    }
+
+
+def _top_post(posts: list[dict[str, Any]], *, key: str) -> dict[str, Any] | None:
+    if not posts:
+        return None
+    if key == "growth_actions":
+        return max(posts, key=lambda row: _growth_actions(row.get("metrics") or {}))
+    return max(posts, key=lambda row: _metric(row.get("metrics") or {}, key))
+
+
+def _comparison(variant: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+    variant_avg = variant["averages"]
+    baseline_avg = baseline["averages"]
+    deltas = {
+        "reach_delta": round(variant_avg["reach"] - baseline_avg["reach"], 2),
+        "engagement_rate_delta": round(
+            variant_avg["engagement_rate"] - baseline_avg["engagement_rate"],
+            2,
+        ),
+        "watch_time_seconds_delta": round(
+            variant_avg["watch_time_seconds"] - baseline_avg["watch_time_seconds"],
+            2,
+        ),
+        "growth_actions_delta": round(
+            variant_avg["growth_actions"] - baseline_avg["growth_actions"],
+            2,
+        ),
+    }
+    positive = sum(value > 0 for value in deltas.values())
+    negative = sum(value < 0 for value in deltas.values())
+    if positive >= 3:
+        assessment = "better"
+    elif negative >= 3:
+        assessment = "weaker"
+    else:
+        assessment = "mixed"
+    return {
+        **deltas,
+        "assessment": assessment,
+        "baseline_post_count": baseline["post_count"],
+    }
+
+
+def _campaign_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    baseline_posts = [row for row in posts if not row.get("campaign")]
+    baseline = _aggregate_posts(baseline_posts)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in posts:
+        campaign = str(row.get("campaign") or "").strip()
+        variant = str(row.get("ctaVariant") or "").strip()
+        if campaign and variant:
+            grouped.setdefault(f"{campaign}:{variant}", []).append(row)
+
+    variants: list[dict[str, Any]] = []
+    for key, rows in sorted(grouped.items()):
+        aggregate = _aggregate_posts(rows)
+        item = {
+            "key": key,
+            "campaign": rows[0]["campaign"],
+            "ctaVariant": rows[0]["ctaVariant"],
+            "habitTargetDate": rows[0].get("habitTargetDate"),
+            **aggregate,
+        }
+        item["comparison_to_baseline"] = (
+            _comparison(item, baseline)
+            if baseline["post_count"]
+            else {
+                "assessment": "no_baseline",
+                "baseline_post_count": 0,
+            }
+        )
+        variants.append(item)
+    return {
+        "baseline": baseline,
+        "variants": variants,
+    }
+
+
+def _post_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    aggregate = _aggregate_posts(posts)
+    return {
+        "posts_analyzed": aggregate["post_count"],
+        "totals": aggregate["totals"],
+        "averages": aggregate["averages"],
+        "top_by_reach": _top_post(posts, key="reach"),
+        "top_by_engagement": _top_post(posts, key="engagementRate"),
+        "top_by_watch_time": _top_post(posts, key="igReelsAvgWatchTime"),
+        "top_by_growth_actions": _top_post(posts, key="growth_actions"),
+        "posts": posts,
+    }
+
+
 def _recommendations(report: dict[str, Any]) -> list[str]:
     if report["status"] == "insufficient_data":
         return ["Collect at least two daily snapshots before changing the campaign."]
@@ -94,11 +332,17 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     subscriber_delta = metrics["email_subscribers"]["delta"]
     habit_delta = metrics["next_habit_registrations"]["delta"]
     upcoming = report["campaigns"]["upcoming_variants"]
+    performance = report["post_performance"]
+    variants = report["campaign_performance"]["variants"]
 
     recommendations: list[str] = []
-    if upcoming and funnel["visitors"] == 0:
-        recommendations.append("Let the scheduled campaign publish before changing copy; no landing traffic was measured this week.")
-    if funnel["visitors"] > 0 and funnel["habit_register_clicks"] == 0:
+    if upcoming and not variants:
+        recommendations.append(
+            "Let the scheduled campaign publish before changing copy; no published variant evidence exists yet."
+        )
+    if 0 < funnel["visitors"] < 10:
+        recommendations.append("Landing traffic is too small to judge conversion; keep measuring before changing the page.")
+    if funnel["visitors"] >= 10 and funnel["habit_register_clicks"] == 0:
         recommendations.append("Review the Instagram bio link and landing-page CTA path; visits did not become register clicks.")
     if funnel["habit_register_clicks"] > 0 and habit_delta is not None and habit_delta <= 0:
         recommendations.append("Inspect the HeyMarvelous registration handoff; register clicks did not increase Habit registrations.")
@@ -106,6 +350,28 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
         recommendations.append("Review the posts from the down-follower week before changing the next variant.")
     if subscriber_delta is not None and subscriber_delta <= 0 and funnel["habit_signup_success"] > 0:
         recommendations.append("Check SendGrid signup attribution; signup successes did not move subscriber count.")
+    if performance["posts_analyzed"] and performance["totals"]["growth_actions"] == 0:
+        recommendations.append(
+            "The reviewed Reels produced no follows, saves, shares, or clicks; use this as the baseline the next variant must beat."
+        )
+    for variant in variants:
+        comparison = variant["comparison_to_baseline"]
+        if variant["post_count"] < 3:
+            recommendations.append(
+                f"Keep {variant['key']} running until at least three published posts have mature analytics."
+            )
+        elif comparison["assessment"] == "better":
+            recommendations.append(
+                f"Keep {variant['key']} for another week; it improved most measured post averages over baseline."
+            )
+        elif comparison["assessment"] == "weaker":
+            recommendations.append(
+                f"Replace or revise {variant['key']}; it underperformed the baseline on most measured post averages."
+            )
+        elif comparison["assessment"] == "mixed":
+            recommendations.append(
+                f"Review {variant['key']} by reach, watch time, and growth actions separately; its result is mixed."
+            )
     if not recommendations:
         recommendations.append("Keep the current campaign running until the next weekly review has published-post evidence.")
     return recommendations
@@ -114,6 +380,7 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
 def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS) -> dict[str, Any]:
     week_start = week_end - timedelta(days=days - 1)
     snapshots = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
+    posts = _post_rows(snapshots, week_start=week_start, week_end=week_end)
     report: dict[str, Any] = {
         "status": "ok" if len(snapshots) >= 2 else "insufficient_data",
         "week_start": week_start.isoformat(),
@@ -136,16 +403,191 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
             "recent_variants": _unique_summary_values(snapshots, "recent_campaign_variants"),
             "upcoming_variants": _unique_summary_values(snapshots, "upcoming_campaign_variants"),
         },
+        "post_performance": _post_performance(posts),
+        "campaign_performance": _campaign_performance(posts),
     }
     report["recommendations"] = _recommendations(report)
     return report
 
 
-def save_weekly_review(report: dict[str, Any], *, output_dir: Path) -> Path:
+def _format_number(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:,.2f}"
+    return f"{value:,.0f}"
+
+
+def _format_delta(metric: dict[str, Any]) -> str:
+    start = metric.get("start")
+    end = metric.get("end")
+    delta = metric.get("delta")
+    if start is None or end is None or delta is None:
+        return "n/a"
+    return f"{_format_number(start)} -> {_format_number(end)} ({delta:+,.0f})"
+
+
+def _post_label(post: dict[str, Any] | None) -> str:
+    if not post:
+        return "None"
+    target = str(post.get("posted_for_class") or post.get("scheduled_for") or "Unknown")
+    return target
+
+
+def render_markdown(report: dict[str, Any]) -> str:
+    metrics = report["metrics"]
+    funnel = metrics["landing_page"]
+    performance = report["post_performance"]
+    lines = [
+        "# TWY Audience Growth Review",
+        "",
+        f"Period: {report['week_start']} through {report['week_end']}",
+        f"Daily snapshots: {report['snapshot_count']}",
+        "",
+        "## Audience",
+        "",
+        f"- Instagram followers: {_format_delta(metrics['instagram_followers'])}",
+        f"- Email subscribers: {_format_delta(metrics['email_subscribers'])}",
+        f"- Next Habits registrations: {_format_delta(metrics['next_habit_registrations'])}",
+        "",
+        "## Funnel",
+        "",
+        f"- Visitors: {_format_number(funnel['visitors'])}",
+        f"- Pageviews: {_format_number(funnel['pageviews'])}",
+        f"- Register clicks: {_format_number(funnel['habit_register_clicks'])}",
+        f"- Signup completions: {_format_number(funnel['habit_signup_success'])}",
+        "",
+        "## Post Performance",
+        "",
+        f"Analyzed {performance['posts_analyzed']} published Reels with mature Zernio analytics.",
+        "",
+        "| Target | Reach | Views | Engagement | Avg watch | Follows | Saves | Shares | Clicks |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for post in performance["posts"]:
+        post_metrics = post.get("metrics") or {}
+        target = _post_label(post)
+        url = str(post.get("platform_post_url") or "").strip()
+        target_text = f"[{target}]({url})" if url else target
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    target_text,
+                    _format_number(_metric(post_metrics, "reach")),
+                    _format_number(_metric(post_metrics, "views")),
+                    f"{_metric(post_metrics, 'engagementRate'):.2f}%",
+                    f"{_metric(post_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s",
+                    _format_number(_metric(post_metrics, "follows")),
+                    _format_number(_metric(post_metrics, "saves")),
+                    _format_number(_metric(post_metrics, "shares")),
+                    _format_number(_metric(post_metrics, "clicks")),
+                ]
+            )
+            + " |"
+        )
+    if not performance["posts"]:
+        lines.append("| No mature post analytics in this period |  |  |  |  |  |  |  |  |")
+
+    lines.extend(["", "## Campaign Variants", ""])
+    variants = report["campaign_performance"]["variants"]
+    if variants:
+        for variant in variants:
+            comparison = variant["comparison_to_baseline"]
+            lines.append(
+                f"- `{variant['key']}`: {variant['post_count']} posts, "
+                f"{_format_number(variant['averages']['reach'])} average reach, "
+                f"{variant['averages']['watch_time_seconds']:.2f}s average watch, "
+                f"assessment `{comparison['assessment']}`"
+            )
+    else:
+        lines.append("- No campaign variant had published posts with mature analytics in this period.")
+
+    lines.extend(["", "## Recommendations", ""])
+    lines.extend(f"- {item}" for item in report["recommendations"])
+    return "\n".join(lines) + "\n"
+
+
+def render_slack(report: dict[str, Any]) -> str:
+    metrics = report["metrics"]
+    funnel = metrics["landing_page"]
+    performance = report["post_performance"]
+    top = performance["top_by_reach"]
+    lines = [
+        "*TWY audience growth review*",
+        f"{report['week_start']} to {report['week_end']} | {report['snapshot_count']} daily snapshots",
+        "",
+        f"*IG followers:* {_format_delta(metrics['instagram_followers'])}",
+        f"*Email subscribers:* {_format_delta(metrics['email_subscribers'])}",
+        f"*Habits registrations:* {_format_delta(metrics['next_habit_registrations'])}",
+        (
+            f"*Funnel:* {_format_number(funnel['visitors'])} visitors | "
+            f"{_format_number(funnel['habit_register_clicks'])} register clicks | "
+            f"{_format_number(funnel['habit_signup_success'])} signups"
+        ),
+        (
+            f"*Posts:* {performance['posts_analyzed']} analyzed | "
+            f"{_format_number(performance['totals']['reach'])} total reach | "
+            f"{_format_number(performance['totals']['growth_actions'])} follows+saves+shares+clicks"
+        ),
+    ]
+    if top:
+        top_metrics = top.get("metrics") or {}
+        top_label = _post_label(top)
+        top_url = str(top.get("platform_post_url") or "").strip()
+        if top_url:
+            top_label = f"<{top_url}|{top_label}>"
+        lines.append(
+            f"*Top Reel:* {top_label} | {_format_number(_metric(top_metrics, 'reach'))} reach | "
+            f"{_metric(top_metrics, 'engagementRate'):.2f}% engagement | "
+            f"{_metric(top_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s average watch"
+        )
+    lines.extend(["", "*Decisions:*"])
+    lines.extend(f"- {item}" for item in report["recommendations"])
+    return "\n".join(lines)
+
+
+def save_weekly_review(report: dict[str, Any], *, output_dir: Path) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"{report['week_end']}.json"
-    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    return path
+    json_path = output_dir / f"{report['week_end']}.json"
+    markdown_path = output_dir / f"{report['week_end']}.md"
+    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    markdown_path.write_text(render_markdown(report))
+    return json_path, markdown_path
+
+
+def post_slack_once(
+    report: dict[str, Any],
+    *,
+    state_path: Path,
+    webhook_url: str,
+) -> bool:
+    if state_path.exists():
+        try:
+            state = read_json(state_path)
+        except Exception:
+            state = {}
+        if state.get("last_week_end") == report["week_end"]:
+            return False
+    response = requests.post(
+        webhook_url,
+        json={"text": render_slack(report)},
+        headers={"Content-Type": "application/json"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    state_path.write_text(
+        json.dumps(
+            {
+                "last_week_end": report["week_end"],
+                "posted_at": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    return True
 
 
 def main() -> int:
@@ -153,6 +595,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print JSON without writing it")
     parser.add_argument("--week-end", help="Week-end date, YYYY-MM-DD. Default is today in UTC.")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS)
+    parser.add_argument("--no-slack", action="store_true", help="Save the review without posting to Slack")
     args = parser.parse_args()
 
     load_env()
@@ -163,10 +606,22 @@ def main() -> int:
     if args.dry_run:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
-    destination = save_weekly_review(report, output_dir=data_dir / "social_growth" / "weekly")
-    print(f"Saved weekly social growth review to {destination}")
+    output_dir = data_dir / "social_growth" / "weekly"
+    json_path, markdown_path = save_weekly_review(report, output_dir=output_dir)
+    print(f"Saved weekly social growth review to {json_path}")
+    print(f"Saved readable weekly social growth review to {markdown_path}")
     if report["status"] == "insufficient_data":
         print("Weekly social growth review has insufficient data.")
+    if not args.no_slack:
+        webhook_url = os.getenv("SOCIAL_GROWTH_SLACK_WEBHOOK_URL") or os.getenv("SLACK_WEBHOOK_URL")
+        if not webhook_url:
+            raise RuntimeError("No Slack webhook configured for weekly social growth review")
+        posted = post_slack_once(
+            report,
+            state_path=output_dir / SLACK_STATE_FILE,
+            webhook_url=webhook_url,
+        )
+        print("Posted weekly social growth review to Slack." if posted else "Slack review already posted.")
     return 0
 
 
