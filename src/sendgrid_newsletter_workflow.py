@@ -32,6 +32,7 @@ from twy_paths import (
     newsletter_path,
     newsletters_dir,
 )
+from twy_platform.text import find_prohibited
 from twy_platform import locked_create, locked_write
 
 
@@ -262,8 +263,14 @@ def _validate_sections_before_provider(sections: dict[str, dict]) -> None:
         if body.lstrip().startswith("#"):
             raise ValueError(f"{key} body begins with a markdown heading")
         combined = "\n".join((subject, preheader, body))
-        if any(character in combined for character in ("—", "–", ";")):
-            raise ValueError(f"{key} contains prohibited punctuation")
+        # PROHIBITED is the shared definition in twy_platform.text, the same one
+        # the writers normalize against, so this guard and the normalizer cannot
+        # drift apart (they were separate literals until 2026-08-02).
+        offenders = find_prohibited(combined)
+        if offenders:
+            raise ValueError(
+                f"{key} contains prohibited punctuation: {offenders}"
+            )
         if UNRESOLVED_TOKEN.search(combined):
             raise ValueError(f"{key} contains an unresolved token")
 
