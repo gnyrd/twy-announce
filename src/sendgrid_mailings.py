@@ -35,6 +35,16 @@ def validate_sendgrid_name(name: str) -> str:
     return normalized
 
 
+def product_attribute_name(product_name: str) -> str:
+    normalized = str(product_name).strip()
+    for character in FORBIDDEN_NAME_CHARACTERS:
+        normalized = normalized.replace(character, " ")
+    normalized = " ".join(normalized.split())
+    if not normalized:
+        raise ValueError("product name must not be empty")
+    return validate_sendgrid_name(f"Product: {normalized}")
+
+
 def mailing_name(
     year: int,
     month: int,

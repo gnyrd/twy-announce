@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+import sendgrid_mailings
 
 from sendgrid_mailings import (
     EMAIL_SUBSCRIBED,
@@ -40,6 +41,24 @@ def test_locked_mailing_names_use_approved_shape():
 def test_locked_name_validator_rejects_every_forbidden_separator(character):
     with pytest.raises(ValueError, match="prohibited punctuation"):
         validate_sendgrid_name(f"Yoga Habit{character}2026_08")
+
+
+def test_product_attribute_name_uses_locked_shape_and_normalizes_punctuation():
+    assert sendgrid_mailings.product_attribute_name(
+        "  Violet  Flame Meditation  "
+    ) == (
+        "Product: Violet Flame Meditation"
+    )
+    assert sendgrid_mailings.product_attribute_name(
+        "Shiva-Mantra – Foundations—Series"
+    ) == (
+        "Product: Shiva Mantra Foundations Series"
+    )
+
+
+def test_product_attribute_name_rejects_empty_normalized_product_name():
+    with pytest.raises(ValueError, match="product name must not be empty"):
+        sendgrid_mailings.product_attribute_name(" - – — ")
 
 
 def test_august_schedule_is_calculated_in_mountain_time():
