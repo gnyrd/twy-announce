@@ -5,26 +5,19 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import sys
 
-from marvelous_report_jwt import ReportJWTError, fetch_report_rows
-import requests
-
+from marvelous_memberships import (
+    MEMBER_ARCHIVE,
+    MEMBER_YOGA_LIFESTYLE,
+    PRODUCT_LISTS,
+    load_active_rows_from_env,
+)
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
 from twy_paths import data_root, load_env
 
-
-MEMBER_YOGA_LIFESTYLE = "Member: Yoga Lifestyle"
-MEMBER_ARCHIVE = "Member: Archive"
-PRODUCT_LISTS = {
-    "The Yoga Lifestyle Membership": MEMBER_YOGA_LIFESTYLE,
-    "Yoga Lifestyle": MEMBER_YOGA_LIFESTYLE,
-    "The Archive": MEMBER_ARCHIVE,
-    "TWY Archive": MEMBER_ARCHIVE,
-}
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
@@ -83,23 +76,6 @@ def normalize_active_memberships(
     )
 
 
-def load_active_rows(
-    report_id: int,
-    report_category: str,
-) -> list[dict]:
-    try:
-        rows = fetch_report_rows(
-            report_id=report_id,
-            category=report_category,
-            force_refresh=True,
-        )
-    except (ReportJWTError, requests.RequestException) as exc:
-        raise RuntimeError(f"Marvelous active membership report failed: {exc}") from exc
-    if not rows:
-        raise RuntimeError("Marvelous active membership report returned no rows")
-    return rows
-
-
 def sync_membership_lists(
     *,
     api,
@@ -131,12 +107,7 @@ def main() -> int:
     registry = SendGridRegistry.load(
         data_root() / "sendgrid" / "production_objects.json"
     )
-    report_id = int(os.getenv("MARVELOUS_ACTIVE_SUBS_REPORT_ID", "15"))
-    report_category = os.getenv(
-        "MARVELOUS_ACTIVE_SUBS_REPORT_CATEGORY",
-        "users",
-    )
-    rows = load_active_rows(report_id, report_category)
+    rows = load_active_rows_from_env()
     memberships, unknown_products = normalize_active_memberships(rows)
     if unknown_products:
         log.warning(
