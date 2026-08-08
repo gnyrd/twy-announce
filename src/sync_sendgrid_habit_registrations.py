@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import sys
+import time
 from zoneinfo import ZoneInfo
 
 import requests
@@ -29,6 +30,10 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger("sync_sendgrid_habit_registrations")
+
+
+# Keep a class in scope after it ends so late-marked attendance is captured.
+ATTENDANCE_TRAIL_DAYS = 2
 
 
 def upcoming_habit_events(today: date) -> tuple[list[tuple[date, int]], list[str]]:
@@ -63,7 +68,7 @@ def upcoming_habit_events(today: date) -> tuple[list[tuple[date, int]], list[str
                     continue
                 event_date = date.fromisoformat(plan["date"])
                 days_out = (event_date - today).days
-                if 0 <= days_out <= REGISTRATION_WINDOW_DAYS:
+                if -ATTENDANCE_TRAIL_DAYS <= days_out <= REGISTRATION_WINDOW_DAYS:
                     events.append((event_date, int(event_id)))
         except (requests.RequestException, ValueError, KeyError) as exc:
             failures.append(f"{year:04d}_{month:02d}: {exc}")
@@ -92,13 +97,29 @@ def registrants_for_event(client, event_id: int) -> list[dict]:
             or student.get("last_name")
             or ""
         ).strip()
-        contact = {"email": email}
+        contact = {"email": email, "attended": bool(registration.get("attended"))}
         if first_name:
             contact["first_name"] = first_name
         if last_name:
             contact["last_name"] = last_name
         by_email[email] = contact
     return [by_email[email] for email in sorted(by_email)]
+
+
+
+def _wait_for_suppression_removal(
+    *, api, suppression_group_id: int, emails: list[str]
+) -> None:
+    """SendGrid suppression removal is eventually consistent. Block until the
+    address is genuinely gone, so the very next send can reach it."""
+    attempts = 16
+    for attempt in range(attempts):
+        remaining = api.search_group_suppressions(suppression_group_id, emails)
+        if not remaining:
+            return
+        if attempt < attempts - 1:
+            time.sleep(1)
+    raise RuntimeError("renewed consent suppression removal failed")
 
 
 def sync_event_lists(
@@ -126,6 +147,39 @@ def sync_event_lists(
     # which SendGrid applies at send time whatever list a contact sits on.
     # Additive, so leaving the Registered list never drops the subscription.
     subscribed_list_id = ensure_list(api, registry, EMAIL_SUBSCRIBED)
+
+    # Registering is an opt-in that supersedes an earlier opt-out (JP,
+    # 2026-08-08). SendGrid enforces the suppression group at send time, so a
+    # returning registrant stays undeliverable until pulled out of it.
+    renew = sorted(
+        api.search_group_suppressions(
+            registry.suppression_group_id,
+            [contact["email"] for contact in registrants],
+        )
+    ) if registrants else []
+    for email in renew:
+        api.remove_group_suppression(registry.suppression_group_id, email)
+    if renew:
+        _wait_for_suppression_removal(
+            api=api,
+            suppression_group_id=registry.suppression_group_id,
+            emails=renew,
+        )
+
+    attended_name = habit_activity_name(
+        event_date.year,
+        event_date.month,
+        "Attended",
+    )
+    attended_list_id = ensure_list(api, registry, attended_name)
+    attendees = [c for c in registrants if c.get("attended")]
+    attended_result = sync_exact_list(
+        api=api,
+        destination_list_id=attended_list_id,
+        desired_contacts=attendees,
+        additive_list_ids=None,
+    )
+
     result = sync_exact_list(
         api=api,
         destination_list_id=registered_list_id,
@@ -137,6 +191,9 @@ def sync_event_lists(
         "interested_list_id": interested_list_id,
         "registered_list_id": registered_list_id,
         "subscribed_list_id": subscribed_list_id,
+        "attended_list_id": attended_list_id,
+        "attended": attended_result["desired"],
+        "renewed_consent": len(renew),
     }
 
 

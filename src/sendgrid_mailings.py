@@ -63,7 +63,7 @@ def mailing_name(
 
 
 def habit_activity_name(year: int, month: int, activity: str) -> str:
-    if activity not in {"Interested", "Registered"}:
+    if activity not in {"Interested", "Registered", "Attended"}:
         raise ValueError("unsupported Yoga Habit activity")
     if not 1 <= month <= 12:
         raise ValueError("month must be from 1 through 12")
