@@ -42,6 +42,7 @@ SECTION_PURPOSES = {
     "non_opener": MailingPurpose.RESEND,
     "gentle_nudge": MailingPurpose.GENTLE_REMINDER,
     "reminder": MailingPurpose.REGISTERED_REMINDER,
+    "recording": MailingPurpose.CLASS_RECORDING,
     "ph1": MailingPurpose.FOLLOW_UP_1,
     "ph2": MailingPurpose.FOLLOW_UP_2,
 }
@@ -676,6 +677,16 @@ def provision_drafts(
             campaigns,
             key="reminder",
             section=sections["reminder"],
+            year=year,
+            month=month,
+            send_to={"list_ids": [registered_list_id], "all": False},
+        )
+
+    if "recording" in sections:
+        result["recording"] = _draft(
+            campaigns,
+            key="recording",
+            section=sections["recording"],
             year=year,
             month=month,
             send_to={"list_ids": [registered_list_id], "all": False},

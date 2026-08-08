@@ -22,6 +22,7 @@ class MailingPurpose(str, Enum):
     RESEND = "Resend"
     GENTLE_REMINDER = "Gentle Reminder"
     REGISTERED_REMINDER = "Registered Reminder"
+    CLASS_RECORDING = "Class Recording"
     FOLLOW_UP_1 = "Follow Up 1"
     FOLLOW_UP_2 = "Follow Up 2"
 
@@ -123,6 +124,11 @@ def mailing_schedule(
         )
     if purpose is MailingPurpose.REGISTERED_REMINDER:
         return _at_mountain(class_date - timedelta(days=1), 10, 17)
+    if purpose is MailingPurpose.CLASS_RECORDING:
+        # The day after class, evening. The edited recording has to exist and be
+        # attached to its free product before this goes, and Follow Up 1 lands
+        # the same morning, so this sits well clear of both.
+        return _at_mountain(class_date + timedelta(days=1), 17, 17)
     if purpose is MailingPurpose.FOLLOW_UP_1:
         return _at_mountain(class_date + timedelta(days=1), 10, 17)
     if purpose is MailingPurpose.FOLLOW_UP_2:

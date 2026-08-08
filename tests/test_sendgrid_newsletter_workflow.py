@@ -123,6 +123,11 @@ def _sections():
             "body": "Reminder body",
             "preheader": "What to bring tomorrow",
         },
+        "recording": {
+            "subject": "Recording",
+            "body": "Recording body",
+            "preheader": "Your class recording",
+        },
         "ph1": {
             "subject": "Thank you",
             "body": "First follow up",
@@ -136,7 +141,7 @@ def _sections():
     }
 
 
-def test_provision_creates_locked_lists_segments_and_all_seven_drafts(
+def test_provision_creates_locked_lists_segments_and_all_eight_drafts(
     tmp_path,
 ):
     api = FakeAPI()
@@ -159,7 +164,7 @@ def test_provision_creates_locked_lists_segments_and_all_seven_drafts(
         "Yoga Habit: Registered: 2026_08",
     ]
     assert set(result) == set(_sections())
-    assert len(api.created_sends) == 7
+    assert len(api.created_sends) == 8
     assert len(api.created_segments) == 5
     assert {
         payload["name"] for payload in api.created_sends
