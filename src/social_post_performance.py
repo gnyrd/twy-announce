@@ -142,6 +142,8 @@ def materialize_post_performance(
                     "post_type": row.get("post_type") or existing.get("post_type"),
                     "clip_name": row.get("clip_name") or existing.get("clip_name"),
                     "class_name": row.get("class_name") or existing.get("class_name"),
+                    "class_type": row.get("class_type") or existing.get("class_type"),
+                    "yantra": row.get("yantra") or existing.get("yantra"),
                     "platform_post_url": (
                         row.get("platform_post_url")
                         or (current or {}).get("platformPostUrl")
