@@ -164,3 +164,46 @@ def test_registrants_carry_the_attended_flag():
     got = registration_sync.registrants_for_event(FakeClient(), 1)
     assert {c['email']: c['attended'] for c in got} == {
         'a@example.com': True, 'b@example.com': False}
+
+
+def test_registrants_resolve_prospects_and_account_holders():
+    """HM populates the two identity shapes exclusively, never both.
+
+    A prospect typed their details into the registration form, so the top-level
+    registrant fields carry them and there is no user_id. An existing student
+    clicked register, so HM leaves those fields empty and the identity lives on
+    the nested student object alone. Verified against event 1012621 on
+    2026-08-08: 21 prospects with top-level values and no user_id, 5 account
+    holders with user_id and empty top-level values, and zero disagreements
+    between the two shapes. Both branches are load-bearing; dropping either
+    silently loses a whole class of registrant.
+    """
+    class FakeClient:
+        def get_event(self, event_id):
+            return {'registrations': [
+                {  # prospect: form values on the registration, no account
+                    'student_email': 'Prospect@Example.com',
+                    'student_first_name': 'Pro',
+                    'student_last_name': 'Spect',
+                    'user_id': None,
+                    'attended': True,
+                    'student': {'email': 'prospect@example.com',
+                                'is_prospect': True},
+                },
+                {  # account holder: identity only on the nested student
+                    'student_email': '',
+                    'student_first_name': '',
+                    'student_last_name': '',
+                    'user_id': 411057,
+                    'attended': False,
+                    'student': {'email': 'Member@Example.com',
+                                'first_name': 'Mem', 'last_name': 'Ber'},
+                },
+            ]}
+
+    got = {c['email']: c for c in registration_sync.registrants_for_event(FakeClient(), 1)}
+    assert set(got) == {'prospect@example.com', 'member@example.com'}
+    assert got['prospect@example.com']['first_name'] == 'Pro'
+    assert got['prospect@example.com']['attended'] is True
+    assert got['member@example.com']['first_name'] == 'Mem'
+    assert got['member@example.com']['attended'] is False

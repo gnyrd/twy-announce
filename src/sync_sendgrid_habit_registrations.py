@@ -76,6 +76,18 @@ def upcoming_habit_events(today: date) -> tuple[list[tuple[date, int]], list[str
 
 
 def registrants_for_event(client, event_id: int) -> list[dict]:
+    """Every registrant for an event, prospects and account holders alike.
+
+    HeyMarvelous fills the two identity shapes exclusively. A prospect typed
+    their details into the registration form, so the top-level student_* fields
+    carry them and user_id is null. An existing student clicked register, so HM
+    leaves those fields empty and the identity lives only on the nested student
+    object. Measured on event 1012621, 2026-08-08: 21 prospects, 5 account
+    holders, zero disagreements between the shapes. The top-level fields are
+    really registrant fields, matching the UI. Both branches below are
+    load-bearing, and collapsing either one silently drops a whole class of
+    registrant.
+    """
     event = client.get_event(event_id)
     by_email = {}
     for registration in event.get("registrations") or []:
