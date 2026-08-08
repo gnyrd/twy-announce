@@ -579,7 +579,7 @@ def provision_drafts(
 
     needs_interested = any(key in sections for key in ("ph1", "ph2"))
     needs_registered = any(
-        key in sections for key in ("gentle_nudge", "reminder")
+        key in sections for key in ("gentle_nudge", "reminder", "recording")
     )
     interested_list_id = (
         campaigns.ensure_list(
