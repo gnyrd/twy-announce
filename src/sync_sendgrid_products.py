@@ -549,10 +549,11 @@ def main(argv=None) -> int:
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
     from twy_paths import (
-        data_root,
         load_env,
         marvy_db_path,
         sendgrid_cleaned_denylist_path,
+        sendgrid_dir,
+        sendgrid_registry_path,
     )
 
     load_env()
@@ -563,7 +564,7 @@ def main(argv=None) -> int:
     if api.user_email() != EXPECTED_ACCOUNT_EMAIL:
         raise SystemExit("unexpected SendGrid account")
     registry = SendGridRegistry.load(
-        data_root() / "sendgrid" / "production_objects.json"
+        sendgrid_registry_path()
     )
     result = run_sync(
         mode="backfill" if args.backfill else "incremental",
@@ -573,9 +574,9 @@ def main(argv=None) -> int:
         marvelous_client=None if args.backfill else _marvelous_client(),
         database_path=marvy_db_path(),
         cleaned_path=sendgrid_cleaned_denylist_path(),
-        state_path=data_root() / "sendgrid" / "product_sync_state.json",
+        state_path=sendgrid_dir() / "product_sync_state.json",
         evidence_path=(
-            data_root() / "sendgrid" / "product_consent_events.jsonl"
+            sendgrid_dir() / "product_consent_events.jsonl"
         ),
     )
     print(json.dumps(result, indent=2, sort_keys=True))

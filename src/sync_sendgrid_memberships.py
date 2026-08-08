@@ -16,7 +16,7 @@ from marvelous_memberships import (
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
-from twy_paths import data_root, load_env
+from twy_paths import load_env, sendgrid_registry_path
 
 
 logging.basicConfig(
@@ -105,7 +105,7 @@ def main() -> int:
         raise SystemExit("unexpected SendGrid account")
 
     registry = SendGridRegistry.load(
-        data_root() / "sendgrid" / "production_objects.json"
+        sendgrid_registry_path()
     )
     rows = load_active_rows_from_env()
     memberships, unknown_products = normalize_active_memberships(rows)

@@ -29,7 +29,7 @@ from sendgrid_newsletter_workflow import (
 )
 from sendgrid_scheduler import schedule_month
 from slack import post_slack
-from twy_paths import data_root, load_env, newsletters_dir
+from twy_paths import load_env, newsletters_dir, sendgrid_registry_path
 
 
 MOUNTAIN = ZoneInfo("America/Denver")
@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("unexpected SendGrid account")
 
     registry = SendGridRegistry.load(
-        data_root() / "sendgrid" / "production_objects.json"
+        sendgrid_registry_path()
     )
     now = datetime.now(timezone.utc)
     if arguments.month:

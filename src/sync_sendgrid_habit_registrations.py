@@ -18,7 +18,7 @@ from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
 from sendgrid_mailings import EMAIL_SUBSCRIBED, habit_activity_name
-from twy_paths import data_root, load_env
+from twy_paths import load_env, sendgrid_registry_path
 
 
 MOUNTAIN = ZoneInfo("America/Denver")
@@ -226,7 +226,7 @@ def main() -> int:
     if api.user_email() != EXPECTED_ACCOUNT_EMAIL:
         raise SystemExit("unexpected SendGrid account")
     registry = SendGridRegistry.load(
-        data_root() / "sendgrid" / "production_objects.json"
+        sendgrid_registry_path()
     )
     today = datetime.now(MOUNTAIN).date()
     events, failures = upcoming_habit_events(today)

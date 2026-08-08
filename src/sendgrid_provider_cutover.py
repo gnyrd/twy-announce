@@ -16,7 +16,7 @@ from sendgrid_campaigns import (
     EXPECTED_SENDER_EMAIL,
     SendGridRegistry,
 )
-from twy_paths import data_root, load_env
+from twy_paths import load_env, sendgrid_dir, sendgrid_registry_path
 from twy_platform import locked_write
 
 
@@ -245,8 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     if not api_key:
         raise SystemExit("SENDGRID_API_KEY is not configured")
     api = SendGridAPI(api_key)
-    plan_path = data_root() / "sendgrid" / "provider_cutover_plan.json"
-    registry_path = data_root() / "sendgrid" / "production_objects.json"
+    plan_path = sendgrid_dir() / "provider_cutover_plan.json"
+    registry_path = sendgrid_registry_path()
 
     if arguments.command == "plan":
         plan = build_plan(

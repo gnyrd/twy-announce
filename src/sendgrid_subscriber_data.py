@@ -12,7 +12,7 @@ import sys
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_mailings import EMAIL_SUBSCRIBED
-from twy_paths import data_root, load_env, twy_root
+from twy_paths import load_env, sendgrid_registry_path, twy_root
 
 
 def collect_snapshot(*, api, registry, captured_at: str) -> dict:
@@ -46,7 +46,7 @@ def main() -> int:
     if api.user_email() != EXPECTED_ACCOUNT_EMAIL:
         raise SystemExit("unexpected SendGrid account")
     registry = SendGridRegistry.load(
-        data_root() / "sendgrid" / "production_objects.json"
+        sendgrid_registry_path()
     )
     now = datetime.now(timezone.utc)
     snapshot = collect_snapshot(
