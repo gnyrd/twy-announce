@@ -16,7 +16,7 @@ import requests
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
-from sendgrid_mailings import habit_activity_name
+from sendgrid_mailings import EMAIL_SUBSCRIBED, habit_activity_name
 from twy_paths import data_root, load_env
 
 
@@ -120,16 +120,23 @@ def sync_event_lists(
     )
     interested_list_id = ensure_list(api, registry, interested_name)
     registered_list_id = ensure_list(api, registry, registered_name)
+    # Registering for a free Habit class puts a person in the mailing audience.
+    # Email: Subscribed is an audience list, not a consent record: opt-out is
+    # enforced by the ASM suppression group Email: Unsubscribed (id 35187),
+    # which SendGrid applies at send time whatever list a contact sits on.
+    # Additive, so leaving the Registered list never drops the subscription.
+    subscribed_list_id = ensure_list(api, registry, EMAIL_SUBSCRIBED)
     result = sync_exact_list(
         api=api,
         destination_list_id=registered_list_id,
         desired_contacts=registrants,
-        additive_list_ids=[interested_list_id],
+        additive_list_ids=[interested_list_id, subscribed_list_id],
     )
     return {
         **result,
         "interested_list_id": interested_list_id,
         "registered_list_id": registered_list_id,
+        "subscribed_list_id": subscribed_list_id,
     }
 
 
