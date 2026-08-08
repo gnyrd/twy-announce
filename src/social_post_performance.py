@@ -24,6 +24,10 @@ from twy_paths import social_post_performance_path
 from twy_platform import locked_json
 
 
+# Summed into one "actions" figure. NOTE: the provider returns follows and
+# clicks as a present-but-always-zero field for every post on record, so in
+# practice this total is saves plus shares. Whether that means none
+# happened or neither is measured for this media type is UNVERIFIED.
 GROWTH_ACTIONS = ("follows", "saves", "shares", "clicks")
 
 
