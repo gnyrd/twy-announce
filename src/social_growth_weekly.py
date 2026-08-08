@@ -485,7 +485,7 @@ def _website_recommendations(website_performance: dict[str, Any]) -> list[str]:
         entry_page = _first_dimension(main["top_entry_pages"])
         if source and entry_page:
             recommendations.append(
-                f"Main discovery recorded {main_visitors:g} rolling 7-day unique visitors; review {source} traffic to {entry_page} before changing acquisition emphasis."
+                f"Main discovery recorded {main_visitors:g} rolling 7-day unique visitors. Review {source} traffic to {entry_page} before changing acquisition emphasis."
             )
 
     habit = website_performance["habit"]
@@ -498,7 +498,7 @@ def _website_recommendations(website_performance: dict[str, Any]) -> list[str]:
         and register_clicks == 0
     ):
         recommendations.append(
-            f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click; review the /ig CTA path."
+            f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click. Review the /ig CTA path."
         )
     return recommendations
 
@@ -519,21 +519,21 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     recommendations: list[str] = []
     if upcoming and not variants:
         recommendations.append(
-            "Let the scheduled campaign publish before changing copy; no published variant evidence exists yet."
+            "Let the scheduled campaign publish before changing copy. No published variant evidence exists yet."
         )
     if 0 < funnel["visitors"] < 10:
-        recommendations.append("Landing traffic is too small to judge conversion; keep measuring before changing the page.")
+        recommendations.append("Landing traffic is too small to judge conversion. Keep measuring before changing the page.")
     if funnel["visitors"] >= 10 and funnel["habit_register_clicks"] == 0:
-        recommendations.append("Review the Instagram bio link and landing-page CTA path; visits did not become register clicks.")
+        recommendations.append("Review the Instagram bio link and landing-page CTA path. Visits did not become register clicks.")
     if funnel["habit_register_clicks"] > 0 and habit_delta is not None and habit_delta <= 0:
-        recommendations.append("Inspect the HeyMarvelous registration handoff; register clicks did not increase Habit registrations.")
+        recommendations.append("Inspect the HeyMarvelous registration handoff. Register clicks did not increase Habit registrations.")
     if follower_delta is not None and follower_delta < 0:
         recommendations.append("Review the posts from the down-follower week before changing the next variant.")
     if subscriber_delta is not None and subscriber_delta <= 0 and funnel["habit_signup_success"] > 0:
-        recommendations.append("Check SendGrid signup attribution; signup successes did not move subscriber count.")
+        recommendations.append("Check SendGrid signup attribution. Signup successes did not move subscriber count.")
     if performance["posts_analyzed"] and performance["totals"]["growth_actions"] == 0:
         recommendations.append(
-            "The reviewed Reels produced no follows, saves, shares, or clicks; use this as the baseline the next variant must beat."
+            "The reviewed Reels produced no follows, saves, shares, or clicks. Use this as the baseline the next variant must beat."
         )
     for variant in variants:
         comparison = variant["comparison_to_baseline"]
@@ -543,15 +543,15 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
             )
         elif comparison["assessment"] == "better":
             recommendations.append(
-                f"Keep {variant['key']} for another week; it improved most measured post averages over baseline."
+                f"Keep {variant['key']} for another week. It improved most measured post averages over baseline."
             )
         elif comparison["assessment"] == "weaker":
             recommendations.append(
-                f"Replace or revise {variant['key']}; it underperformed the baseline on most measured post averages."
+                f"Replace or revise {variant['key']}. It underperformed the baseline on most measured post averages."
             )
         elif comparison["assessment"] == "mixed":
             recommendations.append(
-                f"Review {variant['key']} by reach, watch time, and growth actions separately; its result is mixed."
+                f"Review {variant['key']} by reach, watch time, and growth actions separately. Its result is mixed."
             )
     recommendations.extend(_website_recommendations(report["website_performance"]))
     if not recommendations:

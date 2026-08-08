@@ -223,8 +223,8 @@ def test_weekly_review_computes_deltas_funnel_totals_and_campaigns(tmp_path):
         "upcoming_variants": ["habit_entry_regular_reels:find_out"],
     }
     assert report["recommendations"] == [
-        "Let the scheduled campaign publish before changing copy; no published variant evidence exists yet.",
-        "Landing traffic is too small to judge conversion; keep measuring before changing the page.",
+        "Let the scheduled campaign publish before changing copy. No published variant evidence exists yet.",
+        "Landing traffic is too small to judge conversion. Keep measuring before changing the page.",
     ]
 
 
