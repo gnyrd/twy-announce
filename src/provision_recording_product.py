@@ -26,7 +26,7 @@ sys.path.insert(0, "/root/twy/paths")
 sys.path.insert(0, "/root/twy/marvy")
 sys.path.insert(0, "/root/twy/classes/scripts")
 
-from twy_paths import data_root, load_env  # noqa: E402
+from twy_paths import habit_recording_state_path, load_env  # noqa: E402
 
 CLASSES_API = "http://localhost:5003"
 # Two weeks of access from each person's own enrollment (JP, 2026-08-08).
@@ -40,7 +40,7 @@ def product_name(year: int, month: int) -> str:
 
 
 def state_path(year: int, month: int) -> Path:
-    return data_root() / "habit_recordings" / f"{year:04d}_{month:02d}.json"
+    return habit_recording_state_path(year, month)
 
 
 def habit_class(year: int, month: int) -> dict | None:
@@ -115,6 +115,7 @@ def provision(year: int, month: int, *, dry_run: bool = False) -> dict | None:
         "year": year,
         "month": month,
         "class_date": plan.get("date"),
+        "class_title": str(plan.get("title") or ""),
         "product_id": int(product_id),
         "product_name": name,
         "media_id": media_id,

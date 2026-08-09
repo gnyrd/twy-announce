@@ -22,6 +22,7 @@ from sendgrid_campaigns import (
 from sendgrid_newsletter_workflow import (
     PURPOSE_SECTIONS,
     apply_provider_report,
+    ensure_recording_draft,
     lock_due_sections,
     mark_provider_error,
     provision_drafts,
@@ -123,13 +124,15 @@ def main(argv: list[str] | None = None) -> int:
             / f"{year:04d}-{month:02d}"
             / ".sendgrid.json"
         )
+        class_day = habit_class_date(year, month)
+        if class_day:
+            ensure_recording_draft(year, month)
         if not state_path.exists() and not explicit:
             local_sections = read_local_sections(year, month)
             if not local_sections:
                 continue
         else:
             local_sections = read_local_sections(year, month)
-        class_day = habit_class_date(year, month)
         locked_sections = lock_due_sections(
             year=year,
             month=month,

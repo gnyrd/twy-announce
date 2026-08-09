@@ -27,6 +27,7 @@ from newsletter_editorial_review import (
     validate_comparison,
 )
 from twy_paths import (
+    habit_recording_state_path,
     newsletter_diffs_dir,
     newsletter_metadata_path,
     newsletter_path,
@@ -340,6 +341,12 @@ def lock_due_sections(
             materialization_section = _snapshot_content(
                 _read_snapshot(year, month, approved_snapshot)
             )
+        materialization_section = resolve_section_tokens(
+            key,
+            materialization_section,
+            year=year,
+            month=month,
+        )
         _validate_sections_before_provider({
             key: materialization_section,
         })
@@ -719,3 +726,158 @@ def provision_drafts(
         )
 
     return result
+
+
+RECORDING_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+HABIT_LANDING_URL = "https://habit.tiffanywoodyoga.com"
+RECORDING_PRODUCT_URL = (
+    "https://studio.tiffanywoodyoga.com/buy/product/{product_id}"
+)
+
+
+def _recording_record(year: int, month: int) -> dict:
+    """The month's provisioned recording product record, or {}."""
+    path = habit_recording_state_path(year, month)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def resolve_section_tokens(
+    key: str,
+    section: dict,
+    *,
+    year: int,
+    month: int,
+) -> dict:
+    """Substitute the newsletter token vocabulary with month facts.
+
+    The vocabulary is the one the Class Plans editor documents in
+    classes/dashboard/api.py (_substitute_tokens). This is the send-path
+    resolver: it fills what the month's recording record can answer and
+    leaves anything else in place for the pre-provider validator to
+    reject, so a missing recording fails the lock loudly instead of
+    mailing a token.
+    """
+    record = _recording_record(year, month)
+    title = str(record.get("class_title") or "")
+    product_id = record.get("product_id")
+    recording_url = (
+        RECORDING_PRODUCT_URL.format(product_id=int(product_id))
+        if product_id
+        else ""
+    )
+    landing = (
+        f"{HABIT_LANDING_URL}?utm_source=newsletter"
+        f"&utm_campaign={year:04d}-{month:02d}"
+        f"&utm_content={key.replace('_', '-')}"
+    )
+    subject = str(section.get("subject") or "")
+    preheader = str(section.get("preheader") or "")
+    body = str(section.get("body") or "")
+    if title:
+        subject = subject.replace("{CLASS_TITLE}", title)
+        preheader = preheader.replace("{CLASS_TITLE}", title)
+        body = body.replace("{CLASS_TITLE}", f"[{title}]({landing})")
+    if recording_url:
+        body = body.replace(
+            "{RECORDING_CTA}",
+            f"[Watch {title or 'the class'}]({recording_url})",
+        )
+        body = body.replace("{RECORDING_URL}", recording_url)
+    resolved = dict(section)
+    resolved["subject"] = subject
+    resolved["preheader"] = preheader
+    resolved["body"] = body
+    return resolved
+
+
+def ensure_recording_draft(year: int, month: int) -> bool:
+    """Seed the month's recording section from the canonical template.
+
+    The Class Recording mailing is generic: one token template works for
+    every Habit class because lock-time resolution fills the class title
+    and the recording product link from the month's provisioning record.
+    Seeding makes each month editable in the Class Plans editor with no
+    hand authoring.
+    """
+    changed = False
+    target = newsletter_path(year, month, "recording")
+    if not target.exists():
+        template = RECORDING_TEMPLATE_DIR / "recording.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            template.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        changed = True
+    metadata = _load_metadata(year, month)
+    drafts = metadata.setdefault("drafts", {})
+    entry = drafts.setdefault("recording", {})
+    if not str(entry.get("preheader") or "").strip():
+        preheader = RECORDING_TEMPLATE_DIR / "recording_preheader.txt"
+        entry["preheader"] = preheader.read_text(encoding="utf-8").strip()
+        _save_metadata(year, month, metadata)
+        changed = True
+    return changed
+
+
+def hold_mailing(
+    *,
+    year: int,
+    month: int,
+    key: str,
+    campaigns: SendGridCampaigns,
+    now: datetime,
+) -> dict:
+    """Take one mailing out of the automatic workflow until released.
+
+    Removes the purpose from scheduling expectations, disarms any
+    scheduled single send at the provider, and marks the draft held so
+    the lock loop leaves it alone. The section, its snapshots, and the
+    provider draft all survive intact.
+    """
+    if key not in SECTION_PURPOSES:
+        raise ValueError(f"unknown section: {key}")
+    if now.tzinfo is None:
+        raise ValueError("hold time must be timezone aware")
+    metadata = _load_metadata(year, month)
+    drafts = metadata.setdefault("drafts", {})
+    entry = drafts.setdefault(key, {})
+    state = str(entry.get("state") or "draft")
+    if state == "sent":
+        raise ValueError(f"{key} is already sent")
+    if state != "held":
+        entry["state"] = "held"
+        entry["held_at"] = now.astimezone(timezone.utc).isoformat()
+        _save_metadata(year, month, metadata)
+    campaigns.hold_purpose(SECTION_PURPOSES[key])
+    return entry
+
+
+def release_mailing(
+    *,
+    year: int,
+    month: int,
+    key: str,
+    campaigns: SendGridCampaigns,
+) -> dict:
+    """Return a held or errored mailing to the automatic workflow."""
+    if key not in SECTION_PURPOSES:
+        raise ValueError(f"unknown section: {key}")
+    metadata = _load_metadata(year, month)
+    drafts = metadata.setdefault("drafts", {})
+    entry = drafts.setdefault(key, {})
+    state = str(entry.get("state") or "draft")
+    if state == "sent":
+        raise ValueError(f"{key} is already sent")
+    if state in {"held", "error"}:
+        entry["state"] = "draft"
+        for field in ("held_at", "held_reason", "error", "error_at"):
+            entry.pop(field, None)
+        _save_metadata(year, month, metadata)
+    campaigns.release_purpose(SECTION_PURPOSES[key])
+    return entry

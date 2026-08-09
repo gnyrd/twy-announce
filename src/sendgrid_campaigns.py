@@ -139,6 +139,47 @@ class SendGridCampaigns:
             values = list((state.get("single_sends") or {}).keys())
         return [MailingPurpose(value) for value in values]
 
+    def hold_purpose(self, purpose: MailingPurpose) -> None:
+        """Remove a purpose from automatic scheduling and disarm its send."""
+        state = self._load_state()
+        key = self._purpose_key(purpose)
+        expected = state.get("expected_purposes")
+        if expected is None:
+            expected = list((state.get("single_sends") or {}).keys())
+        if key in expected:
+            state["expected_purposes"] = [
+                value for value in expected if value != key
+            ]
+            self._save_state(state)
+        elif state.get("expected_purposes") is None:
+            state["expected_purposes"] = sorted(expected)
+            self._save_state(state)
+        entry = (state.get("single_sends") or {}).get(key)
+        if entry:
+            try:
+                single_send = self.api.get_single_send(entry["id"])
+            except (KeyError, RuntimeError) as exc:
+                if "returned 404" not in str(exc) and not isinstance(
+                    exc, KeyError
+                ):
+                    raise
+                single_send = None
+            if single_send and single_send.get("status") == "scheduled":
+                self.api.unschedule_single_send(entry["id"])
+
+    def release_purpose(self, purpose: MailingPurpose) -> None:
+        """Return a held purpose to automatic scheduling."""
+        state = self._load_state()
+        key = self._purpose_key(purpose)
+        if not (state.get("single_sends") or {}).get(key):
+            return
+        expected = state.get("expected_purposes")
+        if expected is None:
+            return
+        if key not in expected:
+            state["expected_purposes"] = sorted(set(expected) | {key})
+            self._save_state(state)
+
     @staticmethod
     def _purpose_key(purpose: MailingPurpose) -> str:
         return purpose.value

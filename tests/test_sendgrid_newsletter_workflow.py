@@ -758,3 +758,158 @@ def test_provider_failure_moves_locked_draft_to_error(
     entry = metadata["drafts"]["lifestyle"]
     assert entry["state"] == "error"
     assert entry["error"] == "provider verification failed"
+
+
+from pathlib import Path
+
+from sendgrid_newsletter_workflow import (
+    _validate_sections_before_provider,
+    ensure_recording_draft,
+    hold_mailing,
+    release_mailing,
+    resolve_section_tokens,
+)
+import sendgrid_newsletter_workflow as workflow_module
+
+
+def _write_recording_record(tmp_path, monkeypatch, **overrides):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    from twy_paths import habit_recording_state_path
+
+    payload = {"class_title": "Open to Grace", "product_id": 95861}
+    payload.update(overrides)
+    path = habit_recording_state_path(2026, 8)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def _template_section():
+    template = Path(workflow_module.__file__).resolve().parent.parent
+    text = (template / "templates" / "recording.md").read_text(
+        encoding="utf-8"
+    )
+    first_line, _, rest = text.partition("\n")
+    return {
+        "subject": first_line.lstrip("#").strip(),
+        "preheader": "Yours to practice with for the next two weeks.",
+        "body": rest.strip(),
+    }
+
+
+def test_resolve_section_tokens_resolves_the_template(
+    tmp_path, monkeypatch
+):
+    _write_recording_record(tmp_path, monkeypatch)
+    resolved = resolve_section_tokens(
+        "recording", _template_section(), year=2026, month=8
+    )
+    assert resolved["subject"] == "Your Open to Grace recording"
+    assert (
+        "[Watch Open to Grace]"
+        "(https://studio.tiffanywoodyoga.com/buy/product/95861)"
+    ) in resolved["body"]
+    assert (
+        "[Open to Grace](https://habit.tiffanywoodyoga.com"
+        "?utm_source=newsletter&utm_campaign=2026-08"
+        "&utm_content=recording)"
+    ) in resolved["body"]
+    _validate_sections_before_provider({"recording": resolved})
+
+
+def test_resolver_without_a_record_fails_the_lock_validation(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    resolved = resolve_section_tokens(
+        "recording", _template_section(), year=2026, month=8
+    )
+    with pytest.raises(ValueError, match="unresolved token"):
+        _validate_sections_before_provider({"recording": resolved})
+
+
+def test_ensure_recording_draft_seeds_and_is_idempotent(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    from twy_paths import newsletter_path
+
+    assert ensure_recording_draft(2026, 8) is True
+    seeded = newsletter_path(2026, 8, "recording").read_text(
+        encoding="utf-8"
+    )
+    assert "{RECORDING_CTA}" in seeded
+    assert "{FIRST_NAME}" not in seeded
+    metadata = workflow_module._load_metadata(2026, 8)
+    assert (
+        metadata["drafts"]["recording"]["preheader"]
+        == "Yours to practice with for the next two weeks."
+    )
+    assert ensure_recording_draft(2026, 8) is False
+
+
+def test_hold_and_release_mailing_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    api = FakeAPI()
+    api.single_sends["send9"] = {
+        "id": "send9",
+        "name": "2026_08: Yoga Habit: Class Recording",
+        "status": "scheduled",
+    }
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=_registry(tmp_path / "registry.json"),
+        state_path=tmp_path / "state.json",
+    )
+    campaigns._save_state({
+        "version": 1,
+        "expected_purposes": ["Class Recording", "Monthly"],
+        "segments": {},
+        "single_sends": {
+            "Class Recording": {
+                "id": "send9",
+                "name": "2026_08: Yoga Habit: Class Recording",
+            },
+        },
+    })
+    now = datetime(2026, 8, 9, 0, 30, tzinfo=timezone.utc)
+
+    entry = hold_mailing(
+        year=2026, month=8, key="recording", campaigns=campaigns, now=now
+    )
+    assert entry["state"] == "held"
+    assert campaigns._load_state()["expected_purposes"] == ["Monthly"]
+    assert api.single_sends["send9"]["status"] == "draft"
+    metadata = workflow_module._load_metadata(2026, 8)
+    assert metadata["drafts"]["recording"]["state"] == "held"
+
+    entry = release_mailing(
+        year=2026, month=8, key="recording", campaigns=campaigns
+    )
+    assert entry["state"] == "draft"
+    assert "held_at" not in entry
+    assert campaigns._load_state()["expected_purposes"] == [
+        "Class Recording",
+        "Monthly",
+    ]
+
+
+def test_hold_mailing_rejects_a_sent_mailing(tmp_path, monkeypatch):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    workflow_module._save_metadata(2026, 8, {
+        "version": 1,
+        "drafts": {"recording": {"state": "sent"}},
+    })
+    campaigns = SendGridCampaigns(
+        api=FakeAPI(),
+        registry=_registry(tmp_path / "registry.json"),
+        state_path=tmp_path / "state.json",
+    )
+    with pytest.raises(ValueError, match="already sent"):
+        hold_mailing(
+            year=2026,
+            month=8,
+            key="recording",
+            campaigns=campaigns,
+            now=datetime(2026, 8, 9, tzinfo=timezone.utc),
+        )
