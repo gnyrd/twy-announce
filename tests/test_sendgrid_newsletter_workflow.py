@@ -913,3 +913,143 @@ def test_hold_mailing_rejects_a_sent_mailing(tmp_path, monkeypatch):
             campaigns=campaigns,
             now=datetime(2026, 8, 9, tzinfo=timezone.utc),
         )
+
+
+def test_apply_provider_report_retries_capture_after_error(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    period = _write_local_newsletter(
+        tmp_path,
+        subject="Tiff subject",
+        body="Tiff body.",
+    )
+    original_path = (
+        period / "snapshots" / "lifestyle" / "generated-original.json"
+    )
+    original_path.parent.mkdir(parents=True)
+    original_path.write_text(json.dumps({
+        "version": 1,
+        "kind": "generated",
+        "audience": "lifestyle",
+        "captured_at": "20260729T010000Z",
+        "content_sha256": "unused-by-reader",
+        "content": {
+            "subject": "Tweee subject",
+            "preheader": "Tweee preview",
+            "body": "Tweee body.",
+        },
+    }))
+    metadata = json.loads((period / ".metadata.json").read_text())
+    metadata["drafts"]["lifestyle"].update({
+        "preheader": "Tiff preview",
+        "original_snapshot": str(original_path.relative_to(period)),
+    })
+    (period / ".metadata.json").write_text(json.dumps(metadata))
+    lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
+    )
+
+    from sendgrid_newsletter_workflow import mark_provider_error
+
+    mark_provider_error(
+        year=2026,
+        month=8,
+        audiences={"lifestyle"},
+        error="unsupported newsletter audience",
+        now=datetime(2026, 8, 3, 15, 55, tzinfo=timezone.utc),
+    )
+    metadata = json.loads((period / ".metadata.json").read_text())
+    assert metadata["drafts"]["lifestyle"]["state"] == "error"
+
+    apply_provider_report(
+        year=2026,
+        month=8,
+        report={
+            "Monthly": {
+                "id": "send1",
+                "status": "triggered",
+                "provider_status": "triggered",
+                "send_at": "2026-08-03T15:49:00+00:00",
+            },
+        },
+        now=datetime(2026, 8, 3, 16, 0, tzinfo=timezone.utc),
+    )
+    metadata = json.loads((period / ".metadata.json").read_text())
+    entry = metadata["drafts"]["lifestyle"]
+    assert entry["state"] == "sent"
+    assert "error" not in entry
+    assert "error_at" not in entry
+    assert entry["review_path"].endswith(".review.json")
+
+
+def test_every_workflow_section_is_an_allowed_review_audience():
+    from newsletter_editorial_review import ALLOWED_AUDIENCES
+    from sendgrid_newsletter_workflow import SECTION_PURPOSES
+
+    missing = set(SECTION_PURPOSES) - set(ALLOWED_AUDIENCES)
+    assert not missing, (
+        "every mailing section must be reviewable: " + repr(sorted(missing))
+    )
+
+
+def test_sent_snapshot_retry_tolerates_reverification(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    import sendgrid_newsletter_workflow as wf
+
+    (wf._period_dir(2026, 8) / "snapshots" / "lifestyle").mkdir(
+        parents=True
+    )
+    content = {"subject": "s", "preheader": "p", "body": "b"}
+    first = wf._write_snapshot(
+        year=2026,
+        month=8,
+        key="lifestyle",
+        kind="sent",
+        content=content,
+        captured_at="2026-08-09T23:17:00+00:00",
+        provider={
+            "single_send_id": "send1",
+            "status": "triggered",
+            "send_at": "2026-08-09T23:17:00+00:00",
+            "verified_at": "2026-08-09T23:30:00+00:00",
+        },
+    )
+    second = wf._write_snapshot(
+        year=2026,
+        month=8,
+        key="lifestyle",
+        kind="sent",
+        content=content,
+        captured_at="2026-08-09T23:17:00+00:00",
+        provider={
+            "single_send_id": "send1",
+            "status": "completed",
+            "send_at": "2026-08-09T23:17:00+00:00",
+            "verified_at": "2026-08-09T23:51:00+00:00",
+        },
+    )
+    assert first == second
+
+    with pytest.raises(ValueError, match="collision"):
+        wf._write_snapshot(
+            year=2026,
+            month=8,
+            key="lifestyle",
+            kind="sent",
+            content=content,
+            captured_at="2026-08-09T23:17:00+00:00",
+            provider={
+                "single_send_id": "send2",
+                "status": "triggered",
+                "send_at": "2026-08-09T23:17:00+00:00",
+                "verified_at": "2026-08-09T23:55:00+00:00",
+            },
+        )

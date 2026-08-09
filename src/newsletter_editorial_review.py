@@ -29,6 +29,7 @@ ALLOWED_AUDIENCES = {
     "non_opener",
     "gentle_nudge",
     "reminder",
+    "recording",
     "ph1",
     "ph2",
 }

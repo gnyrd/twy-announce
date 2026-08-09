@@ -147,6 +147,16 @@ def _write_snapshot(
         payload_stable = dict(payload)
         existing_stable.pop("captured_at", None)
         payload_stable.pop("captured_at", None)
+        # A retry after a partial capture re-verifies the same send, so
+        # provider observation fields move while identity (single_send_id,
+        # send_at) must not. Only identity divergence is a collision.
+        for stable in (existing_stable, payload_stable):
+            provider_stable = stable.get("provider")
+            if isinstance(provider_stable, dict):
+                provider_stable = dict(provider_stable)
+                for field in ("verified_at", "status"):
+                    provider_stable.pop(field, None)
+                stable["provider"] = provider_stable
         if existing_stable != payload_stable:
             raise ValueError(f"newsletter snapshot collision: {path}")
     return str(relative)
@@ -442,6 +452,9 @@ def apply_provider_report(
             "locked",
             "scheduled",
             "sent",
+            # error retries the post-send capture: the send already
+            # happened, so there is nothing left to approve or arm.
+            "error",
         }:
             if state == "sent":
                 continue
@@ -484,6 +497,8 @@ def apply_provider_report(
             })
             if review_path:
                 entry["review_path"] = review_path
+            for field in ("error", "error_at"):
+                entry.pop(field, None)
             changed = True
             continue
 
