@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 import re
 
+from urllib.parse import urlparse
+
 from bs4 import BeautifulSoup
 import markdown as md
 from twy_paths import newsletters_dir
@@ -157,6 +159,21 @@ def _with_hidden_preheader(html: str, preheader: str) -> str:
     return f"{hidden}{html}"
 
 
+_TWY_ASSET_SUFFIX = ".tiffanywoodyoga.com"
+
+
+def _assert_asset_hosts(html: str) -> None:
+    # Every email asset must live on a TWY host. The MailChimp migration
+    # left images hotlinked from mcusercontent.com until 2026-08-09; this
+    # fails the render loudly so an external asset can never ship again.
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        src = str(img.get("src") or "").strip()
+        host = urlparse(src).netloc.lower()
+        if host != _TWY_ASSET_SUFFIX[1:] and not host.endswith(_TWY_ASSET_SUFFIX):
+            raise ValueError(f"email image on non-TWY host: {src[:120]}")
+
+
 def render_newsletter(
     body_md: str,
     *,
@@ -170,5 +187,6 @@ def render_newsletter(
         else body_html
     )
     html = _with_hidden_preheader(html, preheader)
+    _assert_asset_hosts(html)
     plain_text = _render_plain_text(body_html)
     return RenderedNewsletter(html=html, plain_text=plain_text)

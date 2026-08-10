@@ -34,7 +34,7 @@ CAL_DESC = "Upcoming live classes with Tiffany Wood."
 UID_HOST = "tiffanywoodyoga.com"
 PRODID = "-//Tiffany Wood Yoga//Classes Feed v1//EN"
 
-LOGO_URL = "https://mcusercontent.com/a6369901d6f0c448fbcc61e6e/images/504db4b6-e9bc-18e5-3142-9a9bcbbbe892.png"
+LOGO_URL = "https://assets.tiffanywoodyoga.com/email/twy_logo_header.png"
 WEBCAL_URL = "webcal://calendar.tiffanywoodyoga.com/classes.ics"
 HTTPS_URL = "https://calendar.tiffanywoodyoga.com/classes.ics"
 # Per-event detail page on Tiff's HM studio (custom domain). Same base used by

@@ -117,3 +117,19 @@ def test_stable_newsletter_corpus_preserves_provider_html():
         body = Path(filename).read_text()
         actual = hashlib.sha256(render_newsletter(body).html.encode()).hexdigest()
         assert actual == expected_hash, filename
+
+
+def test_render_rejects_non_twy_image_host():
+    import pytest
+
+    with pytest.raises(ValueError, match="non-TWY host"):
+        render_newsletter(
+            "![logo](https://mcusercontent.com/abc/logo.png)"
+        )
+
+
+def test_render_accepts_twy_asset_host():
+    rendered = render_newsletter(
+        "![logo](https://assets.tiffanywoodyoga.com/email/twy_logo_header.png)"
+    )
+    assert "assets.tiffanywoodyoga.com/email/twy_logo_header.png" in rendered.html
