@@ -133,3 +133,22 @@ def test_render_accepts_twy_asset_host():
         "![logo](https://assets.tiffanywoodyoga.com/email/twy_logo_header.png)"
     )
     assert "assets.tiffanywoodyoga.com/email/twy_logo_header.png" in rendered.html
+
+def test_body_images_are_capped_to_the_content_column():
+    """A retina asset is twice its display width and would tear the layout."""
+    rendered = render_newsletter(
+        "![A class](https://assets.tiffanywoodyoga.com/email/welcome_video_intro.jpg)"
+    )
+
+    assert "max-width:600px" in rendered.html
+    assert "width:100%" in rendered.html
+    assert "height:auto" in rendered.html
+    # Outlook ignores CSS, so the width attribute carries it there.
+    assert 'width="600"' in rendered.html
+
+
+def test_a_body_without_images_is_returned_untouched():
+    """Reparsing rewrites the CTA table, which the corpus hashes pin exactly."""
+    body = "Plain words, no pictures.\n\nA second paragraph."
+
+    assert "<img" not in render_newsletter(body).html

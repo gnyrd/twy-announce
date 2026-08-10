@@ -161,6 +161,40 @@ def _with_hidden_preheader(html: str, preheader: str) -> str:
 
 _TWY_ASSET_SUFFIX = ".tiffanywoodyoga.com"
 
+# The template's content column. A body image is served at twice its display
+# width for retina, so without a cap a 1128px screenshot renders at 1128px and
+# tears the layout open.
+_CONTENT_WIDTH = 600
+
+
+def _make_images_responsive(html: str) -> str:
+    """Fit every body image to the content column, on phones and in Outlook.
+
+    Markdown gives a bare img with no dimensions. Modern clients honour the
+    max-width, Outlook ignores CSS entirely and honours the width attribute, so
+    both are set. height auto keeps the aspect ratio when the width shrinks.
+    """
+    # Reparsing rewrites the CTA button table even when nothing changes, and
+    # the corpus hashes hold that markup byte for byte. A body with no image
+    # goes back untouched.
+    if "<img" not in html:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        if img.get("data-twy-chrome") is not None:
+            continue
+        existing = str(img.get("style") or "").rstrip("; ")
+        img["style"] = "; ".join(filter(None, [
+            existing,
+            "display:block",
+            "width:100%",
+            f"max-width:{_CONTENT_WIDTH}px",
+            "height:auto",
+        ]))
+        img["width"] = str(_CONTENT_WIDTH)
+        img.attrs.pop("height", None)
+    return str(soup)
+
 
 def _assert_asset_hosts(html: str) -> None:
     # Every email asset must live on a TWY host. The MailChimp migration
@@ -180,7 +214,7 @@ def render_newsletter(
     use_template: bool = False,
     preheader: str = "",
 ) -> RenderedNewsletter:
-    body_html = _render_html(body_md)
+    body_html = _make_images_responsive(_render_html(body_md))
     html = (
         _wrap_with_newsletter_template(body_html)
         if use_template
