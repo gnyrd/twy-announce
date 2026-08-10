@@ -10,6 +10,7 @@ from typing import Callable
 
 from newsletter_rendering import render_newsletter
 from sendgrid_mailings import (
+    INTERNAL_SEND_COPY,
     MailingPurpose,
     mailing_name,
     validate_sendgrid_name,
@@ -363,6 +364,18 @@ class SendGridCampaigns:
             self.registry.register_list(name, identifier)
             return identifier
 
+    def _with_internal_copy(self, send_to: dict) -> dict:
+        # JP directive 2026-08-09: every Single Send delivers a copy to the
+        # Internal: Send Copy audience (admin@ and Tiffany). A registry miss
+        # fails the mailing loudly rather than sending without the copy.
+        copy_id = self.registry.list_id(INTERNAL_SEND_COPY)
+        merged = dict(send_to)
+        list_ids = [str(item) for item in (merged.get("list_ids") or [])]
+        if copy_id not in list_ids:
+            list_ids.append(copy_id)
+        merged["list_ids"] = list_ids
+        return merged
+
     def create_draft(
         self,
         *,
@@ -379,6 +392,7 @@ class SendGridCampaigns:
         clean_preheader = preheader.strip()
         if not clean_subject or not clean_body:
             raise ValueError("SendGrid draft requires subject and body")
+        send_to = self._with_internal_copy(send_to)
         name = mailing_name(year, month, purpose)
         state = self._load_state()
         key = self._purpose_key(purpose)

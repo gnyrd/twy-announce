@@ -14,6 +14,7 @@ EMAIL_SUBSCRIBED = "Email: Subscribed"
 EMAIL_UNSUBSCRIBED = "Email: Unsubscribed"
 MEMBER_YOGA_LIFESTYLE = "Member: Yoga Lifestyle"
 MEMBER_ARCHIVE = "Member: Archive"
+INTERNAL_SEND_COPY = "Internal: Send Copy"
 
 
 class MailingPurpose(str, Enum):

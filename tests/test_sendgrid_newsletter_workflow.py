@@ -91,6 +91,7 @@ def _registry(path):
         "lists": {
             "Email: Subscribed": {"id": "subscribed1"},
             "Member: Yoga Lifestyle": {"id": "member1"},
+            "Internal: Send Copy": {"id": "sendcopy1"},
         },
     }))
     return SendGridRegistry.load(path)
@@ -181,11 +182,14 @@ def test_provision_creates_locked_lists_segments_and_all_eight_drafts(
         payload for payload in api.created_sends
         if payload["name"].endswith(": Registered Reminder")
     )
-    assert monthly["send_to"]["list_ids"] == ["member1"]
+    assert monthly["send_to"]["list_ids"] == ["member1", "sendcopy1"]
     registered_list_id = SendGridRegistry.load(
         registry.path
     ).list_id("Yoga Habit: Registered: 2026_08")
-    assert registered["send_to"]["list_ids"] == [registered_list_id]
+    assert registered["send_to"]["list_ids"] == [
+        registered_list_id,
+        "sendcopy1",
+    ]
 
 
 def test_partial_registered_reminder_does_not_require_general_draft(tmp_path):
@@ -1053,3 +1057,23 @@ def test_sent_snapshot_retry_tolerates_reverification(
                 "verified_at": "2026-08-09T23:55:00+00:00",
             },
         )
+
+
+def test_every_single_send_carries_the_internal_copy_audience(tmp_path):
+    api = FakeAPI()
+    registry = _registry(tmp_path / "registry.json")
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+    provision_drafts(
+        campaigns=campaigns,
+        year=2026,
+        month=8,
+        class_date=date(2026, 8, 8),
+        sections=_sections(),
+    )
+    assert len(api.created_sends) == 8
+    for payload in api.created_sends:
+        assert "sendcopy1" in payload["send_to"]["list_ids"], payload["name"]

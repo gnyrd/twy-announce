@@ -131,6 +131,9 @@ def _registry(path):
             "Yoga Habit: Registered: 2026_08": {
                 "id": "registered1",
             },
+            "Internal: Send Copy": {
+                "id": "sendcopy1",
+            },
         },
     }))
     return SendGridRegistry.load(path)
