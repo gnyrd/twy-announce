@@ -83,6 +83,36 @@ def known_annuals():
     return out
 
 
+def annual_payment_summary(annuals, db_path=MARVY_DB):
+    """Payment reality per annual member, from their TYL purchase rows.
+
+    Emails match case-insensitively (purchase rows carry mixed case). A member
+    is comped only when EVERY TYL membership purchase row is $0; the $0
+    enrollment row that starts each subscription proves nothing on its own
+    (mislabeling both paying annuals as comps misled a client-facing proposal
+    on 2026-08-10).
+    """
+    conn = sqlite3.connect(db_path)
+    out = []
+    for a in annuals:
+        rows = conn.execute(
+            "SELECT created, amount_paid FROM purchases "
+            "WHERE product_id=? AND lower(customer_email)=? ORDER BY created",
+            (TYL_PRODUCT_ID, a["email"]),
+        ).fetchall()
+        paid = [(c, amt) for c, amt in rows if (amt or 0) > 0]
+        out.append(dict(
+            a,
+            paid_total=sum(amt for _, amt in paid),
+            paid_count=len(paid),
+            first_paid=paid[0][0][:10] if paid else None,
+            latest_paid=paid[-1][0][:10] if paid else None,
+            comped=not paid,
+        ))
+    conn.close()
+    return out
+
+
 def from_purchase_window(date, annuals):
     """Reconstruction for dates with no HM report. (monthly, annual, total)."""
     ann_emails = {a["email"] for a in annuals}
@@ -128,9 +158,15 @@ def main(argv):
             print("%-12s %-13d %-12d %-7d %s" % (d.strftime("%Y-%m-%d"), m, a, t, src))
     if annuals:
         print()
-        print("Annual subscriptions on record (both comped, $0 Paid):")
-        for x in annuals:
-            print("  %s  %s -> %s" % (x["email"], x["created"], x["until"]))
+        print("Annual subscriptions on record:")
+        for x in annual_payment_summary(annuals):
+            if x["comped"]:
+                detail = "comped, every membership purchase row $0"
+            else:
+                total = ("%.2f" % x["paid_total"]).rstrip("0").rstrip(".")
+                detail = "paid $%s across %d payments, first %s, latest %s" % (
+                    total, x["paid_count"], x["first_paid"], x["latest_paid"])
+            print("  %s  %s -> %s | %s" % (x["email"], x["created"], x["until"], detail))
     return 0
 
 
