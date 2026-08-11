@@ -22,7 +22,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(__file__))
-from newsletter import newsletter_path
+from newsletter_paths import newsletter_path
 from mailchimp_campaigns import (
     find_campaign_by_title, followup_campaign_title, monthly_campaign_title,
     _mc_url, _mc_auth,

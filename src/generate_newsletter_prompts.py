@@ -23,11 +23,11 @@ load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from newsletter import save_prompt, prompt_path, newsletter_path
+from newsletter_paths import save_prompt, prompt_path, newsletter_path
 import habit_newsletter_prompt as hnp
 from habit_newsletter_prompt import check_coverage, MINIMUM_CLASS_PLANS
 from newsletter_editorial_review import compile_approved_inputs
-from slack import post_slack
+from slack_post import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
 SLACK_STATUS_CHANNEL = os.getenv("SLACK_STATUS_CHANNEL", "#status-newsletters")

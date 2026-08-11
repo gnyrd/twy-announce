@@ -21,7 +21,7 @@ load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
 from mailchimp_campaigns import monthly_campaign_title
-from slack import post_slack
+from slack_post import post_slack
 
 MAILCHIMP_API_KEY    = os.environ["MAILCHIMP_API_KEY"]
 MC_SERVER            = os.environ["MAILCHIMP_SERVER_PREFIX"]

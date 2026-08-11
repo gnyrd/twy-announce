@@ -29,7 +29,7 @@ from sendgrid_newsletter_workflow import (
     read_local_sections,
 )
 from sendgrid_scheduler import schedule_month
-from slack import post_slack
+from slack_post import post_slack
 from twy_paths import load_env, newsletters_dir, sendgrid_registry_path
 
 

@@ -19,9 +19,9 @@ load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from newsletter import newsletter_path
+from newsletter_paths import newsletter_path
 from mailchimp_campaigns import create_or_update_draft, monthly_campaign_title
-from slack import post_slack
+from slack_post import post_slack
 
 MOUNTAIN             = ZoneInfo("America/Denver")
 SLACK_STATUS_CHANNEL = os.getenv("SLACK_STATUS_CHANNEL", "#status-newsletters")

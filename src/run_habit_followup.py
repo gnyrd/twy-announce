@@ -24,9 +24,9 @@ from twy_paths import load_env
 load_env()
 
 sys.path.insert(0, str(Path(__file__).parent))
-from newsletter import newsletter_path
+from newsletter_paths import newsletter_path
 from mailchimp_campaigns import create_or_update_draft, followup_campaign_title
-from slack import post_slack
+from slack_post import post_slack
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)

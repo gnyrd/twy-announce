@@ -38,7 +38,7 @@ from twy_paths import load_env  # noqa: E402
 load_env()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from newsletter import newsletter_path  # noqa: E402
+from newsletter_paths import newsletter_path  # noqa: E402
 from mailchimp_campaigns import _mc_auth, _mc_url  # noqa: E402
 from twy_platform import locked_write  # noqa: E402
 
