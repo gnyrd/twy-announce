@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from sendgrid_campaigns import SendGridRegistry
+from sendgrid_mailings import validate_sendgrid_name
 
 
 def ensure_list(api, registry: SendGridRegistry, name: str) -> str:
     try:
         return registry.list_id(name)
     except KeyError:
-        created = api.create_list(name)
+        # Last waist before the provider. Every builder in sendgrid_mailings
+        # already validates, but this took whatever it was handed, so a caller
+        # skipping a builder could create a list carrying prohibited
+        # punctuation. Naming a list wrong is not a typo you fix later: it is
+        # the identity every mailing matches on.
+        created = api.create_list(validate_sendgrid_name(name))
         identifier = str(created.get("id") or "")
         if not identifier:
             raise ValueError("SendGrid list returned no immutable ID")

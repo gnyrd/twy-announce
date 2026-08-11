@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from sendgrid_campaigns import SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
 
@@ -93,3 +95,45 @@ def test_exact_sync_adds_desired_and_removes_only_stale_members():
         "previous": 2,
         "removed": 1,
     }
+
+
+class RefusingRegistry:
+    """A registry that knows no lists, so ensure_list always tries to create."""
+
+    def __init__(self):
+        self.registered = {}
+
+    def list_id(self, name):
+        raise KeyError(name)
+
+    def register_list(self, name, identifier):
+        self.registered[name] = identifier
+
+
+class CountingAPI:
+    def __init__(self):
+        self.created = []
+
+    def create_list(self, name):
+        self.created.append(name)
+        return {"id": "list-id"}
+
+
+def test_creating_a_list_refuses_prohibited_punctuation():
+    """The last waist before the provider. A wrong list name is an identity."""
+    api = CountingAPI()
+
+    for bad in ("Product: Yoga—Lifestyle", "Product: Yoga–Lifestyle"):
+        with pytest.raises(ValueError, match="prohibited punctuation"):
+            ensure_list(api, RefusingRegistry(), bad)
+
+    assert api.created == [], "nothing may reach the provider"
+
+
+def test_creating_a_clean_list_still_works():
+    registry = RefusingRegistry()
+
+    assert ensure_list(CountingAPI(), registry, "Product: Yoga Lifestyle") == (
+        "list-id"
+    )
+    assert registry.registered == {"Product: Yoga Lifestyle": "list-id"}
