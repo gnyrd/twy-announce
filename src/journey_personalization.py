@@ -23,6 +23,12 @@ import re
 # harmless if the token ever moves mid-sentence.
 NO_NAME_FALLBACK = "there"
 
+# What the editor's Preview and Send test put where a member's name would go.
+# Raw {{first_name}} reads as a broken email and a real name reads as copy, so
+# this is deliberately neither: it says a name gets filled in here. Named by JP
+# 2026-08-11.
+EDITOR_PLACEHOLDER = "auto_substituted_name"
+
 PERSONALIZED_FIELDS = ("subject", "preheader", "body")
 
 _TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
