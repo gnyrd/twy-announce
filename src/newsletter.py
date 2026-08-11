@@ -43,7 +43,7 @@ def save_newsletter(
     """Write a newsletter, keeping the previous version and announcing the change.
 
     Tiff's words are the thing being overwritten here, so the previous copy goes
-    to newsletters/versions/<YYYY-MM>/<audience>/ first. Before this, a save
+    to versions/newsletters/<YYYY-MM>/<audience>/ first. Before this, a save
     replaced them with nothing kept and nothing said.
 
     Both side effects fail soft, matching how class plans do it: a versioning or
