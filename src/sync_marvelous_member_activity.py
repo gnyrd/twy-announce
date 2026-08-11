@@ -429,7 +429,7 @@ def post_activity(message: str, *, channel: str) -> bool:
     return bool(slack(message, channel=channel))
 
 
-def _customer_linker(database_path: Path) -> Callable[[str, str], str]:
+def customer_linker(database_path: Path) -> Callable[[str, str], str]:
     def link(email: str, name: str) -> str:
         connection = sqlite3.connect(database_path)
         try:
@@ -544,7 +544,7 @@ def main(argv=None) -> int:
         dry_run=args.dry_run,
         channel=os.getenv("SLACK_MOVEMENT_CHANNEL", DEFAULT_CHANNEL),
         initial_state=initial_state,
-        customer_link=_customer_linker(database_path),
+        customer_link=customer_linker(database_path),
     )
     print(
         json.dumps(

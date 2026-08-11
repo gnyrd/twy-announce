@@ -33,8 +33,21 @@ import sys
 import journey_enrollment
 from journey_personalization import personalize_email
 from newsletter_rendering import render_newsletter
+from twy_platform.journeys import (
+    journey_campaign_id,
+    journey_display_label,
+)
 
 SENDER_NAME = "Tiffany Wood Yoga"
+
+# The custom argument SendGrid echoes back on every event for a journey
+# message. The event store reads it as the campaign id when no singlesend_id
+# is present, which is always the case for /mail/send.
+TWY_CAMPAIGN_ARG = "twy_campaign_id"
+
+# Member activity, the same channel the Marvelous activity feed posts to, so
+# one place answers what happened to which member.
+DEFAULT_ACTIVITY_CHANNEL = "C0BH3142LNP"
 
 # Why a sequence stopped. Every one of these is a fact about the person, not a
 # judgement, so the reporting page can show them to Tiff as they are.
@@ -124,11 +137,24 @@ def first_name_for(marvy_connection, enrollment: dict) -> str:
     return (row["first_name"] if row and row["first_name"] else "") or ""
 
 
-def build_payload(email: dict, *, recipient: str, registry) -> dict:
+def build_payload(
+    email: dict,
+    *,
+    recipient: str,
+    registry,
+    campaign_id: str = "",
+) -> dict:
     """One /mail/send body, the same shape the editor's Send test already proves.
 
     Subscription tracking stays off and the footer stays disabled because the
     delivery template carries its own, exactly as every other TWY send does.
+
+    campaign_id rides along as a custom argument. SendGrid echoes custom args
+    back on every event for this message, and that echo is the only way an
+    open or a bounce weeks later can be traced to a journey and an email
+    number: /mail/send has no campaign of its own. A send made without it is
+    permanently unattributable, which is why it is stamped here at the one
+    place the payload is built rather than by each caller.
     """
     subject = str(email.get("subject") or "").strip()
     body = str(email.get("body") or "").strip()
@@ -136,7 +162,7 @@ def build_payload(email: dict, *, recipient: str, registry) -> dict:
     if not subject or not body:
         raise ValueError("a journey email needs a subject and a body")
     rendered = render_newsletter(body, use_template=True, preheader=preheader)
-    return {
+    payload = {
         "personalizations": [{"to": [{"email": recipient}]}],
         "from": {"email": registry.sender_email, "name": SENDER_NAME},
         "reply_to": {"email": registry.sender_email, "name": SENDER_NAME},
@@ -152,6 +178,9 @@ def build_payload(email: dict, *, recipient: str, registry) -> dict:
         "mail_settings": {"footer": {"enable": False}},
         "tracking_settings": {"subscription_tracking": {"enable": False}},
     }
+    if campaign_id:
+        payload["custom_args"] = {TWY_CAMPAIGN_ARG: campaign_id}
+    return payload
 
 
 def ineligibility(email: str, *, api, registry, cleaned: set) -> str:
@@ -171,6 +200,28 @@ def ineligibility(email: str, *, api, registry, cleaned: set) -> str:
     return ""
 
 
+def sent_announcement(
+    journey: dict,
+    *,
+    email_index: int,
+    recipient: str,
+    linker=None,
+) -> str:
+    """The Slack line for one journey email going out.
+
+    Reads as a sentence: "Yoga Lifestyle: 2024_05 sent 2 of 8 to Jane". The
+    position is composed here from the index and the journey, never stored,
+    so there is one place it can be wrong. Jane links to her HeyMarvelous
+    customer record through the same linker the member activity feed uses.
+    """
+    total = len(journey.get("emails") or [])
+    label = journey_display_label(journey)
+    who = str(recipient)
+    if linker is not None:
+        who = linker(recipient)
+    return f"{label} sent {email_index + 1} of {total} to {who}"
+
+
 def run(
     *,
     connection,
@@ -182,6 +233,8 @@ def run(
     now: datetime,
     dry_run: bool,
     limit: int | None = None,
+    linker=None,
+    announce=None,
 ) -> dict:
     """Work the due queue. Returns what happened, in counts and reasons."""
     due = journey_enrollment.due_enrollments(connection, now=now)
@@ -253,7 +306,12 @@ def run(
         try:
             api.send_mail(
                 build_payload(
-                    filled, recipient=enrollment["email"], registry=registry
+                    filled,
+                    recipient=enrollment["email"],
+                    registry=registry,
+                    campaign_id=journey_campaign_id(
+                        enrollment["journey_id"], verdict.email_index
+                    ),
                 )
             )
         except Exception as exc:
@@ -286,6 +344,23 @@ def run(
                 next_due_at=due_at,
             )
         counts["sent"] += 1
+        if announce is not None:
+            # A failed post must not undo a real send, so it is counted and
+            # reported rather than raised. The email did go out.
+            try:
+                announce(
+                    sent_announcement(
+                        journey,
+                        email_index=verdict.email_index,
+                        recipient=enrollment["email"],
+                        linker=linker,
+                    )
+                )
+            except Exception as exc:
+                counts["unannounced"] = counts.get("unannounced", 0) + 1
+                failures.append(
+                    f"slack post failed for {enrollment['email']}: {exc}"
+                )
 
     if reasons:
         counts["reasons"] = dict(sorted(reasons.items()))
@@ -318,7 +393,9 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
+    from sync_marvelous_member_activity import customer_linker
     from sync_sendgrid_products import load_cleaned_emails
+    from twy_platform.slack import slack
     from twy_paths import (
         journey_enrollments_db_path,
         journeys_dir,
@@ -345,6 +422,27 @@ def main(argv=None) -> int:
     connection = journey_enrollment.connect(journey_enrollments_db_path())
     marvy = sqlite3.connect(f"file:{marvy_db_path()}?mode=ro", uri=True)
     marvy.row_factory = sqlite3.Row
+
+    link = customer_linker(marvy_db_path())
+
+    def linker(email: str) -> str:
+        """Their first name, linked to their HeyMarvelous record.
+
+        Falls back to the address when marvy has no row for them, which is
+        the same thing the member activity feed does rather than dropping
+        the person from the line.
+        """
+        name = first_name_for(marvy, {"email": email}) or email
+        return link(email, name)
+
+    channel = os.getenv(
+        "SLACK_MOVEMENT_CHANNEL", DEFAULT_ACTIVITY_CHANNEL
+    )
+
+    def announce(message: str) -> None:
+        if not slack(message, channel=channel):
+            raise RuntimeError("Slack delivery was not confirmed")
+
     try:
         result = run(
             connection=connection,
@@ -356,6 +454,8 @@ def main(argv=None) -> int:
             now=datetime.now(timezone.utc),
             dry_run=args.dry_run,
             limit=args.limit,
+            linker=linker,
+            announce=None if args.dry_run else announce,
         )
     finally:
         marvy.close()

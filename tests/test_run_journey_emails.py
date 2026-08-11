@@ -96,6 +96,8 @@ def go(tmp_path, conn, *, api=None, journeys=None, now=NOW, **kwargs):
         marvy_connection=kwargs.pop("marvy_connection", None),
         now=now,
         dry_run=kwargs.pop("dry_run", False),
+        linker=kwargs.pop("linker", None),
+        announce=kwargs.pop("announce", None),
         **kwargs,
     )
 
@@ -542,3 +544,134 @@ def test_no_customer_database_yields_no_name():
     module = drip()
 
     assert module.first_name_for(None, {"customer_id": "441"}) == ""
+
+
+# ---------------------------------------------------------------------------
+# Attribution and the Slack line
+
+
+def test_the_send_carries_the_journey_identity(tmp_path):
+    """Without this echo, an open three weeks later belongs to nothing."""
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    go(tmp_path, conn, api=api)
+
+    assert api.sent[0]["custom_args"] == {
+        "twy_campaign_id": "journey:yoga_lifestyle_welcome_2024_05:0"
+    }
+
+
+def test_each_email_in_the_sequence_gets_its_own_identity(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn, next_index=1, next_due_at=BOUGHT)
+    api = FakeAPI()
+
+    go(tmp_path, conn, api=api)
+
+    assert api.sent[0]["custom_args"]["twy_campaign_id"].endswith(":1")
+
+
+def test_a_payload_built_without_an_identity_carries_no_custom_args():
+    """The editor Send test path has no journey, so it must not invent one."""
+    module = drip()
+
+    payload = module.build_payload(
+        {"subject": "s", "body": "b"},
+        recipient="a@b.com",
+        registry=FakeRegistry(),
+    )
+
+    assert "custom_args" not in payload
+
+
+def test_the_slack_line_reads_as_a_sentence():
+    module = drip()
+
+    assert module.sent_announcement(
+        journey(), email_index=1, recipient="jane@example.com"
+    ) == "Yoga Lifestyle: 2024_05 sent 2 of 3 to jane@example.com"
+
+
+def test_the_slack_line_counts_from_one_not_zero():
+    module = drip()
+
+    line = module.sent_announcement(
+        journey(), email_index=0, recipient="jane@example.com"
+    )
+
+    assert "sent 1 of 3" in line
+
+
+def test_the_recipient_is_linked_to_their_marvelous_record():
+    module = drip()
+
+    def linker(email):
+        return f"<https://app.heymarvelous.com/customers/441|Jane>"
+
+    line = module.sent_announcement(
+        journey(), email_index=1, recipient="jane@example.com", linker=linker
+    )
+
+    assert line == (
+        "Yoga Lifestyle: 2024_05 sent 2 of 3 to "
+        "<https://app.heymarvelous.com/customers/441|Jane>"
+    )
+
+
+def test_a_real_send_announces_itself(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    posted = []
+
+    go(tmp_path, conn, announce=posted.append, linker=lambda e: "Jane")
+
+    assert posted == ["Yoga Lifestyle: 2024_05 sent 1 of 3 to Jane"]
+
+
+def test_a_dry_run_announces_nothing(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    posted = []
+
+    go(tmp_path, conn, dry_run=True, announce=posted.append)
+
+    assert posted == []
+
+
+def test_a_finish_is_not_announced_as_a_send(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    posted = []
+
+    go(
+        tmp_path,
+        conn,
+        api=FakeAPI(suppressed=["buyer@example.com"]),
+        announce=posted.append,
+    )
+
+    assert posted == []
+
+
+def test_a_failed_slack_post_does_not_undo_a_real_send(tmp_path):
+    """The email left. Losing the announcement must not rewind the member."""
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    def broken(_message):
+        raise RuntimeError("Slack delivery was not confirmed")
+
+    with pytest.raises(RuntimeError, match="could not be confirmed"):
+        go(tmp_path, conn, api=api, announce=broken)
+
+    row = store().enrollment_for(
+        conn, "yoga_lifestyle_welcome_2024_05", "buyer@example.com"
+    )
+    ledger = store().sends_for(conn, "yoga_lifestyle_welcome_2024_05")
+
+    assert len(api.sent) == 1, "the email still went out"
+    assert ledger[0]["status"] == "sent"
+    assert row["next_index"] == 1, "and the member still advanced"
