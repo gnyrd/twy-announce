@@ -348,13 +348,13 @@ Apex pose: {habit_plan.get('apex_pose', '')}
 Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 
-Write this as Tiff — her voice, her vernacular, her storytelling. Warm, specific, a little irreverent. Weave the practice into one lived moment — how it meets the day, the body, the line at the grocery store, a hard conversation. Show the depth through experience, don't lecture about it. Non-dual undertone is welcomed; philosophy essay is not. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
+Write this as Tiff - her voice, her vernacular, her storytelling. Warm, specific, a little irreverent. Weave the practice into one lived moment - how it meets the day, the body, the line at the grocery store, a hard conversation. Show the depth through experience, don't lecture about it. Non-dual undertone is welcomed; philosophy essay is not. Tell them what the month is about, what they'll feel in their bodies, what's coming up. End with the event invitation and the ask to bring someone.
 
 Arc (the shape Tiff's best lifestyle emails follow): open from a moment of ordinary life the reader recognizes, name the recognition, offer a short personal reflection or observation, only THEN connect it to the practice and the month, and close with the invitation. Life, then recognition, then story, then yoga, then invitation. Lead from life. The yoga arrives once they already feel why it matters.
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class registration page.
-- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class registration page.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
 
 Hard limit: 300 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body). No bullets except for event details.
@@ -395,12 +395,12 @@ Physical arc: {habit_plan.get('physical_arc', '')}
 Props: {habit_plan.get('props', '')}
 For people with an established practice who want to deepen it. Not a beginner class. Free on Zoom.
 
-Write this as Tiff — warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. Even in this short form, open from something they recognize in their own life before you name the class. Life, then recognition, then invitation. You can gesture at the deeper why ONCE, briefly — a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
+Write this as Tiff - warm, accessible, no yoga jargon. This person is on the fence. They're curious, or tired, or overdue. One thing is happening. One reason to come. One clear ask: register. Even in this short form, open from something they recognize in their own life before you name the class. Life, then recognition, then invitation. You can gesture at the deeper why ONCE, briefly - a single sentence that lets the depth show without requiring belief or vocabulary. Discovered, not explained.
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
-- {{CALENDAR_CTA}}   — place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button. This invites them to subscribe to the Habits-only calendar feed so they never miss a class.
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   - place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button. This invites them to subscribe to the Habits-only calendar feed so they never miss a class.
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
@@ -410,20 +410,20 @@ Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_
 {recent_refs}"""
 
 
-# Reference emails (April 2026, Tiff's voice) — quality bar for prompt templates
+# Reference emails (April 2026, Tiff's voice) - quality bar for prompt templates
 _PH1_REFERENCE = """Hello!
 
 Thank you for being part of this month's Yoga Habit class.
 
-There was something truly beautiful in the way we practiced together — across locations, across lives — yet meeting in a shared rhythm of attention and care. These moments remind me how real this work is. Even for one class, when we return to our center, something shifts.
+There was something truly beautiful in the way we practiced together - across locations, across lives - yet meeting in a shared rhythm of attention and care. These moments remind me how real this work is. Even for one class, when we return to our center, something shifts.
 
-I often think of this practice as a living expression of Indra's Net — each of us a point of light, connected. When we remember our center, and then carry that into our lives, it quietly strengthens the whole.
+I often think of this practice as a living expression of Indra's Net - each of us a point of light, connected. When we remember our center, and then carry that into our lives, it quietly strengthens the whole.
 
-The challenge, of course, is not the one class — it's staying connected to that awareness as life continues.
+The challenge, of course, is not the one class - it's staying connected to that awareness as life continues.
 
 That's where Abhyāsa comes in.
 
-If you'd like to continue practicing, I'd love to have you inside The Yoga Lifestyle. It's a space to return to — again and again — no matter what's happening in your life.
+If you'd like to continue practicing, I'd love to have you inside The Yoga Lifestyle. It's a space to return to - again and again - no matter what's happening in your life.
 
 As a simple invitation, I'm offering your first month for $49 if you join this week.
 
@@ -437,7 +437,7 @@ Tiffany
 
 ---
 
-✨ Our next Yoga Habit class is [NEXT MONTH DATE] — I'd love for you to join us.
+✨ Our next Yoga Habit class is [NEXT MONTH DATE] - I'd love for you to join us.
 
 The community really does feel different when you're part of it. Even if this is the only class you can make, it matters.
 
@@ -449,15 +449,15 @@ As the week begins to wind down, I wanted to offer a small reminder…
 
 You already know how to return to your center.
 
-We touched that place together in practice — that steady point underneath the movement, the breath, the noise of the week. It's still there.
+We touched that place together in practice - that steady point underneath the movement, the breath, the noise of the week. It's still there.
 
 Even a few conscious breaths…
 Even one moment of remembering…
 That is practice.
 
-If you feel the pull to reconnect, I'd love to have you continue inside The Yoga Lifestyle. It's a place to return to — again and again — in a way that supports real life.
+If you feel the pull to reconnect, I'd love to have you continue inside The Yoga Lifestyle. It's a place to return to - again and again - in a way that supports real life.
 
-Your first month is just $49 — that offer closes soon.
+Your first month is just $49 - that offer closes soon.
 
 You can explore it here:
 [link]
@@ -468,7 +468,7 @@ your center hasn't gone anywhere.
 With love,
 Tiffany
 
-P.S. Our next Yoga Habit class is [NEXT MONTH DATE] — mark your calendar. You are always welcome and wanted here."""
+P.S. Our next Yoga Habit class is [NEXT MONTH DATE] - mark your calendar. You are always welcome and wanted here."""
 
 
 def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
@@ -492,11 +492,11 @@ def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
-Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
+Theme: {overview.get('title', '')} - {overview.get('teaching_notes', '')}
 
 This email sends 24 hours after class ends. The reader just practiced with Tiff for the first time (or returned after a gap). They're in the afterglow.
 
-Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49. Do not fabricate details about the class — use only what's provided above.
+Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49. Do not fabricate details about the class - use only what's provided above.
 
 Reference quality (Tiff's voice and tone -- match this). The synthetic template baseline plus Tiff's most recent sent examples:
 
@@ -505,9 +505,9 @@ Reference quality (Tiff's voice and tone -- match this). The synthetic template 
 
 {recent_refs}
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the thank-you for the class they just attended). Do NOT write the literal title text.
-- [link]             — write the offer link as an INLINE text link using markdown: `[Claim your first month for $49]([link])` or `[start your membership]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence — do NOT put it on its own paragraph. Inline placement keeps it a text link; a paragraph alone would render as a button which is not what we want for PH1/PH2.
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title (e.g. in the thank-you for the class they just attended). Do NOT write the literal title text.
+- [link]             - write the offer link as an INLINE text link using markdown: `[Claim your first month for $49]([link])` or `[start your membership]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence - do NOT put it on its own paragraph. Inline placement keeps it a text link; a paragraph alone would render as a button which is not what we want for PH1/PH2.
 
 The literal `[link]` placeholder gets substituted with the coupon checkout URL at send time. Do not invent a URL.
 
@@ -536,11 +536,11 @@ def assemble_ph2_prompt(overview: dict, plans: dict, year: int, month: int) -> s
 Class context:
 Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
-Theme: {overview.get('title', '')} — {overview.get('teaching_notes', '')}
+Theme: {overview.get('title', '')} - {overview.get('teaching_notes', '')}
 
 This email sends 7 days after class. The offer is still open but closing soon. The reader has had a week to think about it. Tone is gentle, non-pushy. A quiet reminder that the door is still open.
 
-Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave — the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon.
+Goal: re-open the invitation to The Yoga Lifestyle. Match the reference's contemplative weave - the practice still alive in the week that's passed, the door still open, no urgency forced. Discovered, not delivered. Offer: first month for $49, closes soon.
 
 Reference quality (Tiff's voice and tone -- match this). The synthetic template baseline plus Tiff's most recent sent examples:
 
@@ -549,9 +549,9 @@ Reference quality (Tiff's voice and tone -- match this). The synthetic template 
 
 {recent_refs}
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title (e.g. in the P.S. about the next class, or referencing what they just practiced). Do NOT write the literal title text.
-- [link]             — write the offer link as an INLINE text link using markdown: `[start your membership]([link])` or `[claim your first month for $49]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence — do NOT put it on its own paragraph. Inline placement keeps it a text link.
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title (e.g. in the P.S. about the next class, or referencing what they just practiced). Do NOT write the literal title text.
+- [link]             - write the offer link as an INLINE text link using markdown: `[start your membership]([link])` or `[claim your first month for $49]([link])` (pick a phrase that fits the prose). Place the link INLINE within a sentence - do NOT put it on its own paragraph. Inline placement keeps it a text link.
 
 The literal `[link]` placeholder gets substituted with the coupon checkout URL at send time. Do not invent a URL.
 
@@ -581,18 +581,18 @@ These readers have NO prior context about this class. They did not see the first
 
 The first send opened with: "If your practice has been feeling stuck... this is usually why. You're trying to open without support." Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
 
-Yoga Habit class details — use ONLY these. Do not invent, embellish, or omit:
+Yoga Habit class details - use ONLY these. Do not invent, embellish, or omit:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
 
-Write this as Tiff — short, warm, accessible, no yoga jargon. Use one specific concrete image grounded in the actual class content above (the apex pose, the physical work). Do not invent class details that aren't listed. One sentence of contemplative depth allowed, not required. Discovered, not delivered. Sign Tiff.
+Write this as Tiff - short, warm, accessible, no yoga jargon. Use one specific concrete image grounded in the actual class content above (the apex pose, the physical work). Do not invent class details that aren't listed. One sentence of contemplative depth allowed, not required. Discovered, not delivered. Sign Tiff.
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
-- {{CALENDAR_CTA}}   — place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button.
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   - place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button.
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
@@ -620,9 +620,9 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
 
 {_subject_job("reminder")}
 
-This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT invite them to bring a friend. Do NOT include a Register CTA button — they are already registered.
+This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT invite them to bring a friend. Do NOT include a Register CTA button - they are already registered.
 
-Yoga Habit class details — use ONLY these. Do not invent or embellish:
+Yoga Habit class details - use ONLY these. Do not invent or embellish:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
@@ -630,11 +630,11 @@ Bring: yoga mat, 2 blocks, strap, blanket if you use one.
 
 The Zoom link comes from their registration confirmation in Marvelous. Mention they can find it there if needed.
 
-Write this as Tiff — short, warm, anticipating. One concrete image grounded in the class content (the apex pose, the physical work). No teaching essay. Just "here's tomorrow." Sign Tiff.
+Write this as Tiff - short, warm, anticipating. One concrete image grounded in the class content (the apex pose, the physical work). No teaching essay. Just "here's tomorrow." Sign Tiff.
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class page (they are registered, so this goes direct to the class).
-- {{CLASS_URL}}      — write inline within a sentence as part of a markdown link, e.g. `[See you tomorrow]({{CLASS_URL}})`. Substitutes to the class URL. INLINE placement is required — do NOT put the resulting markdown link on its own paragraph (that would make it a button; we want a text link).
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class page (they are registered, so this goes direct to the class).
+- {{CLASS_URL}}      - write inline within a sentence as part of a markdown link, e.g. `[See you tomorrow]({{CLASS_URL}})`. Substitutes to the class URL. INLINE placement is required - do NOT put the resulting markdown link on its own paragraph (that would make it a button; we want a text link).
 
 Hard limit: 80 words. Subject line included, not counted.
 Shape: subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), inline `[See you tomorrow]({{CLASS_URL}})` at the end of a sentence, sign-off. Reminder openers tend to be warm and functional -- something like "Looking forward to practicing with you tomorrow for {{CLASS_TITLE}}." The June reference below shows this shape. The API rejects any body beginning with `#`. No bullets. No Register button (this audience has already registered).
@@ -660,18 +660,18 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
 
 {_subject_job("gentle_nudge")}
 
-They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently — in case they meant to register and forgot. If they decided not to come, that is also fine.
+They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently - in case they meant to register and forgot. If they decided not to come, that is also fine.
 
-Class details — use sparingly, just for context:
+Class details - use sparingly, just for context:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 
-Write this as Tiff — short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. Sign Tiff.
+Write this as Tiff - short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. Sign Tiff.
 
-OUTPUT TOKENS — use these LITERAL strings in your output. They are substituted at send time:
-- {{CLASS_TITLE}}    — write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   — place on its own paragraph (nothing else on that line) at the end. Substitutes to a styled Register button.
-- {{CALENDAR_CTA}}   — place on its own paragraph after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button (gentle alternative if they cannot make it this time).
+OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
+- {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) at the end. Substitutes to a styled Register button.
+- {{CALENDAR_CTA}}   - place on its own paragraph after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button (gentle alternative if they cannot make it this time).
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 

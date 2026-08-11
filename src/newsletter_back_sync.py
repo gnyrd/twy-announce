@@ -82,13 +82,13 @@ def find_draft_local(title_contains: str, statuses: list[str]) -> dict | None:
 
 # audience key -> (md filename stem, campaign title template)
 AUDIENCES = {
-    "lifestyle":     ("lifestyle",     "{year}-{month:02d} — Lifestyle — Yoga Habit"),
-    "non-lifestyle": ("non_lifestyle", "{year}-{month:02d} — Non-Lifestyle — Yoga Habit"),
-    "ph1":           ("ph1",           "{year}-{month:02d} — PH1 — Yoga Habit"),
-    "ph2":           ("ph2",           "{year}-{month:02d} — PH2 — Yoga Habit"),
-    "reminder":      ("reminder",      "{year}-{month:02d} — Reminder — Yoga Habit"),
-    "gentle_nudge":  ("gentle_nudge",  "{year}-{month:02d} — Gentle Nudge — Yoga Habit"),
-    "non_opener":    ("non_opener",    "{year}-{month:02d} — Non-Opener — Yoga Habit"),
+    "lifestyle":     ("lifestyle",     "{year}-{month:02d} - Lifestyle - Yoga Habit"),
+    "non-lifestyle": ("non_lifestyle", "{year}-{month:02d} - Non-Lifestyle - Yoga Habit"),
+    "ph1":           ("ph1",           "{year}-{month:02d} - PH1 - Yoga Habit"),
+    "ph2":           ("ph2",           "{year}-{month:02d} - PH2 - Yoga Habit"),
+    "reminder":      ("reminder",      "{year}-{month:02d} - Reminder - Yoga Habit"),
+    "gentle_nudge":  ("gentle_nudge",  "{year}-{month:02d} - Gentle Nudge - Yoga Habit"),
+    "non_opener":    ("non_opener",    "{year}-{month:02d} - Non-Opener - Yoga Habit"),
 }
 
 # Markers that bracket the editable body in the MC-rendered HTML.
@@ -184,7 +184,7 @@ def sync_audience(year: int, month: int, audience: str, *, dry_run: bool) -> dic
 
     existing = find_draft_local(campaign_title, statuses=["save", "paused", "schedule"])
     if not existing:
-        # Also check sent — if it's already sent, there's nothing to back-sync
+        # Also check sent - if it's already sent, there's nothing to back-sync
         # (Tiff cannot edit a sent campaign anyway).
         sent = find_draft_local(campaign_title, statuses=["sent"])
         if sent:
