@@ -44,6 +44,11 @@ CREATE INDEX IF NOT EXISTS enrollments_due
 """
 
 
+def _schema() -> str:
+    """Both tables. The runner needs the ledger in the same store."""
+    return SCHEMA + SENDS_SCHEMA
+
+
 @dataclass(frozen=True)
 class PlannedEnrollment:
     journey_id: str
@@ -67,7 +72,7 @@ def connect(path) -> sqlite3.Connection:
 
 
 def ensure_schema(connection: sqlite3.Connection) -> None:
-    connection.executescript(SCHEMA)
+    connection.executescript(_schema())
     connection.commit()
 
 
@@ -187,4 +192,132 @@ def live_enrollments(connection: sqlite3.Connection, journey_id: str | None = No
             "AND journey_id = ? ORDER BY next_due_at, email",
             (str(journey_id),),
         ).fetchall()
+    return [dict(row) for row in rows]
+
+
+SENDS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sends (
+    journey_id   TEXT    NOT NULL,
+    email        TEXT    NOT NULL,
+    email_index  INTEGER NOT NULL,
+    status       TEXT    NOT NULL,
+    subject      TEXT    NOT NULL,
+    claimed_at   TEXT    NOT NULL,
+    sent_at      TEXT,
+    PRIMARY KEY (journey_id, email, email_index)
+);
+CREATE INDEX IF NOT EXISTS sends_by_time ON sends (claimed_at);
+"""
+
+CLAIMED = "claimed"
+SENT = "sent"
+
+
+def claim_send(connection, *, journey_id, email, email_index, subject):
+    """Reserve one email for one person, or report that it is already taken.
+
+    Two phases on purpose. The claim goes in before the provider call and flips
+    to sent after it returns, so a crash in between leaves a row that says
+    plainly that nobody knows whether it went out. That row then blocks a retry:
+    a missing email is recoverable by hand, a duplicate in a member's inbox is
+    not.
+    """
+    stamp = datetime.now(timezone.utc).isoformat()
+    cursor = connection.execute(
+        """
+        INSERT OR IGNORE INTO sends (
+            journey_id, email, email_index, status, subject, claimed_at, sent_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            str(journey_id),
+            str(email).strip().lower(),
+            int(email_index),
+            CLAIMED,
+            str(subject),
+            stamp,
+        ),
+    )
+    connection.commit()
+    return bool(cursor.rowcount)
+
+
+def mark_sent(connection, *, journey_id, email, email_index):
+    """Record that the provider accepted it. Only ever called after it did."""
+    connection.execute(
+        "UPDATE sends SET status = ?, sent_at = ? "
+        "WHERE journey_id = ? AND email = ? AND email_index = ?",
+        (
+            SENT,
+            datetime.now(timezone.utc).isoformat(),
+            str(journey_id),
+            str(email).strip().lower(),
+            int(email_index),
+        ),
+    )
+    connection.commit()
+
+
+def unresolved_sends(connection):
+    """Claims that never became sends. Somebody has to look at these."""
+    rows = connection.execute(
+        "SELECT * FROM sends WHERE status = ? ORDER BY claimed_at",
+        (CLAIMED,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def sends_for(connection, journey_id):
+    """Everything sent for one journey, oldest first. Reporting reads this."""
+    rows = connection.execute(
+        "SELECT * FROM sends WHERE journey_id = ? ORDER BY claimed_at, email",
+        (str(journey_id),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def advance(connection, *, journey_id, email, next_index, next_due_at):
+    """Move somebody to the next email in their sequence."""
+    connection.execute(
+        "UPDATE enrollments SET next_index = ?, next_due_at = ?, updated_at = ? "
+        "WHERE journey_id = ? AND email = ?",
+        (
+            int(next_index),
+            str(next_due_at),
+            datetime.now(timezone.utc).isoformat(),
+            str(journey_id),
+            str(email).strip().lower(),
+        ),
+    )
+    connection.commit()
+
+
+def finish(connection, *, journey_id, email, reason):
+    """Stop somebody's sequence for good, recording why."""
+    connection.execute(
+        "UPDATE enrollments SET terminal_reason = ?, next_due_at = NULL, "
+        "updated_at = ? WHERE journey_id = ? AND email = ?",
+        (
+            str(reason),
+            datetime.now(timezone.utc).isoformat(),
+            str(journey_id),
+            str(email).strip().lower(),
+        ),
+    )
+    connection.commit()
+
+
+def due_enrollments(connection, *, now):
+    """Everyone owed an email at this moment, oldest due first.
+
+    Plain elapsed time, no sending window: whoever bought at 3:30am is somebody
+    who was awake at 3:30am (JP 2026-08-11). Do not add a window here without
+    asking him again.
+    """
+    rows = connection.execute(
+        "SELECT * FROM enrollments WHERE terminal_reason IS NULL "
+        "AND next_due_at IS NOT NULL AND next_due_at <= ? "
+        "ORDER BY next_due_at, journey_id, email",
+        (now.isoformat(),),
+    ).fetchall()
     return [dict(row) for row in rows]

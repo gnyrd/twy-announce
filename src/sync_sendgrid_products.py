@@ -514,7 +514,7 @@ def run_sync(
         bounced_emails = {
             email for email in emails if api.get_bounce(email) is not None
         }
-        cleaned_emails = _load_cleaned_emails(cleaned_path)
+        cleaned_emails = load_cleaned_emails(cleaned_path)
         plan, next_state = plan_incremental_sync(
             purchases,
             state=current_state,
@@ -540,7 +540,7 @@ def run_sync(
     )
 
 
-def _load_cleaned_emails(path: Path) -> set[str]:
+def load_cleaned_emails(path: Path) -> set[str]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise ValueError("cleaned denylist must be a list")
