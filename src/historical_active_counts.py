@@ -196,7 +196,7 @@ def _self_test() -> int:
     live_now = dict(live_now)
     live_total_now = sum(c["Monthly"] + c["Annual"] for c in live_now.values())
 
-    print("\nCURRENT (today) — new module vs live subscription_active flag:")
+    print("\nCURRENT (today), new module vs live subscription_active flag:")
     print("  {0:<42s} {1:>10s} {2:>10s}".format("product / cycle", "new", "live"))
     all_products = set(new_now.keys()) | set(live_now.keys())
     for name in sorted(all_products):

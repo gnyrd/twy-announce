@@ -408,7 +408,7 @@ def post_review_candidates(year: int, month: int, slack_post_fn=None) -> str:
             audience_summaries.append((audience, rec, sigs, len(removed), added_count))
 
     if not audience_summaries:
-        lines.append("_No edit deltas detected — Tweee's submissions shipped as-is. No prompt changes proposed._")
+        lines.append("_No edit deltas detected. Tweee's submissions shipped as-is. No prompt changes proposed._")
         text = "\n".join(lines)
         if slack_post_fn:
             slack_post_fn(text)

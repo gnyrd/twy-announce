@@ -225,10 +225,10 @@ def main():
     existing_ph1_title = followup_campaign_title(year, month, "Post-Class 1")
     existing = find_existing_campaign(existing_ph1_title)
     if existing and existing.get("status") in ("schedule", "sending", "sent"):
-        log.info("PH1 campaign already %s (id=%s) — skipping follow-up workflow", existing["status"], existing["id"])
+        log.info("PH1 campaign already %s (id=%s), skipping follow-up workflow", existing["status"], existing["id"])
         return
 
-    log.info("Habit class detected for %s — running follow-up workflow", today)
+    log.info("Habit class detected for %s, running follow-up workflow", today)
 
     coupon_url = get_habit_coupon_url(today)
     log.info("Coupon URL: %s", coupon_url)
