@@ -14,8 +14,14 @@ import sqlite3
 import sys
 import time
 
+from journey_enrollment import (
+    connect as connect_enrollments,
+    plan_enrollment,
+    record_enrollments,
+)
 from sendgrid_list_sync import ensure_list
 from sendgrid_mailings import product_attribute_name
+from twy_platform.journeys import active_journeys_by_product
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,9 @@ class ProductSyncPlan:
     subscribe_emails: frozenset[str] = frozenset()
     renewed_consent_emails: frozenset[str] = frozenset()
     blocked: dict[str, str] = field(default_factory=dict)
+    # Journeys a first acquisition starts. Empty on backfill, which must
+    # never mail the back catalogue.
+    enrollments: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -241,6 +250,15 @@ def _merge_product_name(
     names[purchase.product_id] = name
 
 
+def _journey_for(journeys: dict, product_id) -> dict | None:
+    """The active journey bound to this product, or None for most products."""
+    try:
+        key = int(str(product_id).strip())
+    except (TypeError, ValueError):
+        return None
+    return journeys.get(key)
+
+
 def plan_incremental_sync(
     purchases: list[ProductPurchase],
     *,
@@ -249,6 +267,8 @@ def plan_incremental_sync(
     suppressed_emails: set[str],
     cleaned_emails: set[str],
     bounced_emails: set[str],
+    journeys_by_product: dict | None = None,
+    now: datetime | None = None,
 ) -> tuple[ProductSyncPlan, ProductSyncState]:
     subscribers = {_normalized_email(email) for email in subscribed_emails}
     suppressed = {_normalized_email(email) for email in suppressed_emails}
@@ -261,6 +281,9 @@ def plan_incremental_sync(
     subscribe: set[str] = set()
     renewed: set[str] = set()
     blocked: dict[str, str] = {}
+    journeys = journeys_by_product or {}
+    moment = now or datetime.now(timezone.utc)
+    enrollments: list = []
 
     for purchase in sorted(purchases, key=lambda item: item.created):
         if purchase.purchase_id in processed:
@@ -284,6 +307,25 @@ def plan_incremental_sync(
                 subscribe.add(email)
                 if email in suppressed:
                     renewed.add(email)
+            # A journey starts on acquiring the product, never on the
+            # recurring charge that keeps it, so a member is welcomed once.
+            journey = (
+                _journey_for(journeys, purchase.product_id)
+                if first_acquisition
+                else None
+            )
+            if journey is not None:
+                enrollment = plan_enrollment(
+                    journey,
+                    email=email,
+                    customer_id=purchase.customer_id,
+                    product_id=purchase.product_id,
+                    purchase_id=purchase.purchase_id,
+                    purchased_at=purchase.created,
+                    now=moment,
+                )
+                if enrollment is not None:
+                    enrollments.append(enrollment)
 
         processed.add(purchase.purchase_id)
         acquired.add(purchase.pair)
@@ -296,6 +338,7 @@ def plan_incremental_sync(
         subscribe_emails=frozenset(subscribe),
         renewed_consent_emails=frozenset(renewed),
         blocked=dict(sorted(blocked.items())),
+        enrollments=tuple(enrollments),
     )
     next_state = ProductSyncState(
         processed_purchase_ids=frozenset(processed),
@@ -312,6 +355,7 @@ def _plan_counts(plan: ProductSyncPlan, *, dry_run: bool) -> dict[str, int | boo
         "subscribed": len(plan.subscribe_emails),
         "renewed_consent": len(plan.renewed_consent_emails),
         "blocked": len(plan.blocked),
+        "enrolled": len(plan.enrollments),
         "dry_run": dry_run,
     }
 
@@ -340,6 +384,7 @@ def apply_product_plan(
     next_state: ProductSyncState,
     state_path: Path,
     evidence_path: Path,
+    enrollments_db_path: Path,
     dry_run: bool,
 ) -> dict[str, int | bool]:
     if dry_run:
@@ -386,16 +431,35 @@ def apply_product_plan(
                 ):
                     raise RuntimeError("membership verification failed")
 
+    # Enrollments land after the contact is verifiably on the list and
+    # before the state write. Fail here and the purchase stays unprocessed,
+    # so the next run retries it; succeed and crash before the state write
+    # and the retry is a no-op, because the pair is already enrolled.
+    enrolled = 0
+    if plan.enrollments:
+        connection = connect_enrollments(enrollments_db_path)
+        try:
+            enrolled = record_enrollments(connection, plan.enrollments)
+        finally:
+            connection.close()
+
+    counts = _plan_counts(plan, dry_run=False)
+    # The plan says who a journey would start for; this says who it started
+    # for. A replayed purchase plans one and records none.
+    counts["enrolled"] = enrolled
     evidence = {
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "state_purchase_count": len(next_state.processed_purchase_ids),
         "renewed_consent_emails": sorted(plan.renewed_consent_emails),
         "blocked": plan.blocked,
-        "counts": _plan_counts(plan, dry_run=False),
+        "enrolled_pairs": sorted(
+            f"{item.journey_id}:{item.email}" for item in plan.enrollments
+        ),
+        "counts": counts,
     }
     _append_private_json(evidence_path, evidence)
     _write_private_state(state_path, next_state)
-    return _plan_counts(plan, dry_run=False)
+    return counts
 
 
 def _chunks(values: list[str], size: int) -> list[list[str]]:
@@ -413,6 +477,8 @@ def run_sync(
     cleaned_path: Path,
     state_path: Path,
     evidence_path: Path,
+    journeys_directory: Path,
+    enrollments_db_path: Path,
 ) -> dict[str, int | bool]:
     subscribed_list_id = registry.list_id("Email: Subscribed")
     if mode == "backfill":
@@ -456,6 +522,9 @@ def run_sync(
             suppressed_emails=suppressed_emails,
             cleaned_emails=cleaned_emails,
             bounced_emails=bounced_emails,
+            journeys_by_product=active_journeys_by_product(
+                journeys_directory
+            ),
         )
     else:
         raise ValueError("unsupported product sync mode")
@@ -466,6 +535,7 @@ def run_sync(
         next_state=next_state,
         state_path=state_path,
         evidence_path=evidence_path,
+        enrollments_db_path=enrollments_db_path,
         dry_run=dry_run,
     )
 
@@ -549,6 +619,8 @@ def main(argv=None) -> int:
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
     from twy_paths import (
+        journey_enrollments_db_path,
+        journeys_dir,
         load_env,
         marvy_db_path,
         sendgrid_cleaned_denylist_path,
@@ -578,6 +650,8 @@ def main(argv=None) -> int:
         evidence_path=(
             sendgrid_dir() / "product_consent_events.jsonl"
         ),
+        journeys_directory=journeys_dir(),
+        enrollments_db_path=journey_enrollments_db_path(),
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

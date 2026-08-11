@@ -1,6 +1,7 @@
 import importlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -266,6 +267,7 @@ def test_dry_run_makes_no_provider_or_state_writes(tmp_path):
         next_state=next_state,
         state_path=tmp_path / "state.json",
         evidence_path=tmp_path / "evidence.jsonl",
+        enrollments_db_path=tmp_path / "enrollments.db",
         dry_run=True,
     )
 
@@ -278,6 +280,7 @@ def test_dry_run_makes_no_provider_or_state_writes(tmp_path):
         "subscribed": 1,
         "renewed_consent": 1,
         "blocked": 0,
+        "enrolled": 0,
         "dry_run": True,
     }
 
@@ -306,6 +309,7 @@ def test_apply_renews_consent_before_import_and_persists_after_verification(
         next_state=next_state,
         state_path=state_path,
         evidence_path=evidence_path,
+        enrollments_db_path=tmp_path / "enrollments.db",
         dry_run=False,
     )
 
@@ -375,6 +379,7 @@ def test_apply_waits_for_suppression_removal_to_become_visible(
         next_state=next_state,
         state_path=tmp_path / "state.json",
         evidence_path=tmp_path / "evidence.jsonl",
+        enrollments_db_path=tmp_path / "enrollments.db",
         dry_run=False,
     )
 
@@ -405,6 +410,7 @@ def test_failed_membership_verification_does_not_persist_state(tmp_path):
             next_state=next_state,
             state_path=state_path,
             evidence_path=tmp_path / "evidence.jsonl",
+            enrollments_db_path=tmp_path / "enrollments.db",
             dry_run=False,
         )
 
@@ -437,6 +443,7 @@ def test_membership_verification_batches_exact_email_lookups(tmp_path):
         next_state=next_state,
         state_path=tmp_path / "state.json",
         evidence_path=tmp_path / "evidence.jsonl",
+        enrollments_db_path=tmp_path / "enrollments.db",
         dry_run=False,
     )
 
@@ -626,6 +633,8 @@ def test_run_backfill_dry_run_uses_current_subscriber_intersection(tmp_path):
         cleaned_path=tmp_path / "cleaned.json",
         state_path=tmp_path / "state.json",
         evidence_path=tmp_path / "evidence.jsonl",
+        journeys_directory=tmp_path / "journeys",
+        enrollments_db_path=tmp_path / "enrollments.db",
     )
 
     assert result["products"] == 1
@@ -674,6 +683,8 @@ def test_run_incremental_detects_new_purchase_without_full_scan(tmp_path):
         cleaned_path=cleaned_path,
         state_path=state_path,
         evidence_path=tmp_path / "evidence.jsonl",
+        journeys_directory=tmp_path / "journeys",
+        enrollments_db_path=tmp_path / "enrollments.db",
     )
 
     assert result["products"] == 1
@@ -696,3 +707,260 @@ def test_cli_requires_one_sync_mode_and_accepts_dry_run():
     assert parser.parse_args(["--incremental"]).incremental is True
     with pytest.raises(SystemExit):
         parser.parse_args(["--backfill", "--incremental"])
+
+
+# ---------------------------------------------------------------------------
+# Journey enrollment: buying the bound product starts the sequence
+
+
+JOURNEY_NOW = datetime(2026, 8, 11, 18, 0, tzinfo=timezone.utc)
+
+
+def welcome_journey(**overrides):
+    payload = {
+        "version": 1,
+        "journey_id": "yoga_lifestyle_welcome_2024_05",
+        "label": "Journey: Yoga Lifestyle: 2024_05",
+        "marvelous_product_id": 100,
+        "active": True,
+        "emails": [
+            {"subject": "Welcome", "body": "Hi", "interval_days": 0},
+            {"subject": "Day two", "body": "More", "interval_days": 1},
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def journeys_for(journey_payload=None):
+    payload = journey_payload or welcome_journey()
+    return {int(payload["marvelous_product_id"]): payload}
+
+
+def membership(module, **overrides):
+    """A recurring membership purchase, which is what a journey binds to."""
+    values = {
+        "recurring_type": "monthly",
+        "amount_paid": 99,
+        "created": "2026-08-11T17:45:00Z",
+    }
+    values.update(overrides)
+    return purchase(module, **values)
+
+
+def plan_with_journey(module, purchases, journeys=None, **overrides):
+    values = {
+        "state": state(module),
+        "subscribed_emails": set(),
+        "suppressed_emails": set(),
+        "cleaned_emails": set(),
+        "bounced_emails": set(),
+        "journeys_by_product": journeys_for() if journeys is None else journeys,
+        "now": JOURNEY_NOW,
+    }
+    values.update(overrides)
+    return module.plan_incremental_sync(purchases, **values)
+
+
+def test_buying_the_bound_product_starts_its_journey():
+    module = product_sync()
+
+    plan, _ = plan_with_journey(module, [membership(module)])
+
+    assert len(plan.enrollments) == 1
+    enrollment = plan.enrollments[0]
+    assert enrollment.journey_id == "yoga_lifestyle_welcome_2024_05"
+    assert enrollment.email == "sub@example.com"
+    assert enrollment.customer_id == "10"
+    assert enrollment.next_due_at == "2026-08-11T17:45:00+00:00"
+
+
+def test_the_monthly_charge_that_keeps_a_membership_does_not_re_welcome():
+    module = product_sync()
+    renewal = membership(module, purchase_id="2", created="2026-09-11T17:45:00Z")
+
+    plan, _ = plan_with_journey(
+        module,
+        [renewal],
+        state=state(
+            module,
+            processed_purchase_ids=frozenset({"1"}),
+            acquired_pairs=frozenset({"10:100"}),
+        ),
+        now=datetime(2026, 9, 11, 18, 0, tzinfo=timezone.utc),
+    )
+
+    assert plan.enrollments == ()
+    assert plan.subscribe_emails == frozenset()
+
+
+def test_a_product_with_no_journey_enrolls_nobody():
+    module = product_sync()
+
+    plan, _ = plan_with_journey(module, [membership(module)], journeys={})
+
+    assert plan.enrollments == ()
+    assert plan.contacts_by_product
+
+
+def test_an_inactive_journey_enrolls_nobody():
+    module = product_sync()
+
+    plan, _ = plan_with_journey(
+        module,
+        [membership(module)],
+        journeys=journeys_for(welcome_journey(active=False)),
+    )
+
+    assert plan.enrollments == ()
+
+
+def test_a_cleaned_buyer_is_never_enrolled():
+    module = product_sync()
+
+    plan, _ = plan_with_journey(
+        module,
+        [membership(module)],
+        cleaned_emails={"sub@example.com"},
+    )
+
+    assert plan.enrollments == ()
+    assert plan.blocked == {"sub@example.com": "cleaned"}
+
+
+def test_a_bounced_buyer_is_never_enrolled():
+    module = product_sync()
+
+    plan, _ = plan_with_journey(
+        module,
+        [membership(module)],
+        bounced_emails={"sub@example.com"},
+    )
+
+    assert plan.enrollments == ()
+    assert plan.blocked == {"sub@example.com": "bounced"}
+
+
+def test_two_buyers_of_the_same_product_each_enroll():
+    module = product_sync()
+    second = membership(
+        module, purchase_id="2", customer_id="11", email="other@example.com"
+    )
+
+    plan, _ = plan_with_journey(module, [membership(module), second])
+
+    assert sorted(item.email for item in plan.enrollments) == [
+        "other@example.com",
+        "sub@example.com",
+    ]
+
+
+def test_the_historical_backfill_never_mails_the_back_catalogue():
+    module = product_sync()
+
+    plan, _ = module.plan_historical_backfill(
+        [membership(module)],
+        subscribed_emails={"sub@example.com"},
+    )
+
+    assert plan.enrollments == ()
+
+
+def test_apply_records_the_enrollment_only_after_the_contact_verifies(tmp_path):
+    module = product_sync()
+    api = RecordingAPI()
+    registry = RecordingRegistry()
+    plan, next_state = plan_with_journey(module, [membership(module)])
+    db_path = tmp_path / "enrollments.db"
+
+    result = module.apply_product_plan(
+        api=api,
+        registry=registry,
+        plan=plan,
+        next_state=next_state,
+        state_path=tmp_path / "state.json",
+        evidence_path=tmp_path / "evidence.jsonl",
+        enrollments_db_path=db_path,
+        dry_run=False,
+    )
+
+    enrollment = importlib.import_module("journey_enrollment")
+    connection = enrollment.connect(db_path)
+    try:
+        row = enrollment.enrollment_for(
+            connection, "yoga_lifestyle_welcome_2024_05", "sub@example.com"
+        )
+    finally:
+        connection.close()
+
+    assert result["enrolled"] == 1
+    assert row["purchase_id"] == "1"
+    evidence = [
+        json.loads(line)
+        for line in (tmp_path / "evidence.jsonl").read_text().splitlines()
+    ]
+    assert evidence[0]["enrolled_pairs"] == [
+        "yoga_lifestyle_welcome_2024_05:sub@example.com"
+    ]
+
+
+def test_a_dry_run_enrolls_nobody(tmp_path):
+    module = product_sync()
+    plan, next_state = plan_with_journey(module, [membership(module)])
+    db_path = tmp_path / "enrollments.db"
+
+    result = module.apply_product_plan(
+        api=RecordingAPI(),
+        registry=RecordingRegistry(),
+        plan=plan,
+        next_state=next_state,
+        state_path=tmp_path / "state.json",
+        evidence_path=tmp_path / "evidence.jsonl",
+        enrollments_db_path=db_path,
+        dry_run=True,
+    )
+
+    assert result["enrolled"] == 1
+    assert not db_path.exists()
+
+
+def test_a_failed_verification_leaves_nobody_enrolled(tmp_path):
+    module = product_sync()
+    api = RecordingAPI()
+    api.contacts_by_emails = lambda emails: {}
+    plan, next_state = plan_with_journey(module, [membership(module)])
+    db_path = tmp_path / "enrollments.db"
+
+    with pytest.raises(RuntimeError, match="membership verification failed"):
+        module.apply_product_plan(
+            api=api,
+            registry=RecordingRegistry(),
+            plan=plan,
+            next_state=next_state,
+            state_path=tmp_path / "state.json",
+            evidence_path=tmp_path / "evidence.jsonl",
+            enrollments_db_path=db_path,
+            dry_run=False,
+        )
+
+    assert not db_path.exists()
+
+
+def test_a_replayed_apply_reports_nobody_newly_enrolled(tmp_path):
+    module = product_sync()
+    plan, next_state = plan_with_journey(module, [membership(module)])
+    db_path = tmp_path / "enrollments.db"
+    common = {
+        "registry": RecordingRegistry(),
+        "plan": plan,
+        "next_state": next_state,
+        "state_path": tmp_path / "state.json",
+        "evidence_path": tmp_path / "evidence.jsonl",
+        "enrollments_db_path": db_path,
+        "dry_run": False,
+    }
+
+    first = module.apply_product_plan(api=RecordingAPI(), **common)
+    second = module.apply_product_plan(api=RecordingAPI(), **common)
+
+    assert (first["enrolled"], second["enrolled"]) == (1, 0)

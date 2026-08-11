@@ -5,6 +5,7 @@ google-api-python-client
 python-dateutil
 mailchimp3
 twy-paths @ file:///root/twy/paths
+twy-platform @ file:///root/twy/platform
 twy-classplan @ file:///root/twy/classplan
 markdown
 beautifulsoup4
