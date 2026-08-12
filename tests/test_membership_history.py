@@ -49,3 +49,17 @@ def test_member_with_only_zero_rows_is_comped(tmp_path):
     assert summary["paid_count"] == 0
     assert summary["first_paid"] is None
     assert summary["latest_paid"] is None
+
+
+def test_a_cancelled_tyl_member_with_access_left_still_counts(tmp_path, monkeypatch):
+    """JP 2026-08-12: currently has access, not currently renewing."""
+    import membership_history as mh
+
+    path = tmp_path / "active_subscriptions_20260812T072001Z.csv"
+    path.write_text(
+        "Billing Cycle,Created,Email,First Name,Last Name,Paid,Price,Product Name,Renewal Date,Status,Subscription Active Until,split_part\n"
+        "Monthly,2026-07-12T00:00:00Z,a@x.com,A,A,99,99,The Yoga Lifestyle Membership,2026-08-12T00:00:00Z,Active,2026-08-15,1month\n"
+        "Monthly,2025-08-11T00:00:00Z,lia@x.com,Lia,Spiegel,948,99,The Yoga Lifestyle Membership,2027-08-11T00:00:00Z,Canceled,2027-08-11,1year\n"
+        "Monthly,2026-06-01T00:00:00Z,e@x.com,E,E,99,99,The Yoga Lifestyle Membership,2026-07-01T00:00:00Z,Canceled,2026-07-04,1month\n")
+    monthly, annual, total = mh.from_hm_report(str(path))
+    assert (monthly, annual, total) == (1, 1, 2)

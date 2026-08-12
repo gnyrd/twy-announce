@@ -14,6 +14,7 @@ import sqlite3
 import requests
 from twy_paths import load_env, marvy_db_path
 from marvelous_memberships import latest_fresh_snapshot
+from twy_platform.membership import cycle_of, is_member_row, report_date
 
 # Load environment variables
 load_env()
@@ -61,15 +62,14 @@ def counts_from_report(path: Path) -> Dict[str, Dict[str, int]]:
     not exist and misfiled a $545 payment against a $99 monthly price as
     annual, posting TYL 25/3 where the truth was 26/2 (2026-07-21).
     """
+    as_of = report_date(path)
     out: Dict[str, Dict[str, int]] = {}
     with open(path, newline="") as fh:
         for r in csv.DictReader(fh):
-            if r.get("Status") != "Active":
+            if not is_member_row(r, as_of):
                 continue
             product = (r.get("Product Name") or "").strip()
-            if not product or product == ONDEMAND_PRODUCT:
-                continue
-            cycle = "Annual" if r.get("split_part") == ANNUAL_SPLIT else "Monthly"
+            cycle = cycle_of(r).capitalize()
             out.setdefault(product, {"Monthly": 0, "Annual": 0})
             out[product][cycle] += 1
     return out
@@ -77,15 +77,14 @@ def counts_from_report(path: Path) -> Dict[str, Dict[str, int]]:
 
 def _revenue_from_report(path: Path) -> Dict[str, Dict[str, float]]:
     """{product: {cycle: summed recurring Price}} from an HM report CSV."""
+    as_of = report_date(path)
     out: Dict[str, Dict[str, float]] = {}
     with open(path, newline="") as fh:
         for r in csv.DictReader(fh):
-            if r.get("Status") != "Active":
+            if not is_member_row(r, as_of):
                 continue
             product = (r.get("Product Name") or "").strip()
-            if not product or product == ONDEMAND_PRODUCT:
-                continue
-            cycle = "Annual" if r.get("split_part") == ANNUAL_SPLIT else "Monthly"
+            cycle = cycle_of(r).capitalize()
             try:
                 price = float(r.get("Price") or 0)
             except ValueError:

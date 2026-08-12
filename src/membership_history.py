@@ -39,6 +39,7 @@ import glob
 import os
 import sqlite3
 import sys
+from twy_platform.membership import is_member_row, report_date
 
 TYL_PRODUCT_ID = 52025
 TYL_PRODUCT_NAME = "The Yoga Lifestyle Membership"
@@ -57,8 +58,9 @@ def _report_for(date):
 
 def from_hm_report(path):
     """Exact counts from an HM report. Returns (monthly, annual, total)."""
+    as_of = report_date(path)
     rows = [r for r in csv.DictReader(open(path))
-            if r["Product Name"] == TYL_PRODUCT_NAME and r["Status"] == "Active"]
+            if r["Product Name"] == TYL_PRODUCT_NAME and is_member_row(r, as_of)]
     annual = sum(1 for r in rows if r["split_part"] == ANNUAL_SPLIT)
     return len(rows) - annual, annual, len(rows)
 
