@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask, Response
 from twy_classplan.plans import load_plans_for_month
 from twy_paths import marvy_db_path
+from twy_platform import build_register_url
 
 # .ics display labels (mirror of the dashboard CLASS_TYPE_DISPLAY)
 _CLASS_TYPE_DISPLAY = {
@@ -37,9 +38,6 @@ PRODID = "-//Tiffany Wood Yoga//Classes Feed v1//EN"
 LOGO_URL = "https://assets.tiffanywoodyoga.com/email/twy_logo_header.png"
 WEBCAL_URL = "webcal://calendar.tiffanywoodyoga.com/classes.ics"
 HTTPS_URL = "https://calendar.tiffanywoodyoga.com/classes.ics"
-# Per-event detail page on Tiff's HM studio (custom domain). Same base used by
-# /root/twy/announce/scripts/send_class_email_reminders.py (MARVELOUS_JOIN_BASE_URL).
-STUDIO_EVENT_URL = "https://studio.tiffanywoodyoga.com/event/details"
 
 
 def _esc(text):
@@ -155,7 +153,7 @@ def _description_for(plan, instructors, register_url=None):
         # Surfaced visibly in description; also emitted as VEVENT.URL so
         # clients that surface URL natively (Apple, Outlook) have a tap target.
         # Verb "Join" matches existing TWY pattern in send_class_email_reminders.py
-        # ("Link to Join:" against the same {MARVELOUS_JOIN_BASE_URL}/{ev_id}).
+        # ("Link to Join:" against the same twy_platform.build_register_url).
         parts.append(f"Join: {register_url}")
     return "\n\n".join(parts)
 
@@ -222,7 +220,7 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None, summary_pre
         if start_dt < now_utc - timedelta(hours=74):
             continue
 
-        register_url = f"{STUDIO_EVENT_URL}/{mev_int}" if mev_int else None
+        register_url = build_register_url(mev_int)
         description = _description_for(plan, instructors, register_url)
 
         lines.append("BEGIN:VEVENT")

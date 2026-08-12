@@ -53,6 +53,7 @@ from googleapiclient.discovery import build
 import pickle
 import re
 from twy_paths import load_env
+from twy_platform import build_register_url
 from zoneinfo import ZoneInfo
 
 load_env()
@@ -435,14 +436,14 @@ def parse_block(block: List[str], tz: ZoneInfo) -> ClassEntry | None:
 
 
 MARVELOUS_EVENTS_URL = "https://api.namastream.com/api/studios/tiffany-wood-yoga/events"
-MARVELOUS_JOIN_BASE_URL = "https://studio.tiffanywoodyoga.com/event/details"
 
 
 def fetch_marvelous_events() -> list[dict]:
     """Load events from local cache, falling back to live Marvelous API if needed.
 
     NOTE: Studio slug and URL are hard-coded for Tiffany Wood Yoga.
-    If the studio URL changes, update MARVELOUS_EVENTS_URL and MARVELOUS_JOIN_BASE_URL.
+    If the studio URL changes, update MARVELOUS_EVENTS_URL here and
+    HM_EVENT_URL in twy_platform.urls.
     """
     cache_path = Path(os.environ.get("MARVELOUS_EVENTS_PATH", "./data/marvelous_events.json"))
 
@@ -525,10 +526,7 @@ def find_marvelous_event_for_class(cls: ClassEntry, events: list[dict]) -> str |
 
     candidates.sort(key=lambda pair: score(pair[0]))
     best_ev, _ = candidates[0]
-    ev_id = best_ev.get("id")
-    if not ev_id:
-        return None
-    return f"{MARVELOUS_JOIN_BASE_URL}/{ev_id}"
+    return build_register_url(best_ev.get("id"))
 
 
 def load_state(path: Path) -> Dict[str, Dict[str, str]]:
