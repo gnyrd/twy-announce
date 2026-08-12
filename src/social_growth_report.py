@@ -18,6 +18,7 @@ from typing import Any
 
 import requests
 from twy_paths import data_root as default_data_root
+from twy_paths import ig_publish_retry_path as default_retry_ledger_path
 from twy_paths import load_env
 from twy_paths import twy_root as default_twy_root
 
@@ -455,6 +456,32 @@ def collect_zernio_post_analytics(
     }
 
 
+def load_retry_ledger(path: Path | None) -> dict[str, Any]:
+    """Read the clips retry ledger, keyed by original Zernio post id.
+
+    A retry does not repair the failed post, it publishes a new one, so the
+    original stays failed in Zernio forever. Only this ledger knows the
+    difference between a failure that recovered and one that did not.
+    """
+    if path is None or not path.exists():
+        return {}
+    try:
+        ledger = read_json(path)
+    except Exception:
+        return {}
+    return ledger if isinstance(ledger, dict) else {}
+
+
+def recovery_for(ledger: dict[str, Any], post_id: str | None) -> dict[str, Any] | None:
+    """Return the ledger entry for post_id only when the retry republished it."""
+    if not post_id:
+        return None
+    entry = ledger.get(post_id)
+    if not isinstance(entry, dict):
+        return None
+    return entry if entry.get("resolved") == "published" else None
+
+
 def collect_zernio_recent_status(
     *,
     history_path: Path,
@@ -463,6 +490,7 @@ def collect_zernio_recent_status(
     fetch_analytics: Callable[[str], dict[str, Any]] | None = None,
     lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
+    retry_ledger_path: Path | None = None,
 ) -> dict[str, Any]:
     if fetch_post is None:
         return {
@@ -502,11 +530,27 @@ def collect_zernio_recent_status(
             )
             continue
         rows.append(zernio_post_row(entry, payload))
-    failed = [
+    ledger = load_retry_ledger(retry_ledger_path)
+    failed_rows = [
         row
         for row in rows
         if row.get("post_status") == "failed" or row.get("platform_status") == "failed"
     ]
+    failed = []
+    recovered = []
+    for row in failed_rows:
+        recovery = recovery_for(ledger, row.get("zernio_post_id"))
+        if recovery is None:
+            failed.append(row)
+            continue
+        recovered.append(
+            {
+                **row,
+                "recovered_post_ids": recovery.get("new_post_ids") or [],
+                "recovered_at": recovery.get("resolved_utc"),
+                "retry_attempts": recovery.get("attempts"),
+            }
+        )
     pending = [
         row
         for row in rows
@@ -529,6 +573,8 @@ def collect_zernio_recent_status(
         "by_content_type": dict(Counter(row.get("content_type") for row in rows)),
         "failed_count": len(failed),
         "failed": failed,
+        "recovered_count": len(recovered),
+        "recovered": recovered,
         "pending_count": len(pending),
         "pending": pending,
         "content_issue_count": len(content_issues),
@@ -990,6 +1036,7 @@ def collect_snapshot(
             fetch_analytics=zernio_fetch_analytics,
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
+            retry_ledger_path=default_retry_ledger_path(),
         ),
         "websites": websites,
         "landing_page": {"plausible": habit_plausible},
@@ -1087,6 +1134,22 @@ def warning_events(
                     ":warning: TWY social growth: Zernio publish failed "
                     f"for {title} scheduled {scheduled_for}. "
                     f"Post id {post_id}. Status {status}."
+                ),
+            }
+        )
+    for row in zernio.get("recovered") or []:
+        post_id = row.get("zernio_post_id") or "unknown"
+        title = row.get("title") or "untitled post"
+        scheduled_for = row.get("scheduled_for") or "unknown time"
+        replacements = row.get("recovered_post_ids") or []
+        republished = ", ".join(str(x) for x in replacements) or "a new post"
+        events.append(
+            {
+                "key": f"zernio_recovered:{post_id}",
+                "text": (
+                    ":white_check_mark: TWY social growth: Zernio publish failed "
+                    f"for {title} scheduled {scheduled_for}, then recovered on its "
+                    f"own. Republished as {republished}. No action needed."
                 ),
             }
         )

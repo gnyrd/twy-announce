@@ -951,3 +951,127 @@ def test_post_new_warning_events_records_sent_keys_and_skips_repeats(tmp_path):
     ]
     state = json.loads(state_path.read_text())
     assert sorted(state["sent"]) == ["one", "two"]
+
+
+def _zernio_history(tmp_path, post_id, scheduled_for):
+    history = tmp_path / "ig_history.json"
+    history.write_text(
+        json.dumps([{"zernio_post_id": post_id, "scheduled_for": scheduled_for}])
+    )
+    return history
+
+
+def _failed_payload(title):
+    return {
+        "post": {
+            "title": title,
+            "status": "failed",
+            "platforms": [{"platform": "instagram", "status": "failed"}],
+        }
+    }
+
+
+def test_a_retried_failure_is_reported_recovered_not_failed(tmp_path):
+    captured_at = datetime(2026, 8, 12, 13, 20, tzinfo=timezone.utc)
+    post_id = "6a6d0cf46579419296ddcd5a"
+    history = _zernio_history(tmp_path, post_id, "2026-08-11T14:00:00+00:00")
+    ledger = tmp_path / "ig_publish_retry.json"
+    ledger.write_text(
+        json.dumps(
+            {
+                post_id: {
+                    "attempts": 1,
+                    "new_post_ids": ["6a7b390f5460ed9f2954248c"],
+                    "resolved": "published",
+                    "resolved_utc": "2026-08-11T15:30:12+00:00",
+                }
+            }
+        )
+    )
+
+    snapshot = social_growth.collect_zernio_recent_status(
+        history_path=history,
+        captured_at=captured_at,
+        fetch_post=lambda pid: _failed_payload("TWY IG Reel for 2026-08-12"),
+        retry_ledger_path=ledger,
+    )
+
+    assert snapshot["failed_count"] == 0
+    assert snapshot["recovered_count"] == 1
+    assert snapshot["recovered"][0]["recovered_post_ids"] == ["6a7b390f5460ed9f2954248c"]
+
+
+def test_an_unrecovered_failure_is_still_reported_failed(tmp_path):
+    captured_at = datetime(2026, 8, 12, 13, 20, tzinfo=timezone.utc)
+    post_id = "deadbeefdeadbeefdeadbeef"
+    history = _zernio_history(tmp_path, post_id, "2026-08-11T14:00:00+00:00")
+    ledger = tmp_path / "ig_publish_retry.json"
+    ledger.write_text(json.dumps({}))
+
+    snapshot = social_growth.collect_zernio_recent_status(
+        history_path=history,
+        captured_at=captured_at,
+        fetch_post=lambda pid: _failed_payload("TWY IG Reel"),
+        retry_ledger_path=ledger,
+    )
+
+    assert snapshot["failed_count"] == 1
+    assert snapshot["recovered_count"] == 0
+
+
+def test_a_stale_ledger_entry_does_not_count_as_recovered(tmp_path):
+    captured_at = datetime(2026, 8, 12, 13, 20, tzinfo=timezone.utc)
+    post_id = "6a67fdf5131b530ebafbc867"
+    history = _zernio_history(tmp_path, post_id, "2026-08-11T14:00:00+00:00")
+    ledger = tmp_path / "ig_publish_retry.json"
+    ledger.write_text(json.dumps({post_id: {"resolved": "stale"}}))
+
+    snapshot = social_growth.collect_zernio_recent_status(
+        history_path=history,
+        captured_at=captured_at,
+        fetch_post=lambda pid: _failed_payload("TWY IG Reel"),
+        retry_ledger_path=ledger,
+    )
+
+    assert snapshot["failed_count"] == 1
+    assert snapshot["recovered_count"] == 0
+
+
+def test_a_missing_ledger_leaves_every_failure_reported_as_failed(tmp_path):
+    captured_at = datetime(2026, 8, 12, 13, 20, tzinfo=timezone.utc)
+    history = _zernio_history(tmp_path, "abc123", "2026-08-11T14:00:00+00:00")
+
+    snapshot = social_growth.collect_zernio_recent_status(
+        history_path=history,
+        captured_at=captured_at,
+        fetch_post=lambda pid: _failed_payload("TWY IG Reel"),
+        retry_ledger_path=tmp_path / "does_not_exist.json",
+    )
+
+    assert snapshot["failed_count"] == 1
+    assert snapshot["recovered_count"] == 0
+
+
+def test_the_recovered_alert_says_recovered_and_names_the_replacement():
+    events = social_growth.warning_events(
+        {
+            "zernio": {
+                "recovered": [
+                    {
+                        "zernio_post_id": "6a6d0cf46579419296ddcd5a",
+                        "title": "TWY IG Reel for 2026-08-12",
+                        "scheduled_for": "2026-08-11T08:00:00-06:00",
+                        "recovered_post_ids": ["6a7b390f5460ed9f2954248c"],
+                    }
+                ]
+            }
+        }
+    )
+
+    assert len(events) == 1
+    text = events[0]["text"]
+    assert events[0]["key"] == "zernio_recovered:6a6d0cf46579419296ddcd5a"
+    assert "recovered on its own" in text
+    assert "6a7b390f5460ed9f2954248c" in text
+    assert "No action needed." in text
+    assert ":warning:" not in text
