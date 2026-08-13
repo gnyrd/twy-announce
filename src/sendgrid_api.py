@@ -401,6 +401,30 @@ class SendGridAPI:
         )
         return payload or None
 
+    def get_block(self, email: str) -> dict | None:
+        """The block record for this address, or None.
+
+        A block is the receiving server refusing for reputation, greylisting
+        or content. It is often transient and frequently says nothing about
+        the address itself, which is why it is worth telling apart from a
+        bounce rather than folding both into one dead-address bucket.
+        """
+        payload = self._request(
+            "GET",
+            f"/suppression/blocks/{quote(email, safe='')}",
+            allow_not_found=True,
+        )
+        return payload or None
+
+    def get_invalid_email(self, email: str) -> dict | None:
+        """The invalid-address record for this address, or None."""
+        payload = self._request(
+            "GET",
+            f"/suppression/invalid_emails/{quote(email, safe='')}",
+            allow_not_found=True,
+        )
+        return payload or None
+
     def create_single_send(self, payload: dict) -> dict:
         return self._request("POST", "/marketing/singlesends", json=payload)
 

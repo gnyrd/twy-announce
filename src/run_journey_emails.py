@@ -53,7 +53,8 @@ DEFAULT_ACTIVITY_CHANNEL = "C0BH3142LNP"
 # judgement, so the reporting page can show them to Tiff as they are.
 COMPLETED = "completed"
 BOUNCED = "bounced"
-CLEANED = "cleaned"
+BLOCKED = "blocked"
+INVALID = "invalid"
 UNSUBSCRIBED = "unsubscribed"
 
 # Why a tick passed somebody over without changing anything. A skip is reversible
@@ -183,20 +184,40 @@ def build_payload(
     return payload
 
 
-def ineligibility(email: str, *, api, registry, cleaned: set) -> str:
+def ineligibility(email: str, *, api, registry, legacy_denylist: set) -> str:
     """Why this address cannot be mailed, or an empty string when it can.
 
     Checked at send time, not carried from enrollment. Somebody can bounce or
     unsubscribe in the days between joining a sequence and reaching its third
     email, and the sequence has to notice.
+
+    The four answers are four different things and Tiff sees them as four.
+    Unsubscribed is a choice the person made. Bounced is the receiving server
+    saying no such recipient. Blocked is that server refusing for reputation,
+    greylisting or content, which is often transient and frequently says
+    nothing about the address itself. Invalid is malformed or nonexistent.
+
+    Consent is checked before deliverability, so somebody who both opted out
+    and bounced reads as opted out. That is the truthful answer and also the
+    safe one, because an unsubscribe is the reason you never retry.
+
+    legacy_denylist is the frozen MailChimp import. Those addresses were
+    cleaned by MailChimp before the migration, which meant undeliverable, so
+    they answer invalid. The provider word never reaches anybody.
     """
     address = str(email).strip().lower()
-    if address in cleaned:
-        return CLEANED
-    if api.get_bounce(address) is not None:
-        return BOUNCED
     if api.search_group_suppressions(registry.suppression_group_id, [address]):
         return UNSUBSCRIBED
+    if api.get_global_unsubscribe(address) is not None:
+        return UNSUBSCRIBED
+    if api.get_bounce(address) is not None:
+        return BOUNCED
+    if api.get_block(address) is not None:
+        return BLOCKED
+    if api.get_invalid_email(address) is not None:
+        return INVALID
+    if address in legacy_denylist:
+        return INVALID
     return ""
 
 
@@ -228,7 +249,7 @@ def run(
     journeys_by_id: dict,
     api,
     registry,
-    cleaned: set,
+    legacy_denylist: set,
     marvy_connection=None,
     now: datetime,
     dry_run: bool,
@@ -258,7 +279,10 @@ def run(
 
         if verdict.action == "send":
             reason = ineligibility(
-                enrollment["email"], api=api, registry=registry, cleaned=cleaned
+                enrollment["email"],
+                api=api,
+                registry=registry,
+                legacy_denylist=legacy_denylist,
             )
             if reason:
                 verdict = Verdict(action="finish", reason=reason)
@@ -449,7 +473,7 @@ def main(argv=None) -> int:
             journeys_by_id=journeys_by_id,
             api=api,
             registry=SendGridRegistry.load(sendgrid_registry_path()),
-            cleaned=load_cleaned_emails(sendgrid_cleaned_denylist_path()),
+            legacy_denylist=load_cleaned_emails(sendgrid_cleaned_denylist_path()),
             marvy_connection=marvy,
             now=datetime.now(timezone.utc),
             dry_run=args.dry_run,

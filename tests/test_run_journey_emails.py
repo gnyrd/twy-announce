@@ -56,14 +56,37 @@ def enrolled(connection, *, next_index=0, next_due_at=BOUGHT, email="buyer@examp
 
 
 class FakeAPI:
-    def __init__(self, *, bounced=(), suppressed=(), fail=False):
+    def __init__(
+        self,
+        *,
+        bounced=(),
+        suppressed=(),
+        blocked=(),
+        invalid=(),
+        globally_unsubscribed=(),
+        fail=False,
+    ):
         self.sent = []
         self.bounced = {a.lower() for a in bounced}
         self.suppressed = {a.lower() for a in suppressed}
+        self.blocked = {a.lower() for a in blocked}
+        self.invalid = {a.lower() for a in invalid}
+        self.globally_unsubscribed = {a.lower() for a in globally_unsubscribed}
         self.fail = fail
 
     def get_bounce(self, email):
         return {"email": email} if email.lower() in self.bounced else None
+
+    def get_block(self, email):
+        return {"email": email} if email.lower() in self.blocked else None
+
+    def get_invalid_email(self, email):
+        return {"email": email} if email.lower() in self.invalid else None
+
+    def get_global_unsubscribe(self, email):
+        if email.lower() in self.globally_unsubscribed:
+            return {"email": email}
+        return None
 
     def search_group_suppressions(self, group_id, emails):
         return {e for e in emails if e.lower() in self.suppressed}
@@ -92,7 +115,7 @@ def go(tmp_path, conn, *, api=None, journeys=None, now=NOW, **kwargs):
         ),
         api=api or FakeAPI(),
         registry=FakeRegistry(),
-        cleaned=kwargs.pop("cleaned", set()),
+        legacy_denylist=kwargs.pop("legacy_denylist", set()),
         marvy_connection=kwargs.pop("marvy_connection", None),
         now=now,
         dry_run=kwargs.pop("dry_run", False),
@@ -221,15 +244,61 @@ def test_an_empty_subject_or_body_is_refused(email):
 # --- eligibility, re-checked at send time --------------------------------
 
 
-def test_a_cleaned_address_is_ineligible():
+def test_the_legacy_mailchimp_denylist_answers_invalid():
     module = drip()
 
     assert module.ineligibility(
         "Gone@Example.com",
         api=FakeAPI(),
         registry=FakeRegistry(),
-        cleaned={"gone@example.com"},
-    ) == module.CLEANED
+        legacy_denylist={"gone@example.com"},
+    ) == module.INVALID
+
+
+def test_a_blocked_address_is_ineligible():
+    module = drip()
+
+    assert module.ineligibility(
+        "blk@example.com",
+        api=FakeAPI(blocked=["blk@example.com"]),
+        registry=FakeRegistry(),
+        legacy_denylist=set(),
+    ) == module.BLOCKED
+
+
+def test_an_invalid_address_is_ineligible():
+    module = drip()
+
+    assert module.ineligibility(
+        "nope@example.com",
+        api=FakeAPI(invalid=["nope@example.com"]),
+        registry=FakeRegistry(),
+        legacy_denylist=set(),
+    ) == module.INVALID
+
+
+def test_a_global_unsubscribe_is_ineligible():
+    module = drip()
+
+    assert module.ineligibility(
+        "g@example.com",
+        api=FakeAPI(globally_unsubscribed=["g@example.com"]),
+        registry=FakeRegistry(),
+        legacy_denylist=set(),
+    ) == module.UNSUBSCRIBED
+
+
+def test_consent_outranks_deliverability_when_both_apply():
+    module = drip()
+
+    assert module.ineligibility(
+        "both@example.com",
+        api=FakeAPI(
+            suppressed=["both@example.com"], bounced=["both@example.com"]
+        ),
+        registry=FakeRegistry(),
+        legacy_denylist=set(),
+    ) == module.UNSUBSCRIBED
 
 
 def test_a_bouncing_address_is_ineligible():
@@ -239,7 +308,7 @@ def test_a_bouncing_address_is_ineligible():
         "b@example.com",
         api=FakeAPI(bounced=["b@example.com"]),
         registry=FakeRegistry(),
-        cleaned=set(),
+        legacy_denylist=set(),
     ) == module.BOUNCED
 
 
@@ -250,7 +319,7 @@ def test_somebody_who_unsubscribed_is_ineligible():
         "u@example.com",
         api=FakeAPI(suppressed=["u@example.com"]),
         registry=FakeRegistry(),
-        cleaned=set(),
+        legacy_denylist=set(),
     ) == module.UNSUBSCRIBED
 
 
@@ -258,7 +327,7 @@ def test_a_deliverable_address_has_no_reason_against_it():
     module = drip()
 
     assert module.ineligibility(
-        "ok@example.com", api=FakeAPI(), registry=FakeRegistry(), cleaned=set()
+        "ok@example.com", api=FakeAPI(), registry=FakeRegistry(), legacy_denylist=set()
     ) == ""
 
 
