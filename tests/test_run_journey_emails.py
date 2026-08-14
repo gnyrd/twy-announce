@@ -750,3 +750,76 @@ def test_a_failed_slack_post_does_not_undo_a_real_send(tmp_path):
     assert len(api.sent) == 1, "the email still went out"
     assert ledger[0]["status"] == "sent"
     assert row["next_index"] == 1, "and the member still advanced"
+
+
+def test_a_resend_hard_bounce_stops_the_next_email(tmp_path):
+    """The gap the 2026-08-14 cutover opened, closed.
+
+    The send leaves through Resend, the ledger stays on SendGrid, so a hard
+    bounce happens somewhere SendGrid cannot see. Before this, a member whose
+    address bounced on email 1 was sent email 2 regardless.
+    """
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    counts = go(
+        tmp_path,
+        conn,
+        api=api,
+        resend_suppressions={"buyer@example.com": "bounced"},
+    )
+    row = store().enrollment_for(
+        conn, "yoga_lifestyle_welcome_2024_05", "buyer@example.com"
+    )
+
+    assert api.sent == []
+    assert counts["finished"] == 1
+    assert row["terminal_reason"] == "bounced"
+
+
+def test_a_resend_complaint_reads_as_unsubscribed(tmp_path):
+    """Pressing spam is a decision about wanting the mail, not a bad mailbox."""
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    go(
+        tmp_path,
+        conn,
+        api=api,
+        resend_suppressions={"buyer@example.com": "complained"},
+    )
+    row = store().enrollment_for(
+        conn, "yoga_lifestyle_welcome_2024_05", "buyer@example.com"
+    )
+
+    assert api.sent == []
+    assert row["terminal_reason"] == "unsubscribed"
+
+
+def test_an_unrelated_resend_suppression_does_not_stop_this_member(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    counts = go(
+        tmp_path,
+        conn,
+        api=api,
+        resend_suppressions={"somebody-else@example.com": "bounced"},
+    )
+
+    assert counts["sent"] == 1
+    assert len(api.sent) == 1
+
+
+def test_no_resend_suppressions_at_all_still_sends(tmp_path):
+    """A missing event log fails open, so the sequence must not stall."""
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    counts = go(tmp_path, conn, api=api, resend_suppressions={})
+
+    assert counts["sent"] == 1

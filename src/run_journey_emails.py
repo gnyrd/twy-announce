@@ -32,6 +32,7 @@ import sys
 
 import journey_enrollment
 from journey_personalization import personalize_email
+import resend_events
 from newsletter_rendering import render_newsletter
 from twy_platform.journeys import (
     journey_campaign_id,
@@ -189,7 +190,14 @@ def build_payload(
     return payload
 
 
-def ineligibility(email: str, *, api, registry, legacy_denylist: set) -> str:
+def ineligibility(
+    email: str,
+    *,
+    api,
+    registry,
+    legacy_denylist: set,
+    resend_suppressions: dict | None = None,
+) -> str:
     """Why this address cannot be mailed, or an empty string when it can.
 
     Checked at send time, not carried from enrollment. Somebody can bounce or
@@ -209,13 +217,25 @@ def ineligibility(email: str, *, api, registry, legacy_denylist: set) -> str:
     legacy_denylist is the frozen MailChimp import. Those addresses were
     cleaned by MailChimp before the migration, which meant undeliverable, so
     they answer invalid. The provider word never reaches anybody.
+
+    resend_suppressions closes the gap the 2026-08-14 cutover opened. The
+    message now leaves through Resend while this ledger stays on SendGrid,
+    so a hard bounce or a spam complaint on a drip happens somewhere
+    SendGrid cannot see. Without it a member whose address bounced on email
+    1 was sent email 2 regardless. Only permanent bounces and complaints
+    appear in it; a transient bounce is a full mailbox and must be retried.
     """
     address = str(email).strip().lower()
+    from_resend = (resend_suppressions or {}).get(address, "")
     if api.search_group_suppressions(registry.suppression_group_id, [address]):
         return UNSUBSCRIBED
     if api.get_global_unsubscribe(address) is not None:
         return UNSUBSCRIBED
+    if from_resend == resend_events.COMPLAINED:
+        return UNSUBSCRIBED
     if api.get_bounce(address) is not None:
+        return BOUNCED
+    if from_resend == resend_events.BOUNCED:
         return BOUNCED
     if api.get_block(address) is not None:
         return BLOCKED
@@ -256,6 +276,7 @@ def run(
     sender,
     registry,
     legacy_denylist: set,
+    resend_suppressions: dict | None = None,
     marvy_connection=None,
     now: datetime,
     dry_run: bool,
@@ -289,6 +310,7 @@ def run(
                 api=api,
                 registry=registry,
                 legacy_denylist=legacy_denylist,
+                resend_suppressions=resend_suppressions,
             )
             if reason:
                 verdict = Verdict(action="finish", reason=reason)
@@ -432,6 +454,7 @@ def main(argv=None) -> int:
         journeys_dir,
         load_env,
         marvy_db_path,
+        resend_event_log_path,
         sendgrid_cleaned_denylist_path,
         sendgrid_registry_path,
     )
@@ -501,6 +524,9 @@ def main(argv=None) -> int:
             sender=sender,
             registry=SendGridRegistry.load(sendgrid_registry_path()),
             legacy_denylist=load_cleaned_emails(sendgrid_cleaned_denylist_path()),
+            resend_suppressions=resend_events.load_suppressions(
+                resend_event_log_path()
+            ),
             marvy_connection=marvy,
             now=datetime.now(timezone.utc),
             dry_run=args.dry_run,
