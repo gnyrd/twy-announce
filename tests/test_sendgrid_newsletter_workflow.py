@@ -1,16 +1,23 @@
 import json
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
 
+import sendgrid_newsletter_workflow as workflow_module
 from sendgrid_campaigns import SendGridCampaigns, SendGridRegistry
 from sendgrid_mailings import MailingPurpose, mailing_name
 from sendgrid_newsletter_workflow import (
+    _validate_sections_before_provider,
     apply_provider_report,
+    ensure_recording_draft,
+    hold_mailing,
     lock_due_sections,
     mark_provider_error,
     provision_drafts,
     read_local_sections,
+    release_mailing,
+    resolve_section_tokens,
     sections_due_for_materialization,
 )
 
@@ -737,13 +744,13 @@ def test_sent_snapshot_creates_pending_review_from_original_tweee_draft(
     }
 
 
-def test_provider_failure_moves_locked_draft_to_error(
+def test_provider_failure_keeps_locked_draft_retryable(
     monkeypatch,
     tmp_path,
 ):
     monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
     period = _write_local_newsletter(tmp_path)
-    lock_due_sections(
+    first = lock_due_sections(
         year=2026,
         month=8,
         class_date=None,
@@ -760,20 +767,88 @@ def test_provider_failure_moves_locked_draft_to_error(
 
     metadata = json.loads((period / ".metadata.json").read_text())
     entry = metadata["drafts"]["lifestyle"]
-    assert entry["state"] == "error"
+    locked_snapshot = entry["locked_snapshot"]
+    assert entry["state"] == "locked"
     assert entry["error"] == "provider verification failed"
 
+    retried = lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 55, tzinfo=timezone.utc),
+    )
 
-from pathlib import Path
+    assert retried == first
+    metadata = json.loads((period / ".metadata.json").read_text())
+    assert metadata["drafts"]["lifestyle"]["locked_snapshot"] == (
+        locked_snapshot
+    )
 
-from sendgrid_newsletter_workflow import (
-    _validate_sections_before_provider,
-    ensure_recording_draft,
-    hold_mailing,
-    release_mailing,
-    resolve_section_tokens,
-)
-import sendgrid_newsletter_workflow as workflow_module
+
+def test_legacy_pre_provider_error_reenters_locked_retry_state(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    period = _write_local_newsletter(tmp_path)
+    expected = lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
+    )
+    metadata = json.loads((period / ".metadata.json").read_text())
+    entry = metadata["drafts"]["lifestyle"]
+    entry.update({
+        "state": "error",
+        "error": "created Single Send verification failed: email_config.html_content",
+        "error_at": "2026-08-02T15:50:00+00:00",
+    })
+    (period / ".metadata.json").write_text(json.dumps(metadata))
+
+    retried = lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 55, tzinfo=timezone.utc),
+    )
+
+    assert retried == expected
+    metadata = json.loads((period / ".metadata.json").read_text())
+    assert metadata["drafts"]["lifestyle"]["state"] == "locked"
+
+
+def test_provider_evidenced_error_is_not_rearmed(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    period = _write_local_newsletter(tmp_path)
+    lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 49, tzinfo=timezone.utc),
+    )
+    metadata = json.loads((period / ".metadata.json").read_text())
+    entry = metadata["drafts"]["lifestyle"]
+    entry.update({
+        "state": "error",
+        "error": "unexpected",
+        "provider": {"single_send_id": "send1", "status": "unexpected"},
+    })
+    (period / ".metadata.json").write_text(json.dumps(metadata))
+
+    retried = lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=None,
+        now=datetime(2026, 8, 2, 15, 55, tzinfo=timezone.utc),
+    )
+
+    assert retried == {}
+    metadata = json.loads((period / ".metadata.json").read_text())
+    assert metadata["drafts"]["lifestyle"]["state"] == "error"
 
 
 def _write_recording_record(tmp_path, monkeypatch, **overrides):
@@ -919,7 +994,7 @@ def test_hold_mailing_rejects_a_sent_mailing(tmp_path, monkeypatch):
         )
 
 
-def test_apply_provider_report_retries_capture_after_error(
+def test_apply_provider_report_recovers_after_workflow_failure(
     monkeypatch,
     tmp_path,
 ):
@@ -968,7 +1043,9 @@ def test_apply_provider_report_retries_capture_after_error(
         now=datetime(2026, 8, 3, 15, 55, tzinfo=timezone.utc),
     )
     metadata = json.loads((period / ".metadata.json").read_text())
-    assert metadata["drafts"]["lifestyle"]["state"] == "error"
+    entry = metadata["drafts"]["lifestyle"]
+    assert entry["state"] == "locked"
+    assert entry["error"] == "unsupported newsletter audience"
 
     apply_provider_report(
         year=2026,

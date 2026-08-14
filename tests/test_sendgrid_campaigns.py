@@ -1,5 +1,6 @@
 import json
 import inspect
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -94,6 +95,22 @@ class FakeAPI:
 
     def segments(self):
         return list(self.segments_by_id.values())
+
+
+class EventuallyConsistentAPI(FakeAPI):
+    def __init__(self, stale_reads):
+        super().__init__()
+        self.stale_reads = stale_reads
+        self.created_gets = 0
+
+    def get_single_send(self, identifier):
+        item = super().get_single_send(identifier)
+        self.created_gets += 1
+        if self.created_gets > self.stale_reads:
+            return item
+        stale = deepcopy(item)
+        stale["email_config"]["html_content"] = "<p>Not settled</p>"
+        return stale
 
 
 
@@ -217,6 +234,63 @@ def test_create_draft_includes_preheader_in_rendered_html(monkeypatch, tmp_path)
     assert "A useful inbox preview" in html
     assert "display:none" in html
     assert "A useful inbox preview" not in api.created_sends[0]["email_config"]["plain_content"]
+
+
+def test_create_draft_waits_for_exact_provider_content_to_settle(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = EventuallyConsistentAPI(stale_reads=2)
+    sleeps = []
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+        sleep_fn=sleeps.append,
+        created_verification_delays=(0.25, 0.5),
+    )
+
+    created = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="First body",
+        preheader="A useful preview",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+
+    assert created["id"] == "send1"
+    assert api.created_gets == 3
+    assert sleeps == [0.25, 0.5]
+    assert api.deleted == []
+
+
+def test_create_draft_cleans_content_that_never_matches(tmp_path):
+    registry = _registry(tmp_path / "registry.json")
+    api = EventuallyConsistentAPI(stale_reads=20)
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+        sleep_fn=lambda _delay: None,
+        created_verification_delays=(0.0, 0.0),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="created Single Send verification failed: email_config.html_content",
+    ):
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="August",
+            body_md="First body",
+            preheader="A useful preview",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
+
+    assert api.created_gets == 3
+    assert api.deleted == ["send1"]
 
 
 def test_create_draft_reuses_matching_content_and_stops_after_changed_cleanup(

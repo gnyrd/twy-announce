@@ -307,7 +307,12 @@ def lock_due_sections(
     for key, section in local_sections.items():
         entry = drafts.setdefault(key, {})
         state = str(entry.get("state") or "draft")
-        if state == "locked":
+        retrying_pre_provider_error = (
+            state == "error"
+            and not entry.get("provider")
+            and bool(entry.get("locked_snapshot"))
+        )
+        if state == "locked" or retrying_pre_provider_error:
             purpose = SECTION_PURPOSES[key]
             try:
                 send_at = mailing_schedule(
@@ -323,6 +328,9 @@ def lock_due_sections(
             snapshot_path = str(entry.get("locked_snapshot") or "")
             if not snapshot_path:
                 raise ValueError(f"{key} is locked without a snapshot")
+            if retrying_pre_provider_error:
+                entry["state"] = "locked"
+                changed = True
             locked[key] = _snapshot_content(
                 _read_snapshot(year, month, snapshot_path)
             )
@@ -445,6 +453,8 @@ def apply_provider_report(
                 "send_at": send_at,
                 "verified_at": captured_at,
             }
+            for field in ("error", "error_at"):
+                entry.pop(field, None)
             changed = True
             continue
 
@@ -529,7 +539,7 @@ def mark_provider_error(
     error: str,
     now: datetime,
 ) -> None:
-    """Fail closed for audiences affected by provider workflow failure."""
+    """Record provider failure without discarding retryable lifecycle state."""
     if now.tzinfo is None:
         raise ValueError("provider error time must be timezone aware")
     metadata = _load_metadata(year, month)
@@ -541,7 +551,6 @@ def mark_provider_error(
         if not entry or entry.get("state") == "sent":
             continue
         entry.update({
-            "state": "error",
             "error_at": failed_at,
             "error": str(error),
         })

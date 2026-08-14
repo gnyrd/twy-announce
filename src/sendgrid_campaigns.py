@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import time
 from typing import Callable
 
 from newsletter_rendering import render_newsletter
@@ -98,11 +99,15 @@ class SendGridCampaigns:
         registry: SendGridRegistry,
         state_path: Path,
         now_fn: Callable[[], datetime] | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        created_verification_delays: tuple[float, ...] = (0.5, 1.0, 2.0),
     ):
         self.api = api
         self.registry = registry
         self.state_path = state_path
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._sleep = sleep_fn
+        self._created_verification_delays = created_verification_delays
 
     def _load_state(self) -> dict:
         if not self.state_path.exists():
@@ -297,6 +302,32 @@ class SendGridCampaigns:
             )
         self.api.delete_single_send(identifier)
 
+    def _verify_created_single_send(
+        self,
+        identifier: str,
+        expected: dict,
+    ) -> dict:
+        single_send = None
+        mismatches: list[str] = []
+        delays = (*self._created_verification_delays, None)
+        for delay in delays:
+            single_send = self.api.get_single_send(identifier)
+            mismatches = self._verification_mismatches(
+                single_send,
+                expected,
+            )
+            if not mismatches:
+                return single_send
+            if delay is not None:
+                self._sleep(delay)
+
+        assert single_send is not None
+        self._cleanup_single_send(single_send)
+        raise ProviderVerificationError(
+            "created Single Send verification failed: "
+            + ", ".join(mismatches)
+        )
+
     def _record_single_send(
         self,
         *,
@@ -460,14 +491,7 @@ class SendGridCampaigns:
                 raise ProviderVerificationError(
                     "SendGrid draft returned no immutable ID"
                 )
-            keeper = self.api.get_single_send(identifier)
-            mismatches = self._verification_mismatches(keeper, payload)
-            if mismatches:
-                self._cleanup_single_send(keeper)
-                raise ProviderVerificationError(
-                    "created Single Send verification failed: "
-                    + ", ".join(mismatches)
-                )
+            keeper = self._verify_created_single_send(identifier, payload)
 
         self._record_single_send(
             state=state,

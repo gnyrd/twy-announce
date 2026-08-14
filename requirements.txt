@@ -9,5 +9,6 @@ twy-platform @ file:///root/twy/platform
 twy-classplan @ file:///root/twy/classplan
 markdown
 beautifulsoup4
+html2text
 python-dotenv
 markdownify
