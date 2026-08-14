@@ -85,7 +85,31 @@ def _find_main_content(soup: BeautifulSoup):
     return soup.find(attrs={"mc:edit": "main_content"})
 
 
-def _adapt_newsletter_template_for_sendgrid(template: str) -> str:
+UNSUBSCRIBE_PARAGRAPH = re.compile(
+    r"<p\b[^>]*>(?:(?!</p>).)*?\*\|UNSUB\|\*(?:(?!</p>).)*?</p>\s*",
+    re.DOTALL,
+)
+
+
+def _adapt_newsletter_template_for_sendgrid(
+    template: str,
+    *,
+    unsubscribe_footer: bool = True,
+) -> str:
+    """Resolve the MailChimp tokens the template still carries.
+
+    unsubscribe_footer=False removes the preferences and unsubscribe
+    paragraph outright rather than blanking its links. Those two hrefs
+    become `<%asm_preferences_raw_url%>` and
+    `<%asm_group_unsubscribe_raw_url%>`, which ONLY SendGrid substitutes.
+    Any other transport delivers them as literal text, so a member sees an
+    Unsubscribe link that goes nowhere. Newsletters keep the footer: they
+    are marketing to a list, they go out as SendGrid Single Sends, and the
+    tags resolve. Journey drips do not, per JP 2026-08-14, because the
+    sequence is finite and follows a purchase.
+    """
+    if not unsubscribe_footer:
+        template = UNSUBSCRIBE_PARAGRAPH.sub("", template)
     html = re.sub(
         r"<!--\*\|IF:MC_PREVIEW_TEXT\|\*-->.*?<!--\*\|END:IF\|\*-->",
         "",
@@ -115,11 +139,18 @@ def _adapt_newsletter_template_for_sendgrid(template: str) -> str:
     return re.sub(r"\*\|[^|]+\|\*", "", html)
 
 
-def _wrap_with_newsletter_template(body_html: str) -> str:
+def _wrap_with_newsletter_template(
+    body_html: str,
+    *,
+    unsubscribe_footer: bool = True,
+) -> str:
     template = _load_template_html()
     if not template:
         return body_html
-    template = _adapt_newsletter_template_for_sendgrid(template)
+    template = _adapt_newsletter_template_for_sendgrid(
+        template,
+        unsubscribe_footer=unsubscribe_footer,
+    )
     soup = BeautifulSoup(template, "html.parser")
     main_content = _find_main_content(soup)
     if main_content is None:
@@ -213,10 +244,14 @@ def render_newsletter(
     *,
     use_template: bool = False,
     preheader: str = "",
+    unsubscribe_footer: bool = True,
 ) -> RenderedNewsletter:
     body_html = _make_images_responsive(_render_html(body_md))
     html = (
-        _wrap_with_newsletter_template(body_html)
+        _wrap_with_newsletter_template(
+            body_html,
+            unsubscribe_footer=unsubscribe_footer,
+        )
         if use_template
         else body_html
     )

@@ -162,7 +162,12 @@ def build_payload(
     preheader = str(email.get("preheader") or "").strip()
     if not subject or not body:
         raise ValueError("a journey email needs a subject and a body")
-    rendered = render_newsletter(body, use_template=True, preheader=preheader)
+    rendered = render_newsletter(
+        body,
+        use_template=True,
+        preheader=preheader,
+        unsubscribe_footer=False,
+    )
     payload = {
         "personalizations": [{"to": [{"email": recipient}]}],
         "from": {"email": registry.sender_email, "name": SENDER_NAME},
@@ -248,6 +253,7 @@ def run(
     connection,
     journeys_by_id: dict,
     api,
+    sender,
     registry,
     legacy_denylist: set,
     marvy_connection=None,
@@ -328,7 +334,7 @@ def run(
             continue
 
         try:
-            api.send_mail(
+            sender.send_mail(
                 build_payload(
                     filled,
                     recipient=enrollment["email"],
@@ -340,7 +346,7 @@ def run(
             )
         except Exception as exc:
             # The claim stays unresolved on purpose: nobody knows whether this
-            # left SendGrid, so nobody may send it again automatically.
+            # left the provider, so nobody may send it again automatically.
             counts["failed"] += 1
             failures.append(f"{enrollment['journey_id']}:{enrollment['email']}: {exc}")
             continue
@@ -415,6 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    from resend_api import ResendAPI
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
     from sync_marvelous_member_activity import customer_linker
@@ -437,6 +444,25 @@ def main(argv=None) -> int:
     api = SendGridAPI(api_key)
     if api.user_email() != EXPECTED_ACCOUNT_EMAIL:
         raise SystemExit("unexpected SendGrid account")
+
+    # Two providers, on purpose, and the split is not arbitrary.
+    #
+    # SendGrid stays the consent and deliverability ledger: `ineligibility`
+    # reads its suppression group, global unsubscribes, bounces, blocks and
+    # invalids before every single send, and that history lives nowhere else.
+    # Resend only carries the message, because this SendGrid account has no
+    # Email API and `/mail/send` answers 401 Maximum credits exceeded.
+    resend_key = os.getenv("RESEND_API_KEY", "")
+    if not resend_key:
+        raise SystemExit("RESEND_API_KEY is not configured")
+    resend_from = os.getenv("RESEND_FROM_EMAIL", "")
+    if not resend_from:
+        raise SystemExit("RESEND_FROM_EMAIL is not configured")
+    resend_name = os.getenv("RESEND_FROM_NAME", "Tiffany Wood Yoga")
+    sender = ResendAPI(
+        resend_key,
+        from_address=f"{resend_name} <{resend_from}>",
+    )
 
     journeys_by_id = {
         journey["journey_id"]: journey
@@ -472,6 +498,7 @@ def main(argv=None) -> int:
             connection=connection,
             journeys_by_id=journeys_by_id,
             api=api,
+            sender=sender,
             registry=SendGridRegistry.load(sendgrid_registry_path()),
             legacy_denylist=load_cleaned_emails(sendgrid_cleaned_denylist_path()),
             marvy_connection=marvy,

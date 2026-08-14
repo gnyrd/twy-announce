@@ -106,14 +106,20 @@ def connection(tmp_path):
     return store().connect(tmp_path / "journey_enrollments.db")
 
 
-def go(tmp_path, conn, *, api=None, journeys=None, now=NOW, **kwargs):
+def go(tmp_path, conn, *, api=None, sender=None, journeys=None, now=NOW, **kwargs):
     module = drip()
+    # Two roles, filled by one fake unless a test separates them. In
+    # production they are two providers: SendGrid stays the consent and
+    # deliverability ledger that ineligibility reads, and Resend carries
+    # the message, because the SendGrid account has no Email API.
+    provider = api or FakeAPI()
     return module.run(
         connection=conn,
         journeys_by_id=(
             {journey()["journey_id"]: journey()} if journeys is None else journeys
         ),
-        api=api or FakeAPI(),
+        api=provider,
+        sender=sender or provider,
         registry=FakeRegistry(),
         legacy_denylist=kwargs.pop("legacy_denylist", set()),
         marvy_connection=kwargs.pop("marvy_connection", None),
