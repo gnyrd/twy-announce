@@ -99,7 +99,6 @@ class SendGridRegistry:
             json.dumps(self.payload, indent=2, sort_keys=True) + "\n",
         )
 
-
 class SendGridCampaigns:
     def __init__(
         self,
