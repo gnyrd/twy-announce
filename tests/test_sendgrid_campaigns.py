@@ -331,6 +331,7 @@ def test_create_draft_accepts_provider_open_tracking_token(
         api=api,
         registry=registry,
         state_path=tmp_path / "state.json",
+        now_fn=lambda: datetime(2026, 8, 14, tzinfo=timezone.utc),
         created_verification_delays=(),
     )
 
@@ -346,6 +347,12 @@ def test_create_draft_accepts_provider_open_tracking_token(
     stored = api.single_sends[created["id"]]["email_config"]["html_content"]
     assert "%sg_open_track%" in stored
     assert api.deleted == []
+    assert campaigns.single_send(MailingPurpose.MONTHLY)["id"] == created["id"]
+    scheduled = campaigns.schedule(
+        MailingPurpose.MONTHLY,
+        datetime(2026, 8, 15, tzinfo=timezone.utc),
+    )
+    assert scheduled["status"] == "scheduled"
 
 
 def test_create_draft_still_rejects_real_content_corruption(

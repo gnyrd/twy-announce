@@ -216,12 +216,15 @@ class SendGridCampaigns:
         ).hexdigest()
 
     @staticmethod
-    def _rendered_hash(payload: dict) -> str:
+    def _rendered_hash(payload: dict, *, provider: bool = False) -> str:
         email_config = payload["email_config"]
+        html_content = email_config["html_content"]
+        if provider:
+            html_content = _without_provider_injected_html(html_content)
         source = json.dumps(
             {
                 "subject": email_config["subject"],
-                "html_content": email_config["html_content"],
+                "html_content": html_content,
                 "plain_content": email_config["plain_content"],
                 "send_to": payload["send_to"],
             },
@@ -607,7 +610,7 @@ class SendGridCampaigns:
         ) != self._normalized_send_to(entry.get("send_to")):
             mismatches.append("send_to")
         try:
-            rendered_sha256 = self._rendered_hash(single_send)
+            rendered_sha256 = self._rendered_hash(single_send, provider=True)
         except (KeyError, TypeError):
             mismatches.append("rendered_content")
         else:
@@ -639,7 +642,7 @@ class SendGridCampaigns:
         ) != self._normalized_send_to(entry.get("send_to")):
             mismatches.append("send_to")
         try:
-            rendered_sha256 = self._rendered_hash(single_send)
+            rendered_sha256 = self._rendered_hash(single_send, provider=True)
         except (KeyError, TypeError):
             mismatches.append("rendered_content")
         else:
