@@ -90,6 +90,34 @@ class SendGridRegistry:
         )
 
 
+PROVIDER_INJECTED_HTML_TOKENS = ("%sg_open_track%",)
+
+
+def _without_provider_tokens(value):
+    """Strip provider placeholders out of stored html_content.
+
+    SendGrid injects `%sg_open_track%` directly after `<body>` when it stores a
+    Single Send, then substitutes it for the open pixel at send time. It is
+    provider instrumentation, not TWY content, so comparing it against what we
+    uploaded reads the provider doing its job as the provider corrupting the
+    newsletter: verification fails, the fresh draft is deleted, and the mailing
+    can never be created. Removed from both sides so that every other
+    difference still fails verification.
+
+    Observed 2026_08_14. The Aug 8 stored html for Follow Up 1, replayed
+    verbatim, came back 15 characters longer carrying this token. Those same
+    bytes stored clean on Aug 8, and the delivered Aug 3 and Aug 7 mailings
+    carry a working open pixel while their stored html holds no token. So the
+    token is neither ours nor required for tracking, and its appearance is a
+    SendGrid storage change.
+    """
+    if not isinstance(value, str):
+        return value
+    for token in PROVIDER_INJECTED_HTML_TOKENS:
+        value = value.replace(token, "")
+    return value
+
+
 class SendGridCampaigns:
     def __init__(
         self,
@@ -273,7 +301,12 @@ class SendGridCampaigns:
             "suppression_group_id",
             "sender_id",
         ):
-            if actual_config.get(field) != expected["email_config"][field]:
+            actual_value = actual_config.get(field)
+            expected_value = expected["email_config"][field]
+            if field == "html_content":
+                actual_value = _without_provider_tokens(actual_value)
+                expected_value = _without_provider_tokens(expected_value)
+            if actual_value != expected_value:
                 mismatches.append(f"email_config.{field}")
         return mismatches
 

@@ -661,3 +661,95 @@ def test_expected_purposes_are_persisted_and_accumulate(tmp_path):
         MailingPurpose.GENERAL_INVITATION,
         MailingPurpose.MONTHLY,
     ]
+
+
+class OpenTrackingInjectingAPI(FakeAPI):
+    """SendGrid stores an open-tracking placeholder it was never sent."""
+
+    def create_single_send(self, payload):
+        item = super().create_single_send(payload)
+        config = dict(item["email_config"])
+        html = config["html_content"]
+        marker = "<body"
+        cut = html.find(">", html.find(marker)) + 1
+        config["html_content"] = (
+            html[:cut] + "%sg_open_track%" + html[cut:]
+        )
+        item["email_config"] = config
+        return item
+
+
+class ContentCorruptingAPI(FakeAPI):
+    """SendGrid stores something that is genuinely not what we uploaded."""
+
+    def create_single_send(self, payload):
+        item = super().create_single_send(payload)
+        config = dict(item["email_config"])
+        config["html_content"] = config["html_content"].replace(
+            "Template body", "a different newsletter", 1
+        )
+        item["email_config"] = config
+        return item
+
+
+def test_create_draft_accepts_provider_injected_open_tracking_token(
+    monkeypatch, tmp_path
+):
+    """The provider adding its own tracking placeholder is not corruption.
+
+    Regression for 2026_08_14: SendGrid began injecting `%sg_open_track%` into
+    stored html, byte comparison called it a mismatch, the fresh draft was
+    deleted, and Follow Up 2 could never be created.
+    """
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+    registry = _registry(tmp_path / "registry.json")
+    api = OpenTrackingInjectingAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+
+    campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="Template body",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+
+    stored = api.single_sends["send1"]["email_config"]["html_content"]
+    assert "%sg_open_track%" in stored
+    assert api.deleted == []
+    state = json.loads((tmp_path / "state.json").read_text())
+    assert state["single_sends"][MailingPurpose.MONTHLY.value]["id"] == "send1"
+
+
+def test_create_draft_still_rejects_real_content_corruption(
+    monkeypatch, tmp_path
+):
+    """Tolerating one provider token must not blunt the check itself."""
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+    registry = _registry(tmp_path / "registry.json")
+    api = ContentCorruptingAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+    )
+
+    with pytest.raises(Exception) as caught:
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="August",
+            body_md="Template body",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
+
+    assert "email_config.html_content" in str(caught.value)
+    assert api.deleted == ["send1"]
