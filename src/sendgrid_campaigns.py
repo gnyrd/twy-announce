@@ -22,6 +22,15 @@ from twy_platform import locked_write
 EXPECTED_ACCOUNT_EMAIL = "admin@tiffanywoodyoga.com"
 EXPECTED_SENDER_EMAIL = "hello@tiffanywoodyoga.com"
 UNSUBSCRIBE_GROUP_NAME = "Email: Unsubscribed"
+PROVIDER_INJECTED_HTML_TOKENS = ("%sg_open_track%",)
+
+
+def _without_provider_injected_html(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    for token in PROVIDER_INJECTED_HTML_TOKENS:
+        value = value.replace(token, "")
+    return value
 
 
 class ProviderVerificationError(ValueError):
@@ -278,7 +287,14 @@ class SendGridCampaigns:
             "suppression_group_id",
             "sender_id",
         ):
-            if actual_config.get(field) != expected["email_config"][field]:
+            actual_value = actual_config.get(field)
+            expected_value = expected["email_config"][field]
+            if field == "html_content" and not any(
+                token in expected_value
+                for token in PROVIDER_INJECTED_HTML_TOKENS
+            ):
+                actual_value = _without_provider_injected_html(actual_value)
+            if actual_value != expected_value:
                 mismatches.append(f"email_config.{field}")
         return mismatches
 

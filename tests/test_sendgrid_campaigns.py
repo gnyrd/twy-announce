@@ -113,6 +113,32 @@ class EventuallyConsistentAPI(FakeAPI):
         return stale
 
 
+class OpenTrackingInjectingAPI(FakeAPI):
+    def create_single_send(self, payload):
+        item = super().create_single_send(payload)
+        config = dict(item["email_config"])
+        html = config["html_content"]
+        body_end = html.find(">", html.find("<body")) + 1
+        config["html_content"] = (
+            html[:body_end] + "%sg_open_track%" + html[body_end:]
+        )
+        item["email_config"] = config
+        return item
+
+
+class ContentCorruptingAPI(FakeAPI):
+    def create_single_send(self, payload):
+        item = super().create_single_send(payload)
+        config = dict(item["email_config"])
+        config["html_content"] = config["html_content"].replace(
+            "Template body",
+            "a different newsletter",
+            1,
+        )
+        item["email_config"] = config
+        return item
+
+
 
 
 def _write_newsletter_template(root):
@@ -290,6 +316,66 @@ def test_create_draft_cleans_content_that_never_matches(tmp_path):
         )
 
     assert api.created_gets == 3
+    assert api.deleted == ["send1"]
+
+
+def test_create_draft_accepts_provider_open_tracking_token(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+    registry = _registry(tmp_path / "registry.json")
+    api = OpenTrackingInjectingAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+        created_verification_delays=(),
+    )
+
+    created = campaigns.create_draft(
+        purpose=MailingPurpose.MONTHLY,
+        year=2026,
+        month=8,
+        subject="August",
+        body_md="Template body",
+        send_to={"list_ids": ["lifestyle1"], "all": False},
+    )
+
+    stored = api.single_sends[created["id"]]["email_config"]["html_content"]
+    assert "%sg_open_track%" in stored
+    assert api.deleted == []
+
+
+def test_create_draft_still_rejects_real_content_corruption(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path))
+    _write_newsletter_template(tmp_path)
+    registry = _registry(tmp_path / "registry.json")
+    api = ContentCorruptingAPI()
+    campaigns = SendGridCampaigns(
+        api=api,
+        registry=registry,
+        state_path=tmp_path / "state.json",
+        created_verification_delays=(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="created Single Send verification failed: email_config.html_content",
+    ):
+        campaigns.create_draft(
+            purpose=MailingPurpose.MONTHLY,
+            year=2026,
+            month=8,
+            subject="August",
+            body_md="Template body",
+            send_to={"list_ids": ["lifestyle1"], "all": False},
+        )
+
     assert api.deleted == ["send1"]
 
 
