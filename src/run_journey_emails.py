@@ -473,19 +473,33 @@ def main(argv=None) -> int:
     # SendGrid stays the consent and deliverability ledger: `ineligibility`
     # reads its suppression group, global unsubscribes, bounces, blocks and
     # invalids before every single send, and that history lives nowhere else.
-    # Resend only carries the message, because this SendGrid account has no
-    # Email API and `/mail/send` answers 401 Maximum credits exceeded.
-    resend_key = os.getenv("RESEND_API_KEY", "")
-    if not resend_key:
-        raise SystemExit("RESEND_API_KEY is not configured")
-    resend_from = os.getenv("RESEND_FROM_EMAIL", "")
-    if not resend_from:
-        raise SystemExit("RESEND_FROM_EMAIL is not configured")
-    resend_name = os.getenv("RESEND_FROM_NAME", "Tiffany Wood Yoga")
-    sender = ResendAPI(
-        resend_key,
-        from_address=f"{resend_name} <{resend_from}>",
-    )
+    #
+    # The send TRANSPORT is chosen by TWY_JOURNEY_PROVIDER (default resend).
+    # Resend carries the message because this SendGrid account has no Email
+    # API and `/mail/send` answers 401 Maximum credits exceeded. sendgrid is
+    # the documented revert lever for if that Email plan is ever bought.
+    journey_provider = os.getenv("TWY_JOURNEY_PROVIDER", "resend").strip().lower()
+    if journey_provider == "resend":
+        resend_key = os.getenv("RESEND_API_KEY", "")
+        if not resend_key:
+            raise SystemExit("RESEND_API_KEY is not configured")
+        resend_from = os.getenv("RESEND_FROM_EMAIL", "")
+        if not resend_from:
+            raise SystemExit("RESEND_FROM_EMAIL is not configured")
+        resend_name = os.getenv("RESEND_FROM_NAME", "Tiffany Wood Yoga")
+        sender = ResendAPI(
+            resend_key,
+            from_address=f"{resend_name} <{resend_from}>",
+        )
+    elif journey_provider == "sendgrid":
+        # Revert lever: reuse the SendGrid client as the transport. Its
+        # /mail/send answers 401 until an Email API plan exists.
+        sender = api
+    else:
+        raise SystemExit(
+            f"unknown TWY_JOURNEY_PROVIDER: {journey_provider!r} "
+            "(expected resend or sendgrid)"
+        )
 
     journeys_by_id = {
         journey["journey_id"]: journey
