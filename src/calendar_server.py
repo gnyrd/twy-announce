@@ -94,7 +94,11 @@ def _iter_published_plans():
     Also skips draft `* copy.json` siblings (keys not matching YYYY-MM-DD) and
     de-dupes if two plans share an mev (first-seen wins).
     """
-    today = datetime.now(timezone.utc).date()
+    # Mountain, not UTC. The box runs Etc/UTC, so after 18:00 MT the UTC
+    # date is already tomorrow, and on the last evening of a month that
+    # shifts the month set forward and drops the CURRENT month out of the
+    # feed entirely.
+    today = datetime.now(TZ_MT).date()
     months = sorted({(d.year, d.month) for d in (today, today + timedelta(days=31), today + timedelta(days=62))})
     seen = set()
     for year, month in months:
