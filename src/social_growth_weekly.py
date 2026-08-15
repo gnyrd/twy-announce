@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import json
 import os
 import uuid
@@ -807,7 +808,14 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    week_end = parse_date(args.week_end) if args.week_end else datetime.now(timezone.utc).date()
+    # Mountain, not UTC. The week this report covers is the week Tiff and
+    # JP live in, and a UTC default rolls the boundary a day early every
+    # evening after 18:00 MT.
+    week_end = (
+        parse_date(args.week_end)
+        if args.week_end
+        else datetime.now(ZoneInfo("America/Denver")).date()
+    )
     data_dir = default_data_root()
     snapshots = load_daily_snapshots(data_dir / "social_growth", week_end=week_end, days=args.days)
     report = build_weekly_review(snapshots, week_end=week_end, days=args.days)

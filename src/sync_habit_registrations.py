@@ -17,6 +17,7 @@ import hashlib
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -186,8 +187,15 @@ def sync_event(client, event_date, event_id):
     return {"event_id": event_id, "tag": tag_name, "added": add_ok, "removed": rem_ok}
 
 
+MOUNTAIN = ZoneInfo("America/Denver")
+
+
 def main():
-    today = datetime.now().date()
+    # The box runs Etc/UTC, so a bare datetime.now() is UTC and from 18:00
+    # MT onward it already reads as tomorrow. That would drop a Habit class
+    # happening today out of the upcoming window during exactly the evening
+    # hours somebody is most likely to be registering for it.
+    today = datetime.now(MOUNTAIN).date()
     events, api_failures = upcoming_habit_events(today)
     if not events:
         if api_failures:
