@@ -46,10 +46,6 @@ SENDER_NAME = "Tiffany Wood Yoga"
 # is present, which is always the case for /mail/send.
 TWY_CAMPAIGN_ARG = "twy_campaign_id"
 
-# Member activity, the same channel the Marvelous activity feed posts to, so
-# one place answers what happened to which member.
-DEFAULT_ACTIVITY_CHANNEL = "C0BH3142LNP"
-
 # Why a sequence stopped. Every one of these is a fact about the person, not a
 # judgement, so the reporting page can show them to Tiff as they are.
 COMPLETED = "completed"
@@ -255,6 +251,12 @@ def sent_announcement(
 ) -> str:
     """The Slack line for one journey email going out.
 
+    NOT WIRED TO PRODUCTION. Per JP 2026-08-16 journey drips do not post to
+    the member activity channel, so main() passes no announce and this runs
+    only from tests. The member activity feed (joins, renewals, cancels) is
+    a different module and is untouched. Re-enabling is one argument at the
+    run() call site.
+
     Reads as a sentence: "Yoga Lifestyle: 2024_05 sent 2 of 8 to Jane". The
     position is composed here from the index and the journey, never stored,
     so there is one place it can be wrong. Jane links to her HeyMarvelous
@@ -446,9 +448,7 @@ def main(argv=None) -> int:
     from resend_api import ResendAPI
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
-    from sync_marvelous_member_activity import customer_linker
     from sync_sendgrid_products import load_cleaned_emails
-    from twy_platform.slack import slack
     from twy_paths import (
         journey_enrollments_db_path,
         journeys_dir,
@@ -510,26 +510,6 @@ def main(argv=None) -> int:
     marvy = sqlite3.connect(f"file:{marvy_db_path()}?mode=ro", uri=True)
     marvy.row_factory = sqlite3.Row
 
-    link = customer_linker(marvy_db_path())
-
-    def linker(email: str) -> str:
-        """Their first name, linked to their HeyMarvelous record.
-
-        Falls back to the address when marvy has no row for them, which is
-        the same thing the member activity feed does rather than dropping
-        the person from the line.
-        """
-        name = first_name_for(marvy, {"email": email}) or email
-        return link(email, name)
-
-    channel = os.getenv(
-        "SLACK_MOVEMENT_CHANNEL", DEFAULT_ACTIVITY_CHANNEL
-    )
-
-    def announce(message: str) -> None:
-        if not slack(message, channel=channel):
-            raise RuntimeError("Slack delivery was not confirmed")
-
     try:
         result = run(
             connection=connection,
@@ -545,8 +525,6 @@ def main(argv=None) -> int:
             now=datetime.now(timezone.utc),
             dry_run=args.dry_run,
             limit=args.limit,
-            linker=linker,
-            announce=None if args.dry_run else announce,
         )
     finally:
         marvy.close()
