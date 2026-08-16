@@ -7,22 +7,19 @@ import calendar
 from datetime import date, datetime
 import logging
 import os
-from pathlib import Path
 import sys
 import time
 from zoneinfo import ZoneInfo
-
-import requests
 
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_list_sync import ensure_list, sync_exact_list
 from sendgrid_mailings import EMAIL_SUBSCRIBED, habit_activity_name
 from twy_paths import load_env, sendgrid_registry_path
+from twy_platform.planning import PlanningClient, PlanningClientError
 
 
 MOUNTAIN = ZoneInfo("America/Denver")
-CLASSES_API = "http://localhost:5003"
 REGISTRATION_WINDOW_DAYS = 35
 
 logging.basicConfig(
@@ -47,20 +44,13 @@ def upcoming_habit_events(today: date) -> tuple[list[tuple[date, int]], list[str
             year += 1
         last = calendar.monthrange(year, month)[1]
         try:
-            response = requests.get(
-                f"{CLASSES_API}/api/plans",
-                params={
-                    "from": f"{year:04d}-{month:02d}-01",
-                    "to": f"{year:04d}-{month:02d}-{last:02d}",
-                },
+            client = PlanningClient.from_env()
+            plans = client.list_plans(
+                from_date=f"{year:04d}-{month:02d}-01",
+                to_date=f"{year:04d}-{month:02d}-{last:02d}",
                 timeout=10,
             )
-            if not response.ok:
-                failures.append(
-                    f"{year:04d}_{month:02d}: HTTP {response.status_code}"
-                )
-                continue
-            for plan in response.json():
+            for plan in plans:
                 if plan.get("class_type") != "Habit":
                     continue
                 event_id = plan.get("marvelous_event_id")
@@ -70,7 +60,7 @@ def upcoming_habit_events(today: date) -> tuple[list[tuple[date, int]], list[str
                 days_out = (event_date - today).days
                 if -ATTENDANCE_TRAIL_DAYS <= days_out <= REGISTRATION_WINDOW_DAYS:
                     events.append((event_date, int(event_id)))
-        except (requests.RequestException, ValueError, KeyError) as exc:
+        except (PlanningClientError, ValueError, KeyError) as exc:
             failures.append(f"{year:04d}_{month:02d}: {exc}")
     return events, failures
 

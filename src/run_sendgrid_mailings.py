@@ -11,8 +11,6 @@ from pathlib import Path
 import sys
 from zoneinfo import ZoneInfo
 
-import requests
-
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import (
     EXPECTED_ACCOUNT_EMAIL,
@@ -31,10 +29,10 @@ from sendgrid_newsletter_workflow import (
 from sendgrid_scheduler import schedule_month
 from slack_post import post_slack
 from twy_paths import load_env, newsletters_dir, sendgrid_registry_path
+from twy_platform.planning import PlanningClient
 
 
 MOUNTAIN = ZoneInfo("America/Denver")
-CLASSES_API = "http://localhost:5003"
 
 
 def habit_class_date(year: int, month: int) -> date | None:
@@ -43,17 +41,13 @@ def habit_class_date(year: int, month: int) -> date | None:
         following = date(year + 1, 1, 1)
     else:
         following = date(year, month + 1, 1)
-    response = requests.get(
-        f"{CLASSES_API}/api/plans",
-        params={
-            "from": first.isoformat(),
-            "to": (following - timedelta(days=1)).isoformat(),
-        },
+    plans = PlanningClient.from_env().list_plans(
+        from_date=first.isoformat(),
+        to_date=(following - timedelta(days=1)).isoformat(),
         timeout=10,
     )
-    response.raise_for_status()
     matches = [
-        plan for plan in response.json()
+        plan for plan in plans
         if plan.get("class_type") == "Habit"
     ]
     if len(matches) > 1:

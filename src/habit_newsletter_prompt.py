@@ -3,18 +3,15 @@ Prompt assembly for newsletter generation.
 Builds fully populated prompt text for Tweee (members + non-members).
 """
 import json
-import re
 import calendar
 from datetime import date
 from pathlib import Path
-import sys
-import requests
+from twy_platform.planning import PlanningClient
 from twy_paths import (
     newsletter_approved_references_path,
     newsletter_editorial_guidance_path,
 )
 
-CLASSES_API = "http://localhost:5003"
 MINIMUM_CLASS_PLANS = 7
 
 _PERSPECTIVE = """PERSPECTIVE (governs everything below):
@@ -232,32 +229,21 @@ def _format_recent_references(
 def get_habit_class_date(year: int, month: int) -> date:
     """Return the Habit class date for the given month by querying the classes API.
 
-    Looks for a plan with class_type == 'Habit' in the given month.
-    Falls back to second Saturday if no plan found (pre-entry safety net).
+    Looks for a plan with class_type == 'Habit' in the given month. Missing
+    authoritative data is an error; callers must not invent a calendar date.
     """
     last_day = calendar.monthrange(year, month)[1]
     from_date = f"{year:04d}-{month:02d}-01"
     to_date = f"{year:04d}-{month:02d}-{last_day:02d}"
-    try:
-        resp = requests.get(
-            f"{CLASSES_API}/api/plans",
-            params={"from": from_date, "to": to_date},
-            timeout=10,
-        )
-        if resp.ok:
-            for plan in resp.json():
-                if plan.get("class_type") == "Habit":
-                    return date.fromisoformat(plan["date"])
-    except requests.RequestException as exc:
-        print(f"[get_habit_class_date] API unreachable, falling back to second Saturday: {exc}", file=sys.stderr)
-    # Fallback: second Saturday
-    count = 0
-    for day in range(1, last_day + 1):
-        if date(year, month, day).weekday() == 5:
-            count += 1
-            if count == 2:
-                return date(year, month, day)
-    raise ValueError(f"No Habit class date found for {year}-{month:02d}")
+    plans = PlanningClient.from_env().list_plans(
+        from_date=from_date,
+        to_date=to_date,
+        timeout=10,
+    )
+    for plan in plans:
+        if plan.get("class_type") == "Habit":
+            return date.fromisoformat(plan["date"])
+    raise ValueError(f"No Habit class plan for {year}-{month:02d}")
 
 
 def check_coverage(plans: dict, year: int, month: int) -> None:

@@ -20,15 +20,13 @@ import os
 from pathlib import Path
 import sys
 
-import requests
-
 sys.path.insert(0, "/root/twy/paths")
 sys.path.insert(0, "/root/twy/marvy")
 sys.path.insert(0, "/root/twy/classes/scripts")
 
 from twy_paths import habit_recording_state_path, load_env  # noqa: E402
+from twy_platform.planning import PlanningClient  # noqa: E402
 
-CLASSES_API = "http://localhost:5003"
 # Two weeks of access from each person's own enrollment (JP, 2026-08-08).
 AVAILABLE_DAYS = 14
 
@@ -46,14 +44,12 @@ def state_path(year: int, month: int) -> Path:
 def habit_class(year: int, month: int) -> dict | None:
     """The month's Habit plan, or None. Requires a published recording."""
     last = calendar.monthrange(year, month)[1]
-    response = requests.get(
-        f"{CLASSES_API}/api/plans",
-        params={"from": f"{year:04d}-{month:02d}-01",
-                "to": f"{year:04d}-{month:02d}-{last:02d}"},
+    plans = PlanningClient.from_env().list_plans(
+        from_date=f"{year:04d}-{month:02d}-01",
+        to_date=f"{year:04d}-{month:02d}-{last:02d}",
         timeout=15,
     )
-    response.raise_for_status()
-    for plan in response.json():
+    for plan in plans:
         if plan.get("class_type") != "Habit":
             continue
         if not plan.get("marvelous_media_id"):
