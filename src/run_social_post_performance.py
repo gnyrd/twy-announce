@@ -18,7 +18,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests
-from twy_paths import load_env, twy_root
+from twy_paths import (
+    facebook_post_performance_path,
+    load_env,
+    social_post_performance_path,
+    twy_root,
+)
 
 from social_post_performance import materialize_post_performance
 
@@ -30,9 +35,18 @@ DEFAULT_BASE_URL = "https://zernio.com/api/v1"
 # normal reply, not an error, and every Instagram story returns it.
 PENDING_STATUSES = {202, 402, 424}
 
+# Each platform has its own publish ledger and its own Zernio account id. The
+# analytics endpoint and the durable store shape are identical, which is why
+# one collector serves both by swapping these three things.
+HISTORY_FILES = {"instagram": "ig_history.json", "facebook": "fb_history.json"}
+ACCOUNT_ENV = {
+    "instagram": "ZERNIO_INSTAGRAM_ACCOUNT_ID",
+    "facebook": "ZERNIO_FACEBOOK_ACCOUNT_ID",
+}
 
-def history_path() -> Path:
-    return twy_root() / "clips" / "state" / "ig_history.json"
+
+def history_path(platform: str = "instagram") -> Path:
+    return twy_root() / "clips" / "state" / HISTORY_FILES[platform]
 
 
 def read_history(path: Path) -> list[dict]:
@@ -43,11 +57,11 @@ def read_history(path: Path) -> list[dict]:
     return [row for row in payload if isinstance(row, dict)]
 
 
-def analytics_fetcher():
+def analytics_fetcher(account_env: str = "ZERNIO_INSTAGRAM_ACCOUNT_ID"):
     api_key = os.getenv("ZERNIO_API_KEY", "").strip()
     if not api_key:
         raise SystemExit("ZERNIO_API_KEY is not configured")
-    account_id = os.getenv("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
+    account_id = os.getenv(account_env, "").strip()
     base_url = os.getenv("ZERNIO_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
@@ -133,26 +147,38 @@ def main() -> int:
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO)
     load_env()
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--platform",
+        choices=("instagram", "facebook"),
+        default="instagram",
+        help="which publish history and Zernio account to collect",
+    )
     parser.add_argument("--backfill", action="store_true", help="walk the whole publish history")
     parser.add_argument("--since-days", type=int, default=10, help="incremental window in days")
     parser.add_argument("--dry-run", action="store_true", help="collect but write nothing")
     args = parser.parse_args()
 
     now = datetime.now(timezone.utc)
-    history = read_history(history_path())
+    platform = args.platform
+    history = read_history(history_path(platform))
     if not history:
-        log.error("no publish history at %s", history_path())
+        log.error("no publish history at %s", history_path(platform))
         return 1
 
     rows = select_rows(history, backfill=args.backfill, since_days=args.since_days, now=now)
-    log.info("%s posts selected of %s in history", len(rows), len(history))
-    collected, tally = collect(rows, analytics_fetcher())
+    log.info("%s %s posts selected of %s in history", len(rows), platform, len(history))
+    collected, tally = collect(rows, analytics_fetcher(ACCOUNT_ENV[platform]))
 
     if args.dry_run:
-        log.info("dry run: %s", json.dumps(tally))
+        log.info("dry run (%s): %s", platform, json.dumps(tally))
         return 0
 
-    written = materialize_post_performance(collected, now)
+    path_for = (
+        facebook_post_performance_path
+        if platform == "facebook"
+        else social_post_performance_path
+    )
+    written = materialize_post_performance(collected, now, path_for=path_for)
     log.info(
         "measured=%(measured)s pending=%(pending)s errors=%(errors)s" % tally
         + " months=%s" % len(written)
