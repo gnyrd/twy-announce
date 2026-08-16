@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -560,7 +561,90 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     return recommendations
 
 
-def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS) -> dict[str, Any]:
+def _ig_shortcode(url: Any) -> str | None:
+    match = re.search(r"instagram\.com/(?:reel|p|tv)/([^/?#]+)", str(url or ""))
+    return match.group(1) if match else None
+
+
+def fetch_meta_media(limit: int = 25) -> list[dict[str, Any]]:
+    """Live Instagram media pull for the cross-check. Fails open to an empty list.
+
+    The weekly report must never break on a Meta hiccup, so a missing token or
+    any API error yields no cross-check rather than an exception.
+    """
+    token = os.getenv("META_PAGE_ACCESS_TOKEN")
+    if not token:
+        return []
+    try:
+        from meta_insights import MetaInsights
+
+        return MetaInsights(token).ig_recent_media(limit=limit)
+    except Exception:
+        return []
+
+
+def _meta_cross_check(posts: list[dict[str, Any]], meta_media: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """Match the week's Instagram posts to Meta's own insights by shortcode.
+
+    Meta and Zernio coexist and validate each other. Meta is authoritative for
+    Instagram reach, so a large delta flags a stale Zernio number rather than a
+    real disagreement. Read only, mutates neither source.
+    """
+    if not meta_media:
+        reason = "meta insights not fetched" if meta_media is None else "no meta media returned"
+        return {"status": "unavailable", "reason": reason, "matched": []}
+    by_code: dict[str, dict[str, Any]] = {}
+    for media in meta_media:
+        code = _ig_shortcode(media.get("permalink"))
+        if code:
+            by_code[code] = media
+    matched: list[dict[str, Any]] = []
+    unmatched = 0
+    for post in posts:
+        code = _ig_shortcode(post.get("platform_post_url"))
+        media = by_code.get(code) if code else None
+        if not media:
+            unmatched += 1
+            continue
+        zm = post.get("metrics") or {}
+        mi = media.get("insights") or {}
+        zr = int(_metric(zm, "reach"))
+        mr = int(mi.get("reach") or 0)
+        matched.append(
+            {
+                "label": _post_label(post),
+                "permalink": post.get("platform_post_url"),
+                "shortcode": code,
+                "zernio": {
+                    "reach": zr,
+                    "likes": int(_metric(zm, "likes")),
+                    "comments": int(_metric(zm, "comments")),
+                    "saves": int(_metric(zm, "saves")),
+                    "shares": int(_metric(zm, "shares")),
+                },
+                "meta": {
+                    "reach": mr,
+                    "likes": int(mi.get("likes") or 0),
+                    "comments": int(mi.get("comments") or 0),
+                    "saved": int(mi.get("saved") or 0),
+                    "shares": int(mi.get("shares") or 0),
+                },
+                "reach_delta": zr - mr,
+                "reach_agrees": abs(zr - mr) <= max(5, round(0.10 * mr)),
+            }
+        )
+    agree = sum(1 for row in matched if row["reach_agrees"])
+    return {
+        "status": "ok",
+        "matched": matched,
+        "matched_count": len(matched),
+        "unmatched_posts": unmatched,
+        "agree_count": agree,
+        "disagree_count": len(matched) - agree,
+    }
+
+
+def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     week_start = week_end - timedelta(days=days - 1)
     history = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
     snapshots = [
@@ -596,6 +680,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "campaign_performance": _campaign_performance(posts),
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
+    report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
     report["recommendations"] = _recommendations(report)
     return report
 
@@ -693,6 +778,43 @@ def render_markdown(report: dict[str, Any]) -> str:
     else:
         lines.append("- No campaign variant had published posts with mature analytics in this period.")
 
+    cross = report.get("meta_cross_check") or {}
+    lines.extend(["", "## Meta cross-check (Instagram)", ""])
+    if cross.get("status") == "ok":
+        lines.append(
+            f"Compared {cross['matched_count']} Instagram posts against Meta's own insights. "
+            f"{cross['agree_count']} agree on reach within tolerance, {cross['disagree_count']} differ, "
+            f"{cross['unmatched_posts']} had no Meta match. Meta is authoritative for reach."
+        )
+        matched = cross.get("matched") or []
+        if matched:
+            lines.extend(
+                [
+                    "",
+                    "| Target | Zernio reach | Meta reach | Delta | Likes Z/M |",
+                    "| --- | ---: | ---: | ---: | ---: |",
+                ]
+            )
+            for row in matched:
+                flag = "" if row["reach_agrees"] else " !"
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            row["label"],
+                            _format_number(row["zernio"]["reach"]),
+                            _format_number(row["meta"]["reach"]),
+                            f"{row['reach_delta']:+d}{flag}",
+                            f"{row['zernio']['likes']}/{row['meta']['likes']}",
+                        ]
+                    )
+                    + " |"
+                )
+    else:
+        lines.append(
+            f"Unavailable this run ({cross.get('reason', 'no data')}). The Zernio numbers above stand alone."
+        )
+
     lines.extend(["", "## Recommendations", ""])
     lines.extend(f"- {item}" for item in report["recommendations"])
     return "\n".join(lines) + "\n"
@@ -731,6 +853,12 @@ def render_slack(report: dict[str, Any]) -> str:
             f"*Top Reel:* {top_label} | {_format_number(_metric(top_metrics, 'reach'))} reach | "
             f"{_metric(top_metrics, 'engagementRate'):.2f}% engagement | "
             f"{_metric(top_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s average watch"
+        )
+    cross = report.get("meta_cross_check") or {}
+    if cross.get("status") == "ok":
+        lines.append(
+            f"*Meta cross-check:* {cross['matched_count']} IG posts | "
+            f"{cross['agree_count']} agree on reach | {cross['disagree_count']} differ vs Zernio"
         )
     lines.extend(["", "*Decisions:*"])
     lines.extend(f"- {item}" for item in report["recommendations"])
@@ -818,7 +946,9 @@ def main() -> int:
     )
     data_dir = default_data_root()
     snapshots = load_daily_snapshots(data_dir / "social_growth", week_end=week_end, days=args.days)
-    report = build_weekly_review(snapshots, week_end=week_end, days=args.days)
+    report = build_weekly_review(
+        snapshots, week_end=week_end, days=args.days, meta_media=fetch_meta_media()
+    )
     if args.dry_run:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
