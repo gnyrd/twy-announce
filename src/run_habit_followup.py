@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "paths"))
 from twy_paths import load_env
+from twy_platform.planning import PlanningClient, PlanningClientError
 
 load_env()
 
@@ -33,7 +34,6 @@ log = logging.getLogger(__name__)
 
 MARVY_DB             = "/root/twy/data/marvy.db"
 MOUNTAIN             = ZoneInfo("America/Denver")
-CLASSES_API          = "http://localhost:5003"
 MEMBERSHIP_PRODUCT   = 52025
 LIFESTYLE_TAG_ID     = 3018884   # "Membership - Yoga Lifestyle" — stable, does not change monthly
 SLACK_REVIEW_CHANNEL = os.getenv("SLACK_REVIEW_CHANNEL", "#review-newsletters")
@@ -75,17 +75,11 @@ def is_habit_class_today(today: date) -> bool:
     so the caller fails loud instead of treating an API outage as "no class
     today" (audit F09).
     """
-    url = f"{CLASSES_API}/api/plans/{today.isoformat()}"
     try:
-        resp = requests.get(url, timeout=10)
-        if resp.ok:
-            plan = resp.json()
-            return plan.get("class_type") == "Habit"
-    except requests.RequestException as e:
-        raise ClassesApiUnavailable(f"classes API unreachable at {url}: {e}") from e
-    if resp.status_code == 404:
-        return False  # confirmed: no plan for today
-    raise ClassesApiUnavailable(f"classes API returned HTTP {resp.status_code} for {url}")
+        plan = PlanningClient.from_env().get_plan(today.isoformat(), timeout=10)
+    except PlanningClientError as exc:
+        raise ClassesApiUnavailable(f"classes API unavailable: {exc}") from exc
+    return bool(plan and plan.get("class_type") == "Habit")
 
 
 def find_existing_campaign(title: str) -> dict | None:

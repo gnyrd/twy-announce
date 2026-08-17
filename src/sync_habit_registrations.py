@@ -15,7 +15,7 @@ import sys
 import calendar
 import hashlib
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "paths"))
 from twy_paths import load_env
+from twy_platform.planning import PlanningClient, PlanningClientError
 
 load_env()
 
@@ -35,7 +36,6 @@ from marvy.client import Client
 LIST_ID = os.environ["MAILCHIMP_AUDIENCE_ID"]
 MC_API_KEY = os.environ["MAILCHIMP_API_KEY"]
 MC_SERVER = os.environ["MAILCHIMP_SERVER_PREFIX"]
-CLASSES_API = "http://localhost:5003"
 REGISTRATION_WINDOW_DAYS = 35  # how far ahead to look for Habit classes
 TAG_TEMPLATE = "Habit Registered - {year:04d}-{month:02d}"
 
@@ -73,15 +73,13 @@ def upcoming_habit_events(today):
             y += 1
         last = calendar.monthrange(y, m)[1]
         try:
-            r = requests.get(
-                f"{CLASSES_API}/api/plans",
-                params={"from": f"{y:04d}-{m:02d}-01", "to": f"{y:04d}-{m:02d}-{last:02d}"},
+            client = PlanningClient.from_env()
+            plans = client.list_plans(
+                from_date=f"{y:04d}-{m:02d}-01",
+                to_date=f"{y:04d}-{m:02d}-{last:02d}",
                 timeout=10,
             )
-            if not r.ok:
-                api_failures.append(f"{y:04d}-{m:02d}: HTTP {r.status_code}")
-                continue
-            for plan in r.json():
+            for plan in plans:
                 if plan.get("class_type") != "Habit":
                     continue
                 event_id = plan.get("marvelous_event_id")
@@ -94,7 +92,7 @@ def upcoming_habit_events(today):
                 days_out = (plan_date - today).days
                 if 0 <= days_out <= REGISTRATION_WINDOW_DAYS:
                     out.append((plan_date, event_id))
-        except requests.RequestException as e:
+        except PlanningClientError as e:
             log.warning("classes API unreachable for %s-%02d: %s", y, m, e)
             api_failures.append(f"{y:04d}-{m:02d}: {e}")
     return out, api_failures
