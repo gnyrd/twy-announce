@@ -1,6 +1,7 @@
 from collections import deque
 
 import pytest
+import requests
 
 from sendgrid_api import (
     SendGridAPI,
@@ -29,7 +30,10 @@ class FakeSession:
 
     def request(self, method, url, **kwargs):
         self.calls.append({"method": method, "url": url, **kwargs})
-        return self.responses.popleft()
+        queued = self.responses.popleft()
+        if isinstance(queued, Exception):
+            raise queued
+        return queued
 
 
 def make_api(*responses):
@@ -699,3 +703,54 @@ def test_send_mail_posts_direct_content_to_mail_send_endpoint():
     assert fake.calls[-1]["method"] == "POST"
     assert fake.calls[-1]["url"].endswith("/v3/mail/send")
     assert fake.calls[-1]["json"] == payload
+
+
+def test_a_read_that_times_out_once_is_retried_and_succeeds():
+    """The 2026-08-17 07:00 alert: api.sendgrid.com did not answer in 30s.
+
+    The retry loop already covered 429 and 5xx, but a Timeout is raised by
+    the session rather than returned, so it escaped the loop and failed the
+    whole scheduler run over a blip that was gone 15 minutes later.
+    """
+    api, fake = make_api(
+        requests.exceptions.ReadTimeout("read timed out"),
+        FakeResponse(200, {"email": "admin@example.invalid"}),
+    )
+    assert api.user_email() == "admin@example.invalid"
+    assert len(fake.calls) == 2
+
+
+def test_a_read_that_never_answers_still_fails_the_job():
+    """A real outage must not be swallowed into a silent success."""
+    api, fake = make_api(*[requests.exceptions.ReadTimeout("read timed out")] * 4)
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        api.user_email()
+    assert len(fake.calls) == 4
+
+
+def test_a_write_that_times_out_is_never_repeated():
+    """A lost reply to a POST does not mean the write was lost.
+
+    Repeating it can trigger a Single Send twice, so the timeout is raised
+    on the first attempt and a human decides.
+    """
+    api, fake = make_api(
+        requests.exceptions.ReadTimeout("read timed out"),
+        FakeResponse(201, {"id": "list-1"}),
+    )
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        api.create_list("Proof")
+    assert len(fake.calls) == 1
+
+
+def test_a_connection_error_on_a_read_is_retried_with_backoff():
+    slept = []
+    session = FakeSession(
+        [
+            requests.exceptions.ConnectionError("connection reset"),
+            FakeResponse(200, {"email": "admin@example.invalid"}),
+        ]
+    )
+    api = SendGridAPI("SG.secret-proof-key", session=session, sleep_fn=slept.append)
+    assert api.user_email() == "admin@example.invalid"
+    assert slept == [1.0]

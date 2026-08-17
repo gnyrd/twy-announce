@@ -13,6 +13,12 @@ import requests
 
 BASE_URL = "https://api.sendgrid.com/v3"
 
+# A transport failure is not an answer: the request may have landed and only
+# the reply was lost. Repeating a read costs nothing, so these are retried.
+# Every other verb is left to fail loudly, because repeating a write can
+# trigger a Single Send twice or apply a contact change twice.
+RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
 
 class SendGridAPIError(RuntimeError):
     pass
@@ -62,14 +68,29 @@ class SendGridAPI:
 
         response = None
         for attempt in range(attempts):
-            response = self._session.request(
-                method,
-                url,
-                headers=headers,
-                json=json,
-                params=params,
-                timeout=30,
-            )
+            try:
+                response = self._session.request(
+                    method,
+                    url,
+                    headers=headers,
+                    json=json,
+                    params=params,
+                    timeout=30,
+                )
+            except (
+                requests.exceptions.Timeout,
+                requests.exceptions.ConnectionError,
+            ):
+                # SendGrid never answered. Retry a read under the same budget
+                # and backoff as a 429; re-raise anything else immediately so
+                # a lost write stays a human decision, and re-raise on the
+                # last attempt so a real outage still fails the job.
+                if method.upper() not in RETRYABLE_METHODS:
+                    raise
+                if attempt == attempts - 1:
+                    raise
+                self._sleep(float(2 ** attempt))
+                continue
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt == attempts - 1:
                     break
