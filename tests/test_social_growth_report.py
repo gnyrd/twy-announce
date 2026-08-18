@@ -84,6 +84,22 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
             "subscriber_count": 921,
         },
     )
+    write_json(
+        twy_root / "announce/data/facebook/history/2026-07-26.json",
+        {"date": "2026-07-26", "follower_count": 2320},
+    )
+    write_json(
+        twy_root / "announce/data/facebook/history/2026-07-27.json",
+        {"date": "2026-07-27", "follower_count": 2319},
+    )
+    write_json(
+        twy_root / "announce/data/youtube/history/2026-07-26.json",
+        {"date": "2026-07-26", "subscriber_count": 1078},
+    )
+    write_json(
+        twy_root / "announce/data/youtube/history/2026-07-27.json",
+        {"date": "2026-07-27", "subscriber_count": 1080},
+    )
     create_marvy_db(data_root / "marvy.db")
     write_json(twy_root / "clips/state/ig_queue.json", [{"clip": 1}, {"clip": 2}])
     write_json(twy_root / "clips/state/ig_quote_queue.json", [{"quote": 1}])
@@ -116,6 +132,20 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "count": 921,
         "list_name": "Email: Subscribed",
         "snapshot_date": "2026-07-27",
+    }
+    assert snapshot["facebook"]["followers"] == {
+        "count": 2319,
+        "snapshot_date": "2026-07-27",
+        "previous_count": 2320,
+        "previous_snapshot_date": "2026-07-26",
+        "delta_since_previous": -1,
+    }
+    assert snapshot["youtube"]["subscribers"] == {
+        "count": 1080,
+        "snapshot_date": "2026-07-27",
+        "previous_count": 1078,
+        "previous_snapshot_date": "2026-07-26",
+        "delta_since_previous": 2,
     }
     assert snapshot["habit"]["next_event"] == {
         "id": 1012621,
@@ -150,6 +180,10 @@ def test_collect_snapshot_combines_available_growth_sources(tmp_path, monkeypatc
         "ig_quote_queue": 1,
         "instagram_follower_delta": -2,
         "instagram_followers": 2303,
+        "facebook_followers": 2319,
+        "facebook_follower_delta": -1,
+        "youtube_subscribers": 1080,
+        "youtube_subscriber_delta": 2,
         "landing_day_pageviews": None,
         "landing_day_visitors": None,
         "landing_page_status": "not_configured",

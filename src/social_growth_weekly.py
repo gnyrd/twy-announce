@@ -663,7 +663,9 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "last_snapshot_date": snapshots[-1].get("date") if snapshots else None,
         "metrics": {
             "instagram_followers": _delta(snapshots, "instagram_followers"),
+            "facebook_followers": _delta(snapshots, "facebook_followers"),
             "email_subscribers": _delta(snapshots, "email_subscribers"),
+            "youtube_subscribers": _delta(snapshots, "youtube_subscribers"),
             "next_habit_registrations": _delta(snapshots, "next_habit_registrations"),
             "landing_page": {
                 "visitors": _sum(snapshots, "landing_day_visitors"),

@@ -137,6 +137,38 @@ def latest_email_subscribers(twy_root: Path) -> dict[str, Any] | None:
     }
 
 
+def _latest_count_with_delta(history_dir: Path, field: str) -> dict[str, Any] | None:
+    snapshots: list[dict[str, Any]] = []
+    for path in sorted(history_dir.glob("*.json"), reverse=True):
+        try:
+            data = read_json(path)
+        except Exception:
+            continue
+        count = data.get(field)
+        if count is None:
+            continue
+        snapshots.append({"count": int(count), "snapshot_date": path.stem})
+        if len(snapshots) == 2:
+            break
+    if not snapshots:
+        return None
+    latest = snapshots[0]
+    if len(snapshots) > 1:
+        previous = snapshots[1]
+        latest["previous_count"] = previous["count"]
+        latest["previous_snapshot_date"] = previous["snapshot_date"]
+        latest["delta_since_previous"] = latest["count"] - previous["count"]
+    return latest
+
+
+def latest_facebook_followers(twy_root: Path) -> dict[str, Any] | None:
+    return _latest_count_with_delta(twy_root / "announce/data/facebook/history", "follower_count")
+
+
+def latest_youtube_subscribers(twy_root: Path) -> dict[str, Any] | None:
+    return _latest_count_with_delta(twy_root / "announce/data/youtube/history", "subscriber_count")
+
+
 def next_habit_event(data_root: Path, captured_at: datetime) -> dict[str, Any] | None:
     db_path = data_root / "marvy.db"
     if not db_path.exists():
@@ -955,7 +987,9 @@ def campaign_snapshot(
 
 def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     followers = (snapshot.get("instagram") or {}).get("followers") or {}
+    fb_followers = (snapshot.get("facebook") or {}).get("followers") or {}
     subscribers = (snapshot.get("email") or {}).get("subscribers") or {}
+    yt_subscribers = (snapshot.get("youtube") or {}).get("subscribers") or {}
     habit_event = (snapshot.get("habit") or {}).get("next_event") or {}
     queues = snapshot.get("queues") or {}
     zernio = snapshot.get("zernio") or {}
@@ -967,7 +1001,11 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
         "instagram_followers": followers.get("count"),
         "instagram_follower_delta": followers.get("delta_since_previous"),
+        "facebook_followers": fb_followers.get("count"),
+        "facebook_follower_delta": fb_followers.get("delta_since_previous"),
         "email_subscribers": subscribers.get("count"),
+        "youtube_subscribers": yt_subscribers.get("count"),
+        "youtube_subscriber_delta": yt_subscribers.get("delta_since_previous"),
         "next_habit_registrations": habit_event.get("registrations"),
         "ig_clip_queue": queues.get("ig_clip_queue"),
         "ig_quote_queue": queues.get("ig_quote_queue"),
@@ -1018,8 +1056,14 @@ def collect_snapshot(
             "followers": latest_instagram_followers(twy_root),
             "zernio_account": account_health,
         },
+        "facebook": {
+            "followers": latest_facebook_followers(twy_root),
+        },
         "email": {
             "subscribers": latest_email_subscribers(twy_root),
+        },
+        "youtube": {
+            "subscribers": latest_youtube_subscribers(twy_root),
         },
         "habit": {
             "next_event": next_habit_event(data_root, captured_at),
