@@ -156,7 +156,7 @@ def _description_for(plan, instructors, register_url=None):
     if register_url:
         # Surfaced visibly in description; also emitted as VEVENT.URL so
         # clients that surface URL natively (Apple, Outlook) have a tap target.
-        # Verb "Join" matches existing TWY pattern in send_class_email_reminders.py
+        # Verb "Join" matches existing TWY join-link pattern
         # ("Link to Join:" against the same twy_platform.build_register_url).
         parts.append(f"Join: {register_url}")
     return "\n\n".join(parts)
