@@ -12,12 +12,14 @@ import sys
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_mailings import EMAIL_SUBSCRIBED
+from twy_platform.sendgrid import subscribed_count
 from twy_paths import email_history_dir, load_env, sendgrid_registry_path
 
 
-def collect_snapshot(*, api, registry, captured_at: str) -> dict:
-    list_id = registry.list_id(EMAIL_SUBSCRIBED)
-    subscriber_count = api.list_contact_count(list_id)
+def collect_snapshot(*, api_key: str, list_id: str, captured_at: str) -> dict:
+    subscriber_count = subscribed_count(api_key, list_id=list_id)
+    if subscriber_count is None:
+        raise RuntimeError("could not read the Email: Subscribed contact count")
     return {
         "captured_at": captured_at,
         "list_name": EMAIL_SUBSCRIBED,
@@ -48,10 +50,11 @@ def main() -> int:
     registry = SendGridRegistry.load(
         sendgrid_registry_path()
     )
+    list_id = registry.list_id(EMAIL_SUBSCRIBED)
     now = datetime.now(timezone.utc)
     snapshot = collect_snapshot(
-        api=api,
-        registry=registry,
+        api_key=api_key,
+        list_id=list_id,
         captured_at=now.isoformat().replace("+00:00", "Z"),
     )
     destination = save_snapshot(

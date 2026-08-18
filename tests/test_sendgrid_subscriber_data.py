@@ -3,24 +3,17 @@ import json
 import sendgrid_subscriber_data as subscriber_data
 
 
-class FakeAPI:
-    def list_contact_count(self, list_id):
-        assert list_id == "subscribed1"
-        return 921
-
-
-class FakeRegistry:
-    def list_id(self, name):
-        assert name == "Email: Subscribed"
-        return "subscribed1"
-
-
 def test_snapshot_uses_locked_subscriber_list_and_provider_neutral_shape(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
+    monkeypatch.setattr(
+        subscriber_data,
+        "subscribed_count",
+        lambda api_key, *, list_id: 921 if list_id == "subscribed1" else None,
+    )
     snapshot = subscriber_data.collect_snapshot(
-        api=FakeAPI(),
-        registry=FakeRegistry(),
+        api_key="key",
+        list_id="subscribed1",
         captured_at="2026-07-25T12:00:00Z",
     )
     path = subscriber_data.save_snapshot(
