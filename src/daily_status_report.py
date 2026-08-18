@@ -266,44 +266,45 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-ZERNIO_BASE_URL = os.getenv("ZERNIO_BASE_URL", "https://zernio.com/api/v1").rstrip("/")
-
 META_GRAPH = "https://graph.facebook.com/v21.0"
 META_PAGE_ID = "136254809853695"  # Tiffany Wood Yoga Page
 
 
 def fetch_instagram_follower_count() -> Optional[int]:
-    """Fetch current Instagram follower count from Zernio.
+    """Fetch the current Instagram follower count from the Meta Graph API.
 
-    Zernio holds an official Instagram Graph API connection (OAuth,
-    Business account), so this can run from Hetzner directly -- unlike
-    the old instaloader-based fetch, which Instagram blocks from
-    datacenter IPs and had to run on the Mac mini + scp over Tailscale.
+    Reads instagram_business_account.followers_count on the Page node via the
+    durable META_PAGE_ACCESS_TOKEN, the same source and field the stats
+    dashboard uses, so both surfaces report one Instagram number. Replaces the
+    former Zernio read, which could disagree with Meta; Zernio stays only for
+    posting and Facebook reach.
     """
-    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
-    if not api_key:
-        print("Warning: ZERNIO_API_KEY not set, skipping Instagram snapshot")
+    token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
+    if not token:
+        print("Warning: META_PAGE_ACCESS_TOKEN not set, skipping Instagram snapshot")
         return None
     try:
         resp = requests.get(
-            f"{ZERNIO_BASE_URL}/accounts",
-            params={"platform": "instagram"},
-            headers={"Authorization": f"Bearer {api_key}"},
+            f"{META_GRAPH}/{META_PAGE_ID}",
+            params={
+                "fields": "instagram_business_account{followers_count}",
+                "access_token": token,
+            },
             timeout=30,
         )
         resp.raise_for_status()
-        accounts = resp.json().get("accounts", [])
-        if not accounts:
-            print("Warning: Zernio returned no Instagram accounts")
+        ig = (resp.json().get("instagram_business_account") or {}).get("followers_count")
+        if not isinstance(ig, int):
+            print("Warning: Meta returned no Instagram followers_count")
             return None
-        return accounts[0]["metadata"]["profileData"]["followersCount"]
+        return ig
     except Exception as e:
-        print(f"Warning: Could not fetch Instagram follower count from Zernio: {e}")
+        print(f"Warning: Could not fetch Instagram follower count from Meta: {e}")
         return None
 
 
 def ensure_instagram_snapshot(date: str) -> None:
-    """Write today's Instagram snapshot from Zernio if it doesn't already exist."""
+    """Write today's Instagram snapshot from Meta if it doesn't already exist."""
     filepath = INSTAGRAM_HISTORY_DIR / f"{date}.json"
     if filepath.exists():
         return
@@ -317,7 +318,7 @@ def ensure_instagram_snapshot(date: str) -> None:
             "timestamp": datetime.now().isoformat(),
             "follower_count": follower_count,
         }, f, indent=2)
-    print(f"✓ Wrote Instagram snapshot for {date}: {follower_count} followers (via Zernio)")
+    print(f"✓ Wrote Instagram snapshot for {date}: {follower_count} followers (via Meta)")
 
 
 def fetch_facebook_follower_count() -> Optional[int]:
