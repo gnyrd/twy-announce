@@ -21,9 +21,7 @@ import sys
 
 import requests
 
-GRAPH = "https://graph.facebook.com/v21.0"
-PAGE_ID = "136254809853695"        # Tiffany Wood Yoga Facebook Page
-IG_USER_ID = "17841402021315900"   # instagram @tiffanywoodyoga
+from twy_platform.meta import GRAPH, PAGE_ID, IG_USER_ID
 
 MEDIA_METRICS = "reach,likes,comments,saved,shares,total_interactions"
 FB_POST_METRICS = "post_clicks,post_reactions_by_type_total"

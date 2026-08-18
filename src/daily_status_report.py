@@ -24,6 +24,7 @@ from twy_paths import (
 )
 from marvelous_memberships import latest_fresh_snapshot
 from twy_platform.membership import cycle_of, is_member_row, report_date
+from twy_platform import meta
 
 # Load environment variables
 load_env()
@@ -266,41 +267,12 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-META_GRAPH = "https://graph.facebook.com/v21.0"
-META_PAGE_ID = "136254809853695"  # Tiffany Wood Yoga Page
-
-
 def fetch_instagram_follower_count() -> Optional[int]:
-    """Fetch the current Instagram follower count from the Meta Graph API.
-
-    Reads instagram_business_account.followers_count on the Page node via the
-    durable META_PAGE_ACCESS_TOKEN, the same source and field the stats
-    dashboard uses, so both surfaces report one Instagram number. Replaces the
-    former Zernio read, which could disagree with Meta; Zernio stays only for
-    posting and Facebook reach.
-    """
-    token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
-    if not token:
-        print("Warning: META_PAGE_ACCESS_TOKEN not set, skipping Instagram snapshot")
-        return None
-    try:
-        resp = requests.get(
-            f"{META_GRAPH}/{META_PAGE_ID}",
-            params={
-                "fields": "instagram_business_account{followers_count}",
-                "access_token": token,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        ig = (resp.json().get("instagram_business_account") or {}).get("followers_count")
-        if not isinstance(ig, int):
-            print("Warning: Meta returned no Instagram followers_count")
-            return None
-        return ig
-    except Exception as e:
-        print(f"Warning: Could not fetch Instagram follower count from Meta: {e}")
-        return None
+    """Instagram follower count from Meta (shared twy_platform.meta reader)."""
+    count = meta.page_followers(meta.page_access_token())["instagram"]
+    if count is None:
+        print("Warning: could not read Instagram follower count from Meta")
+    return count
 
 
 def ensure_instagram_snapshot(date: str) -> None:
@@ -322,33 +294,11 @@ def ensure_instagram_snapshot(date: str) -> None:
 
 
 def fetch_facebook_follower_count() -> Optional[int]:
-    """Fetch the current Facebook Page follower count from the Meta Graph API.
-
-    Uses the durable non-expiring Page token (META_PAGE_ACCESS_TOKEN) and the
-    `followers_count` field, the same source and field the stats dashboard
-    reads, so both surfaces report one number. Not Zernio: Facebook Page
-    metrics are gone from the Graph API there. Instagram above still comes from
-    Zernio only because that path predates the Meta token.
-    """
-    token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
-    if not token:
-        print("Warning: META_PAGE_ACCESS_TOKEN not set, skipping Facebook snapshot")
-        return None
-    try:
-        resp = requests.get(
-            f"{META_GRAPH}/{META_PAGE_ID}",
-            params={"fields": "followers_count", "access_token": token},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        count = resp.json().get("followers_count")
-        if not isinstance(count, int):
-            print("Warning: Meta returned no Facebook followers_count")
-            return None
-        return count
-    except Exception as e:
-        print(f"Warning: Could not fetch Facebook follower count from Meta: {e}")
-        return None
+    """Facebook Page follower count from Meta (shared twy_platform.meta reader)."""
+    count = meta.page_followers(meta.page_access_token())["facebook"]
+    if count is None:
+        print("Warning: could not read Facebook follower count from Meta")
+    return count
 
 
 def ensure_facebook_snapshot(date: str) -> None:
