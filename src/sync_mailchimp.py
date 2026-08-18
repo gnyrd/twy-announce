@@ -37,8 +37,6 @@ import requests
 # Setup paths relative to script location
 SCRIPT_DIR = Path(__file__).parent.absolute()
 ANNOUNCE_DIR = SCRIPT_DIR.parent
-DATA_DIR = ANNOUNCE_DIR / "data"
-REPORTS_DIR = DATA_DIR / "reports"
 
 try:
     from marvelous_report_jwt import fetch_report_rows, ReportJWTError
@@ -582,7 +580,7 @@ def normalize_canceled_contacts(
 
 
 def main() -> None:
-    from twy_paths import load_env
+    from twy_paths import hm_subscriptions_dir, load_env
     load_env()
     logger.info("Loaded environment via twy_paths.load_env")
 
@@ -626,7 +624,7 @@ def main() -> None:
 
         # Cache active report snapshot for auditing/reuse
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        report_csv_path = REPORTS_DIR / f"active_subscriptions_{timestamp}.csv"
+        report_csv_path = hm_subscriptions_dir() / f"active_subscriptions_{timestamp}.csv"
         save_report_rows_csv(report_rows, report_csv_path)
 
     if not report_rows:
@@ -649,7 +647,7 @@ def main() -> None:
 
         # Cache canceled report snapshot for auditing/reuse
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        canceled_csv_path = REPORTS_DIR / f"canceled_subscriptions_{timestamp}.csv"
+        canceled_csv_path = hm_subscriptions_dir() / f"canceled_subscriptions_{timestamp}.csv"
         save_report_rows_csv(canceled_report_rows, canceled_csv_path)
 
     syncer = MailChimpSyncer(mailchimp_key, audience_id, dry_run=dry_run)

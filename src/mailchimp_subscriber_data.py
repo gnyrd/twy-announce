@@ -5,17 +5,15 @@ import json
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
-from twy_paths import load_env
+from twy_paths import load_env, mailchimp_history_dir
 from mailchimp3 import MailChimp
 
 # Load environment variables
 load_env()
 
 # Configuration
-PROJECT_ROOT = Path(__file__).parent.parent
-MAILCHIMP_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
+MAILCHIMP_HISTORY_DIR = mailchimp_history_dir()
 
 
 def get_mailchimp_subscriber_count() -> int:

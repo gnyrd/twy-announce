@@ -24,8 +24,6 @@ from marvelous_memberships import (
 )
 
 
-PROJECT_ROOT = Path(__file__).parent.parent
-REPORTS_DIR = PROJECT_ROOT / "data" / "reports"
 DEFAULT_CHANNEL = "C0BH3142LNP"
 
 
@@ -491,7 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    from twy_paths import data_root, load_env, marvy_db_path
+    from twy_paths import data_root, hm_subscriptions_dir, load_env, marvy_db_path
 
     load_env()
     now = datetime.now(timezone.utc)
@@ -499,14 +497,14 @@ def main(argv=None) -> int:
     canceled_rows = load_canceled_rows_from_env()
     active_path = write_report_snapshot(
         active_rows,
-        reports_dir=REPORTS_DIR,
+        reports_dir=hm_subscriptions_dir(),
         prefix="active_subscriptions",
         fields=ACTIVE_FIELDS,
         now=now,
     )
     canceled_path = write_report_snapshot(
         canceled_rows,
-        reports_dir=REPORTS_DIR,
+        reports_dir=hm_subscriptions_dir(),
         prefix="canceled_subscriptions",
         fields=CANCELED_FIELDS,
         now=now,

@@ -7,12 +7,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from twy_paths import load_env
+from twy_paths import load_env, youtube_history_dir
 import requests
-
-# Determine repo root from script location
-SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
 
 # Load environment variables
 load_env()
@@ -22,7 +18,7 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 YOUTUBE_HISTORY_DIR = Path(os.getenv(
     "YOUTUBE_HISTORY_DIR",
-    REPO_ROOT / "data/youtube/history"
+    youtube_history_dir()
 ))
 
 

@@ -12,7 +12,16 @@ from typing import List, Dict, Any, Optional
 
 import sqlite3
 import requests
-from twy_paths import load_env, marvy_db_path
+from twy_paths import (
+    email_history_dir,
+    facebook_history_dir,
+    hm_subscriptions_dir,
+    instagram_history_dir,
+    load_env,
+    mailchimp_history_dir,
+    marvy_db_path,
+    youtube_history_dir,
+)
 from marvelous_memberships import latest_fresh_snapshot
 from twy_platform.membership import cycle_of, is_member_row, report_date
 
@@ -20,13 +29,12 @@ from twy_platform.membership import cycle_of, is_member_row, report_date
 load_env()
 
 # Configuration
-PROJECT_ROOT = Path(__file__).parent.parent
-EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/email/history"
-LEGACY_EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
-INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
-FACEBOOK_HISTORY_DIR = PROJECT_ROOT / "data/facebook/history"
-YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
-REPORTS_DIR = PROJECT_ROOT / "data/reports"
+EMAIL_HISTORY_DIR = email_history_dir()
+LEGACY_EMAIL_HISTORY_DIR = mailchimp_history_dir()
+INSTAGRAM_HISTORY_DIR = instagram_history_dir()
+FACEBOOK_HISTORY_DIR = facebook_history_dir()
+YOUTUBE_HISTORY_DIR = youtube_history_dir()
+REPORTS_DIR = hm_subscriptions_dir()
 MARVY_DB = marvy_db_path()
 
 

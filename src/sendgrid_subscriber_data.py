@@ -12,7 +12,7 @@ import sys
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
 from sendgrid_mailings import EMAIL_SUBSCRIBED
-from twy_paths import load_env, sendgrid_registry_path, twy_root
+from twy_paths import email_history_dir, load_env, sendgrid_registry_path
 
 
 def collect_snapshot(*, api, registry, captured_at: str) -> dict:
@@ -57,7 +57,7 @@ def main() -> int:
     destination = save_snapshot(
         snapshot,
         date_string=now.date().isoformat(),
-        history_dir=twy_root() / "announce" / "data" / "email" / "history",
+        history_dir=email_history_dir(),
     )
     print(
         f"Saved {snapshot['subscriber_count']} email subscribers to "
