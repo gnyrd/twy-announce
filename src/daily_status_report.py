@@ -24,6 +24,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/email/history"
 LEGACY_EMAIL_HISTORY_DIR = PROJECT_ROOT / "data/mailchimp/history"
 INSTAGRAM_HISTORY_DIR = PROJECT_ROOT / "data/instagram/history"
+FACEBOOK_HISTORY_DIR = PROJECT_ROOT / "data/facebook/history"
 YOUTUBE_HISTORY_DIR = PROJECT_ROOT / "data/youtube/history"
 REPORTS_DIR = PROJECT_ROOT / "data/reports"
 MARVY_DB = marvy_db_path()
@@ -231,6 +232,19 @@ def load_instagram_snapshot(date: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def load_facebook_snapshot(date: str) -> Optional[Dict[str, Any]]:
+    """Load Facebook snapshot for a specific date."""
+    filepath = FACEBOOK_HISTORY_DIR / f"{date}.json"
+    if not filepath.exists():
+        return None
+    try:
+        with open(filepath) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load Facebook snapshot for {date}: {e}")
+        return None
+
+
 def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
     """Load YouTube snapshot for a specific date."""
     filepath = YOUTUBE_HISTORY_DIR / f"{date}.json"
@@ -245,6 +259,9 @@ def load_youtube_snapshot(date: str) -> Optional[Dict[str, Any]]:
 
 
 ZERNIO_BASE_URL = os.getenv("ZERNIO_BASE_URL", "https://zernio.com/api/v1").rstrip("/")
+
+META_GRAPH = "https://graph.facebook.com/v21.0"
+META_PAGE_ID = "136254809853695"  # Tiffany Wood Yoga Page
 
 
 def fetch_instagram_follower_count() -> Optional[int]:
@@ -295,9 +312,58 @@ def ensure_instagram_snapshot(date: str) -> None:
     print(f"✓ Wrote Instagram snapshot for {date}: {follower_count} followers (via Zernio)")
 
 
+def fetch_facebook_follower_count() -> Optional[int]:
+    """Fetch the current Facebook Page follower count from the Meta Graph API.
+
+    Uses the durable non-expiring Page token (META_PAGE_ACCESS_TOKEN) and the
+    `followers_count` field, the same source and field the stats dashboard
+    reads, so both surfaces report one number. Not Zernio: Facebook Page
+    metrics are gone from the Graph API there. Instagram above still comes from
+    Zernio only because that path predates the Meta token.
+    """
+    token = os.getenv("META_PAGE_ACCESS_TOKEN", "").strip()
+    if not token:
+        print("Warning: META_PAGE_ACCESS_TOKEN not set, skipping Facebook snapshot")
+        return None
+    try:
+        resp = requests.get(
+            f"{META_GRAPH}/{META_PAGE_ID}",
+            params={"fields": "followers_count", "access_token": token},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        count = resp.json().get("followers_count")
+        if not isinstance(count, int):
+            print("Warning: Meta returned no Facebook followers_count")
+            return None
+        return count
+    except Exception as e:
+        print(f"Warning: Could not fetch Facebook follower count from Meta: {e}")
+        return None
+
+
+def ensure_facebook_snapshot(date: str) -> None:
+    """Write today Facebook snapshot from Meta if it does not already exist."""
+    filepath = FACEBOOK_HISTORY_DIR / f"{date}.json"
+    if filepath.exists():
+        return
+    follower_count = fetch_facebook_follower_count()
+    if follower_count is None:
+        return
+    FACEBOOK_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w") as f:
+        json.dump({
+            "date": date,
+            "timestamp": datetime.now().isoformat(),
+            "follower_count": follower_count,
+        }, f, indent=2)
+    print(f"✓ Wrote Facebook snapshot for {date}: {follower_count} followers (via Meta)")
+
+
 def extract_subscriber_counts(
     email_snapshot: Optional[Dict[str, Any]],
     instagram: Optional[Dict[str, Any]],
+    facebook: Optional[Dict[str, Any]],
     youtube: Optional[Dict[str, Any]]
 ) -> Dict[str, int]:
     """Extract email/social subscriber counts into a flat dict for comparison."""
@@ -309,6 +375,8 @@ def extract_subscriber_counts(
         )
     if instagram:
         counts["instagram:follower_count"] = instagram.get("follower_count", 0)
+    if facebook:
+        counts["facebook:follower_count"] = facebook.get("follower_count", 0)
     if youtube:
         counts["youtube:subscriber_count"] = youtube.get("subscriber_count", 0)
     return counts
@@ -402,6 +470,11 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     ig_month_snap = load_instagram_snapshot(month_ago_date)
     ig_year_snap = load_instagram_snapshot(year_ago_date)
 
+    fb_today_snap = load_facebook_snapshot(today)
+    fb_week_snap = load_facebook_snapshot(week_ago_date)
+    fb_month_snap = load_facebook_snapshot(month_ago_date)
+    fb_year_snap = load_facebook_snapshot(year_ago_date)
+
     yt_today_snap = load_youtube_snapshot(today)
     yt_week_snap = load_youtube_snapshot(week_ago_date)
     yt_month_snap = load_youtube_snapshot(month_ago_date)
@@ -436,6 +509,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             "subscriber_count",
         ),
         ("Instagram", ig_today_snap, ig_week_snap, ig_month_snap, ig_year_snap, "follower_count"),
+        ("Facebook", fb_today_snap, fb_week_snap, fb_month_snap, fb_year_snap, "follower_count"),
         ("YouTube", yt_today_snap, yt_week_snap, yt_month_snap, yt_year_snap, "subscriber_count"),
     ):
         if not today_snap:
@@ -537,27 +611,32 @@ def main(dry_run: bool = False):
 
     try:
         ensure_instagram_snapshot(today)
+        ensure_facebook_snapshot(today)
 
         subscriptions = get_marvelous_data()
 
         # Load today's subscriber snapshots (email/social only)
         email_today = load_email_snapshot(today)
         ig_today = load_instagram_snapshot(today)
+        fb_today = load_facebook_snapshot(today)
         yt_today = load_youtube_snapshot(today)
 
         # Load yesterday's subscriber snapshots for comparison
         email_yesterday = load_email_snapshot(yesterday)
         ig_yesterday = load_instagram_snapshot(yesterday)
+        fb_yesterday = load_facebook_snapshot(yesterday)
         yt_yesterday = load_youtube_snapshot(yesterday)
 
         today_counts = extract_subscriber_counts(
             email_today,
             ig_today,
+            fb_today,
             yt_today,
         )
         yesterday_counts = extract_subscriber_counts(
             email_yesterday,
             ig_yesterday,
+            fb_yesterday,
             yt_yesterday,
         )
         changes = compare_counts(today_counts, yesterday_counts)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from daily_status_report import counts_from_report
+from daily_status_report import counts_from_report, extract_subscriber_counts
 
 HEADER = "Billing Cycle,Created,Email,First Name,Last Name,Paid,Price,Product Name,Renewal Date,Status,Subscription Active Until,split_part"
 ROW_ACTIVE = "Monthly,2026-07-12T00:00:00Z,a@x.com,A,A,99,99,The Yoga Lifestyle Membership,2026-08-12T00:00:00Z,Active,2026-08-15,1month"
@@ -40,3 +40,25 @@ def test_a_historical_report_is_judged_as_of_its_own_date(tmp_path):
     counts = counts_from_report(
         write(tmp_path, [ROW_LAPSED], name="active_subscriptions_20260615T072001Z.csv"))
     assert counts["The Yoga Lifestyle Membership"]["Monthly"] == 1
+
+
+def test_facebook_followers_are_extracted():
+    """A Facebook snapshot lands under its own key, so a FB-only change sends."""
+    counts = extract_subscriber_counts(None, None, {"follower_count": 2319}, None)
+    assert counts == {"facebook:follower_count": 2319}
+
+
+def test_every_platform_keeps_its_own_key():
+    """Facebook sits between Instagram and YouTube without colliding with either."""
+    counts = extract_subscriber_counts(
+        {"subscriber_count": 949},
+        {"follower_count": 2316},
+        {"follower_count": 2319},
+        {"subscriber_count": 1080},
+    )
+    assert counts == {
+        "email:subscriber_count": 949,
+        "instagram:follower_count": 2316,
+        "facebook:follower_count": 2319,
+        "youtube:subscriber_count": 1080,
+    }
