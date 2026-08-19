@@ -401,6 +401,54 @@ def test_relaunching_does_not_duplicate_the_resend(tmp_path):
     assert len(api.created_single_sends) == 2  # not four
 
 
+def _anchored_launcher(tmp_path, email, api=None, gate_context=None):
+    journey = _campaign(recurrence="monthly", emails=[email])
+    return CampaignLauncher(
+        api=api or FakeAPI(), registry=FakeRegistry(), journey=journey,
+        state_path=tmp_path / "campaign.json", now_fn=lambda: NOW,
+        gate_context=gate_context,
+    )
+
+
+def test_a_first_weekday_anchor_resolves_to_the_first_weekday(tmp_path):
+    api = FakeAPI()
+    launcher = _anchored_launcher(tmp_path, api=api, email={
+        "subject": "Monthly", "preheader": "", "body": "News.",
+        "interval_days": 0, "anchor": "first_weekday", "offset_days": 0,
+    })
+
+    launcher.launch(date(2026, 9, 1))
+
+    # Sept 1 2026 is a Tuesday, the first weekday of the month; 09:49 MDT = 15:49 UTC
+    assert api.scheduled[0][1] == "2026-09-01T15:49:00Z"
+
+
+def test_a_class_date_anchor_offsets_from_the_class_date(tmp_path):
+    api = FakeAPI()
+    launcher = _anchored_launcher(
+        tmp_path, api=api,
+        gate_context=GateContext(class_date=date(2026, 9, 12)),
+        email={"subject": "Reminder", "preheader": "", "body": "Tomorrow.",
+               "interval_days": 0, "anchor": "class_date", "offset_days": -1})
+
+    launcher.launch(date(2026, 9, 1))
+
+    # class Sep 12, offset -1 -> Sep 11; 09:49 MDT = 15:49 UTC
+    assert api.scheduled[0][1] == "2026-09-11T15:49:00Z"
+
+
+def test_a_class_anchored_email_needs_a_class_date(tmp_path):
+    api = FakeAPI()
+    launcher = _anchored_launcher(tmp_path, api=api, email={
+        "subject": "Reminder", "preheader": "", "body": "x",
+        "interval_days": 0, "anchor": "class_date", "offset_days": -1,
+    })  # no gate_context, so no class date
+
+    with pytest.raises(CampaignLaunchError, match="class date"):
+        launcher.launch(date(2026, 9, 1))
+    assert not api.scheduled
+
+
 def test_launch_fails_clearly_when_the_segment_is_gone(tmp_path):
     api = FakeAPI()
     launcher = _launcher(

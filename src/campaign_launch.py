@@ -31,6 +31,8 @@ from sendgrid_mailings import (
 )
 from twy_platform import locked_write
 from twy_platform.journeys import (
+    ANCHOR_CLASS_DATE,
+    ANCHOR_FIRST_WEEKDAY,
     GATE_CLASS_EXISTS,
     GATE_CLASS_HAPPENED,
     GATE_RECORDING_READY,
@@ -44,6 +46,14 @@ MOUNTAIN = ZoneInfo("America/Denver")
 # Every campaign email goes out at the house newsletter hour, Mountain time.
 SEND_HOUR = 9
 SEND_MINUTE = 49
+
+
+def _first_weekday(year: int, month: int) -> date:
+    """The first Monday-through-Friday day of the month."""
+    day = date(year, month, 1)
+    while day.weekday() >= 5:  # Saturday is 5, Sunday is 6
+        day += timedelta(days=1)
+    return day
 
 
 class CampaignLaunchError(ValueError):
@@ -146,18 +156,45 @@ class CampaignLauncher:
         )
         return local.astimezone(timezone.utc)
 
+    def _class_date(self) -> date:
+        """The Habit class date for this period, from the campaign context.
+
+        A class-anchored email cannot resolve its date without it, so a missing
+        one is refused rather than guessed.
+        """
+        ctx = self.gate_context
+        if ctx is None or ctx.class_date is None:
+            raise CampaignLaunchError(
+                "a class-anchored email needs a class date in the campaign context"
+            )
+        return ctx.class_date
+
+    def _anchor_date(self, anchor: str, offset_days: int) -> date:
+        if anchor == ANCHOR_FIRST_WEEKDAY:
+            base = _first_weekday(self._year, self._month)
+        elif anchor == ANCHOR_CLASS_DATE:
+            base = self._class_date()
+        else:
+            raise CampaignLaunchError(f"unknown campaign anchor: {anchor}")
+        return base + timedelta(days=offset_days)
+
     def _email_dates(self, start_date) -> dict:
         """The calendar date each email lands on.
 
-        Email one is the run date. A later email is either pinned to its own
-        fixed date, or falls the wait it carries after the previous email's
-        date. A fixed date earlier than the email before it is refused, because
-        a sequence that goes backwards would send out of order.
+        An anchored email derives its date from the period (the first weekday of
+        the month, or the class date) moved by its offset. Otherwise email one is
+        the run date, and a later email is pinned to its own fixed date or falls
+        the wait it carries after the previous email. A fixed date earlier than
+        the email before it is refused, because a sequence that goes backwards
+        would send out of order.
         """
         dates = {}
         current = start_date
         for index, email in enumerate(self.journey.get("emails") or []):
-            if index == 0:
+            anchor = email.get("anchor")
+            if anchor:
+                resolved = self._anchor_date(anchor, int(email.get("offset_days") or 0))
+            elif index == 0:
                 resolved = start_date
             elif email.get("send_date"):
                 resolved = date.fromisoformat(email["send_date"])
