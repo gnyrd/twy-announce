@@ -14,6 +14,7 @@ unschedule first, so a relaunch can never leave two schedules live.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
@@ -26,7 +27,13 @@ from sendgrid_mailings import (
     campaign_single_send_name,
 )
 from twy_platform import locked_write
-from twy_platform.journeys import TYPE_CAMPAIGN, journey_type
+from twy_platform.journeys import (
+    GATE_CLASS_EXISTS,
+    GATE_CLASS_HAPPENED,
+    GATE_RECORDING_READY,
+    TYPE_CAMPAIGN,
+    journey_type,
+)
 from twy_platform.text import find_prohibited
 
 
@@ -40,6 +47,39 @@ class CampaignLaunchError(ValueError):
     """A campaign cannot be launched as asked, and nothing was sent."""
 
 
+@dataclass(frozen=True)
+class GateContext:
+    """The live facts a send gate is checked against when a message is provisioned.
+
+    A recurring campaign resolves this per period from the class plans and
+    HeyMarvelous. The launcher never reaches for those itself, so a test supplies
+    a context directly and production builds one and passes it in.
+    """
+    class_exists: bool = False
+    recording_ready: bool = False
+    class_date: date | None = None
+    now: date | None = None
+
+
+def gate_passes(gate, ctx: GateContext) -> bool:
+    """Whether a message carrying this gate should go out against this context.
+
+    An empty gate always passes. Every real gate needs a context, so a set gate
+    with no context is a programming error the caller must catch before here.
+    """
+    if not gate:
+        return True
+    if ctx is None:
+        raise CampaignLaunchError(f"gate {gate} has no gate context to evaluate it")
+    if gate == GATE_CLASS_EXISTS:
+        return bool(ctx.class_exists)
+    if gate == GATE_RECORDING_READY:
+        return bool(ctx.recording_ready)
+    if gate == GATE_CLASS_HAPPENED:
+        return ctx.class_date is not None and ctx.now is not None and ctx.now >= ctx.class_date
+    raise CampaignLaunchError(f"unknown campaign gate: {gate}")
+
+
 class CampaignLauncher:
     def __init__(
         self,
@@ -50,6 +90,7 @@ class CampaignLauncher:
         state_path,
         now_fn=None,
         sleep_fn=_time.sleep,
+        gate_context: GateContext = None,
     ):
         if journey_type(journey) != TYPE_CAMPAIGN:
             raise CampaignLaunchError("not a campaign journey")
@@ -59,6 +100,7 @@ class CampaignLauncher:
         self.state_path = Path(state_path)
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._sleep = sleep_fn
+        self.gate_context = gate_context
         month = str(journey.get("campaign_month") or "")
         if len(month) != 7 or month[4] != "_":
             raise CampaignLaunchError("campaign month must be YYYY_MM")
@@ -163,6 +205,28 @@ class CampaignLauncher:
         """
         audience = email.get("audience") or {}
         return str(audience.get("segment_id") or "").strip() or self._segment_id
+
+    def _gated_out(self, index: int, email: dict) -> bool:
+        """Whether this message's send gate holds it back this period.
+
+        A message with no gate is never held. A gated message needs a context to
+        judge against, so a gate with none is refused loudly rather than sent to
+        the wrong audience or held forever by accident.
+        """
+        gate = email.get("gate")
+        if not gate:
+            return False
+        if self.gate_context is None:
+            raise CampaignLaunchError(
+                f"email {index + 1} has gate {gate} but the campaign has no gate "
+                f"context to evaluate it"
+            )
+        return not gate_passes(gate, self.gate_context)
+
+    def _check_gate_context(self) -> None:
+        """Refuse a gated campaign with no context before any state is written."""
+        for index, email in enumerate(self.journey.get("emails") or []):
+            self._gated_out(index, email)
 
     def _distinct_segment_ids(self) -> list:
         """Every segment this campaign will send to, plus the default fallback.
@@ -278,6 +342,8 @@ class CampaignLauncher:
                 "send_at": self._format(schedule[index]),
                 "segment_id": self._email_segment_id(email),
                 "segment_name": audience.get("segment_name") or self.journey.get("segment_name"),
+                "gate": email.get("gate"),
+                "gated_out": self._gated_out(index, email),
             })
         return {
             "journey_id": self.journey["journey_id"],
@@ -291,6 +357,7 @@ class CampaignLauncher:
     def launch(self, start_date) -> dict:
         """Create and schedule one Single Send per email. Idempotent."""
         self._validate_start(start_date)
+        self._check_gate_context()
         state = self._load_state()
         recorded_start = state.get("start_date")
         if recorded_start and recorded_start != start_date.isoformat():
@@ -306,6 +373,20 @@ class CampaignLauncher:
         results = []
         for index, email in enumerate(self.journey.get("emails") or []):
             send_at = self._format(schedule[index])
+            if self._gated_out(index, email):
+                # Held back this period by its send gate. Nothing is created, so a
+                # later run (or the recurring tick) provisions it once the gate
+                # holds, since no send state exists for it yet.
+                results.append({
+                    "index": index,
+                    "name": campaign_single_send_name(
+                        self._year, self._month, self._name, index
+                    ),
+                    "gate": email.get("gate"),
+                    "gated_out": True,
+                    "skipped": True,
+                })
+                continue
             entry = (state.get("sends") or {}).get(str(index))
             if entry and self._already_scheduled(entry, send_at):
                 results.append({**entry, "skipped": True})

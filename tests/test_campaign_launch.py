@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from campaign_launch import CampaignLauncher, CampaignLaunchError
+from campaign_launch import CampaignLauncher, CampaignLaunchError, GateContext
 from sendgrid_mailings import INTERNAL_SEND_COPY
 
 
@@ -231,6 +231,84 @@ def test_plan_shows_each_email_target_segment(tmp_path):
 
     assert plan["emails"][0]["segment_id"] == SEGMENT_ID
     assert plan["emails"][1]["segment_id"] == OTHER_SEGMENT
+
+
+def _gated_campaign(gate, **overrides):
+    return _campaign(emails=[
+        {"subject": "Invite", "preheader": "", "body": "Come to class.",
+         "interval_days": 0},
+        {"subject": "Recording", "preheader": "", "body": "Here is the replay.",
+         "interval_days": 1, "gate": gate},
+    ], **overrides)
+
+
+def _gated_launcher(tmp_path, gate, ctx, api=None):
+    return CampaignLauncher(
+        api=api or FakeAPI(), registry=FakeRegistry(),
+        journey=_gated_campaign(gate), state_path=tmp_path / "campaign.json",
+        now_fn=lambda: NOW, gate_context=ctx,
+    )
+
+
+def test_a_gated_message_is_skipped_when_its_gate_is_false(tmp_path):
+    api = FakeAPI()
+    launcher = _gated_launcher(tmp_path, "recording_ready",
+                               GateContext(recording_ready=False), api=api)
+
+    report = launcher.launch(date(2026, 9, 12))
+
+    # only the ungated email 1 was created; the gated recording email was held
+    assert len(api.created_single_sends) == 1
+    assert api.created_single_sends[0]["name"].endswith("Email 1")
+    gated = [s for s in report["sends"] if s.get("gated_out")]
+    assert [g["gate"] for g in gated] == ["recording_ready"]
+
+
+def test_a_gated_message_sends_when_its_gate_is_true(tmp_path):
+    api = FakeAPI()
+    launcher = _gated_launcher(tmp_path, "recording_ready",
+                               GateContext(recording_ready=True), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+
+    assert len(api.created_single_sends) == 2
+
+
+def test_class_happened_gate_reads_the_class_date(tmp_path):
+    api = FakeAPI()
+    # class Sep 12, provisioning "now" Sep 10: the class has not happened, hold it
+    launcher = _gated_launcher(
+        tmp_path, "class_happened",
+        GateContext(class_date=date(2026, 9, 12), now=date(2026, 9, 10)), api=api)
+
+    report = launcher.launch(date(2026, 9, 12))
+
+    assert len(api.created_single_sends) == 1
+    assert any(s.get("gated_out") for s in report["sends"])
+
+
+def test_a_gate_with_no_context_is_refused(tmp_path):
+    api = FakeAPI()
+    launcher = CampaignLauncher(
+        api=api, registry=FakeRegistry(), journey=_gated_campaign("class_exists"),
+        state_path=tmp_path / "campaign.json", now_fn=lambda: NOW,
+    )  # no gate_context
+
+    with pytest.raises(CampaignLaunchError, match="no gate context"):
+        launcher.launch(date(2026, 9, 12))
+    assert not api.scheduled
+    assert not api.created_single_sends
+
+
+def test_plan_shows_gated_messages(tmp_path):
+    launcher = _gated_launcher(tmp_path, "recording_ready",
+                               GateContext(recording_ready=False))
+
+    plan = launcher.plan(date(2026, 9, 12))
+
+    assert plan["emails"][1]["gate"] == "recording_ready"
+    assert plan["emails"][1]["gated_out"] is True
+    assert not plan["emails"][0].get("gated_out")
 
 
 def test_launch_fails_clearly_when_the_segment_is_gone(tmp_path):
