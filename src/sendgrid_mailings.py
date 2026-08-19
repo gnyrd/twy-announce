@@ -74,6 +74,50 @@ def habit_activity_name(year: int, month: int, activity: str) -> str:
     )
 
 
+def _clean_campaign_name(name: str) -> str:
+    clean = " ".join(str(name or "").split())
+    if not clean:
+        raise ValueError("campaign name must not be empty")
+    return clean
+
+
+def campaign_label(name: str, year: int, month: int) -> str:
+    """The campaign journey's editor label and its audience-segment name.
+
+    Format `Campaign: Name: YYYY_MM`, the top-level Campaign category JP locked
+    on 2026-08-18. One string names the campaign in the journey editor and its
+    non-member audience segment at the provider, so the two cannot drift.
+    """
+    clean = _clean_campaign_name(name)
+    if not 1 <= month <= 12:
+        raise ValueError("month must be from 1 through 12")
+    return validate_sendgrid_name(f"Campaign: {clean}: {year:04d}_{month:02d}")
+
+
+def campaign_single_send_name(
+    year: int,
+    month: int,
+    name: str,
+    email_index: int,
+) -> str:
+    """One campaign email's Single Send name, `YYYY_MM: Name: Email N`.
+
+    Date-first like every recurring mailing, so the Single Sends index sorts and
+    scans by month. N is the email's one-based position, matching the index the
+    launcher advances through, so the name and the sequence state cannot
+    disagree about which email this is.
+    """
+    clean = _clean_campaign_name(name)
+    if not 1 <= month <= 12:
+        raise ValueError("month must be from 1 through 12")
+    position = int(email_index)
+    if position < 0:
+        raise ValueError("email index cannot be negative")
+    return validate_sendgrid_name(
+        f"{year:04d}_{month:02d}: {clean}: Email {position + 1}"
+    )
+
+
 def _previous_weekday_strictly_before(day: date, weekday: int) -> date:
     delta = (day.weekday() - weekday) % 7
     if delta == 0:
