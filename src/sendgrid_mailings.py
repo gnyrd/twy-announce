@@ -118,6 +118,37 @@ def campaign_single_send_name(
     )
 
 
+def campaign_resend_send_name(
+    year: int,
+    month: int,
+    name: str,
+    email_index: int,
+) -> str:
+    """The resend child's Single Send name, `YYYY_MM: Name: Email N: Resend`.
+
+    Extends the parent email's name with the approved `Resend` purpose word, so
+    the resend reads as a child of the email it derives from. Approved 2026_08_19.
+    """
+    base = campaign_single_send_name(year, month, name, email_index)
+    return validate_sendgrid_name(f"{base}: Resend")
+
+
+def campaign_non_opener_segment_name(
+    year: int,
+    month: int,
+    name: str,
+    email_index: int,
+) -> str:
+    """The resend's target segment, `YYYY_MM: Name: Email N: Non Openers`.
+
+    A dynamic, send-scoped segment (the non-openers of one specific Single Send),
+    named after the email it derives from rather than placed under the standing
+    `Audience:` category. Approved 2026_08_19.
+    """
+    base = campaign_single_send_name(year, month, name, email_index)
+    return validate_sendgrid_name(f"{base}: Non Openers")
+
+
 def _previous_weekday_strictly_before(day: date, weekday: int) -> date:
     delta = (day.weekday() - weekday) % 7
     if delta == 0:

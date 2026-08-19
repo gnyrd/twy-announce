@@ -311,6 +311,96 @@ def test_plan_shows_gated_messages(tmp_path):
     assert not plan["emails"][0].get("gated_out")
 
 
+def _resend_campaign(wait_days=3, **resend_over):
+    resend = {"wait_days": wait_days, **resend_over}
+    return _campaign(emails=[
+        {"subject": "Invite", "preheader": "Come back", "body": "Come to class.",
+         "interval_days": 0, "resend": resend},
+    ])
+
+
+def _resend_launcher(tmp_path, journey, api=None, gate_context=None):
+    return CampaignLauncher(
+        api=api or FakeAPI(), registry=FakeRegistry(), journey=journey,
+        state_path=tmp_path / "campaign.json", now_fn=lambda: NOW,
+        gate_context=gate_context,
+    )
+
+
+def test_a_resend_child_is_created_after_its_parent(tmp_path):
+    api = FakeAPI()
+    launcher = _resend_launcher(tmp_path, _resend_campaign(wait_days=3), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+
+    assert len(api.created_single_sends) == 2
+    names = [c["name"] for c in api.created_single_sends]
+    assert names == [
+        "2026_09: Transitions: Email 1",
+        "2026_09: Transitions: Email 1: Resend",
+    ]
+    # the child sends 3 days after the parent: Sep 12 -> Sep 15, 09:49 MDT = 15:49 UTC
+    assert api.scheduled[-1][1] == "2026-09-15T15:49:00Z"
+
+
+def test_resend_targets_a_non_opener_segment_of_its_parent(tmp_path):
+    api = FakeAPI()
+    launcher = _resend_launcher(tmp_path, _resend_campaign(wait_days=3), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+
+    parent_id = api.created_single_sends[0]["id"]
+    child_segments = api.created_single_sends[1]["send_to"]["segment_ids"]
+    assert len(child_segments) == 1
+    segment = api.segments_by_id[child_segments[0]]
+    assert segment["name"] == "2026_09: Transitions: Email 1: Non Openers"
+    assert parent_id in segment["query_dsl"]  # non_opener_query embeds the send id
+
+
+def test_resend_child_inherits_parent_copy_by_default(tmp_path):
+    api = FakeAPI()
+    launcher = _resend_launcher(tmp_path, _resend_campaign(wait_days=3), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+
+    parent, child = api.created_single_sends
+    assert child["email_config"]["subject"] == parent["email_config"]["subject"]
+
+
+def test_resend_child_can_override_its_subject(tmp_path):
+    api = FakeAPI()
+    launcher = _resend_launcher(
+        tmp_path, _resend_campaign(wait_days=3, subject="One more nudge"), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+
+    assert api.created_single_sends[1]["email_config"]["subject"] == "One more nudge"
+
+
+def test_resend_is_skipped_when_the_parent_is_gated_out(tmp_path):
+    api = FakeAPI()
+    journey = _campaign(emails=[
+        {"subject": "Invite", "preheader": "", "body": "Come.", "interval_days": 0,
+         "gate": "class_exists", "resend": {"wait_days": 3}},
+    ])
+    launcher = _resend_launcher(
+        tmp_path, journey, api=api, gate_context=GateContext(class_exists=False))
+
+    launcher.launch(date(2026, 9, 12))
+
+    assert len(api.created_single_sends) == 0  # parent held, so no child either
+
+
+def test_relaunching_does_not_duplicate_the_resend(tmp_path):
+    api = FakeAPI()
+    launcher = _resend_launcher(tmp_path, _resend_campaign(wait_days=3), api=api)
+
+    launcher.launch(date(2026, 9, 12))
+    launcher.launch(date(2026, 9, 12))
+
+    assert len(api.created_single_sends) == 2  # not four
+
+
 def test_launch_fails_clearly_when_the_segment_is_gone(tmp_path):
     api = FakeAPI()
     launcher = _launcher(

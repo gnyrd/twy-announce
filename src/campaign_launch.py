@@ -24,7 +24,10 @@ from zoneinfo import ZoneInfo
 from newsletter_rendering import render_newsletter
 from sendgrid_mailings import (
     INTERNAL_SEND_COPY,
+    campaign_non_opener_segment_name,
+    campaign_resend_send_name,
     campaign_single_send_name,
+    non_opener_query,
 )
 from twy_platform import locked_write
 from twy_platform.journeys import (
@@ -283,31 +286,134 @@ class CampaignLauncher:
             "all": False,
         }
 
+    def _email_config(self, subject: str, preheader: str, body: str) -> dict:
+        rendered = render_newsletter(body, use_template=True, preheader=preheader)
+        return {
+            "subject": subject,
+            "html_content": rendered.html,
+            "plain_content": rendered.plain_text,
+            "generate_plain_content": False,
+            "editor": "design",
+            "suppression_group_id": self.registry.suppression_group_id,
+            "sender_id": self.registry.sender_id,
+        }
+
+    def _guard_prohibited(self, label: str, subject: str, preheader: str, body: str) -> None:
+        offenders = find_prohibited("\n".join([subject, preheader, body]))
+        if offenders:
+            raise CampaignLaunchError(
+                f"{label} contains prohibited punctuation: {offenders}"
+            )
+
     def _email_payload(self, index: int, email: dict, segment_id: str) -> dict:
         subject = str(email.get("subject") or "")
         preheader = str(email.get("preheader") or "")
         body = str(email.get("body") or "")
-        offenders = find_prohibited("\n".join([subject, preheader, body]))
-        if offenders:
-            raise CampaignLaunchError(
-                f"email {index + 1} contains prohibited punctuation: {offenders}"
-            )
-        rendered = render_newsletter(body, use_template=True, preheader=preheader)
+        self._guard_prohibited(f"email {index + 1}", subject, preheader, body)
         return {
             "name": campaign_single_send_name(
                 self._year, self._month, self._name, index
             ),
             "send_to": self._send_to(segment_id),
-            "email_config": {
-                "subject": subject,
-                "html_content": rendered.html,
-                "plain_content": rendered.plain_text,
-                "generate_plain_content": False,
-                "editor": "design",
-                "suppression_group_id": self.registry.suppression_group_id,
-                "sender_id": self.registry.sender_id,
-            },
+            "email_config": self._email_config(subject, preheader, body),
         }
+
+    def _resend_payload(self, index: int, parent_email: dict, resend: dict, segment_id: str) -> dict:
+        """The resend child's Single Send: the parent copy unless overridden here."""
+        subject = str(resend.get("subject") or parent_email.get("subject") or "")
+        preheader = str(resend.get("preheader") or parent_email.get("preheader") or "")
+        body = str(resend.get("body") or parent_email.get("body") or "")
+        self._guard_prohibited(f"email {index + 1} resend", subject, preheader, body)
+        return {
+            "name": campaign_resend_send_name(
+                self._year, self._month, self._name, index
+            ),
+            "send_to": self._send_to(segment_id),
+            "email_config": self._email_config(subject, preheader, body),
+        }
+
+    def _provision(self, payload: dict, send_at: str, label: str):
+        """Create one Single Send, verify its name, schedule it, verify that.
+
+        Returns (single_send_id, record). Every Single Send a launch creates,
+        parent or resend child, goes through here so both are checked the same.
+        """
+        created = self.api.create_single_send(payload)
+        single_send_id = str(created.get("id") or "")
+        if not single_send_id:
+            raise CampaignLaunchError(f"{label} Single Send returned no id")
+        confirmed = self.api.get_single_send(single_send_id)
+        if confirmed.get("name") != payload["name"]:
+            raise CampaignLaunchError(f"{label} created Single Send name mismatch")
+        self.api.schedule_single_send(single_send_id, send_at)
+        scheduled = self.api.get_single_send(single_send_id)
+        if (
+            scheduled.get("status") != "scheduled"
+            or scheduled.get("send_at") != send_at
+        ):
+            raise CampaignLaunchError(f"{label} schedule verification failed")
+        return single_send_id, {
+            "id": single_send_id,
+            "name": payload["name"],
+            "send_at": send_at,
+            "status": "scheduled",
+            "verified_at": self.now_fn().astimezone(timezone.utc).isoformat(),
+        }
+
+    def _ensure_non_opener_segment(self, index: int, parent_send_id: str, state: dict) -> str:
+        """The segment of contacts sent the parent email who did not open it.
+
+        Built from non_opener_query of the parent's Single Send id and named after
+        that email. Recorded in state so a resumed launch reuses it rather than
+        minting a second segment for the same email.
+        """
+        name = campaign_non_opener_segment_name(
+            self._year, self._month, self._name, index
+        )
+        query_dsl = non_opener_query(parent_send_id)
+        existing = (state.get("resend_segments") or {}).get(str(index))
+        if existing and existing.get("id"):
+            try:
+                segment = self.api.segment(existing["id"])
+            except Exception:
+                segment = None
+            if segment and str(segment.get("id")) == existing["id"]:
+                return existing["id"]
+        segment = self.api.create_segment(name=name, query_dsl=query_dsl)
+        segment_id = str((segment or {}).get("id") or "")
+        if not segment_id:
+            raise CampaignLaunchError(
+                f"email {index + 1} non-opener segment returned no id"
+            )
+        state.setdefault("resend_segments", {})[str(index)] = {
+            "id": segment_id, "name": name,
+        }
+        self._save_state(state)
+        return segment_id
+
+    def _provision_resend(self, index, parent_email, resend, parent_send_id, start_date, state) -> dict:
+        """Create the resend child once its parent has been scheduled.
+
+        The child sends the parent's copy, or the override, to the parent's
+        non-openers, a set number of days after the parent's own send date.
+        """
+        parent_day = self._email_dates(start_date)[index]
+        child_send_at = self._format(
+            self._send_at(parent_day + timedelta(days=int(resend["wait_days"])))
+        )
+        entry = (state.get("resends") or {}).get(str(index))
+        if entry and self._already_scheduled(entry, child_send_at):
+            return {**entry, "resend_of": index, "skipped": True}
+        segment_id = self._ensure_non_opener_segment(index, parent_send_id, state)
+        payload = self._resend_payload(index, parent_email, resend, segment_id)
+        _child_id, record = self._provision(
+            payload, child_send_at, f"email {index + 1} resend"
+        )
+        record["resend_of"] = index
+        record["segment_id"] = segment_id
+        state.setdefault("resends", {})[str(index)] = record
+        self._save_state(state)
+        return {**record, "skipped": False}
 
     def _already_scheduled(self, entry: dict, send_at: str) -> bool:
         if not entry.get("id"):
@@ -390,42 +496,31 @@ class CampaignLauncher:
             entry = (state.get("sends") or {}).get(str(index))
             if entry and self._already_scheduled(entry, send_at):
                 results.append({**entry, "skipped": True})
-                continue
-
-            payload = self._email_payload(index, email, self._email_segment_id(email))
-            created = self.api.create_single_send(payload)
-            single_send_id = str(created.get("id") or "")
-            if not single_send_id:
-                raise CampaignLaunchError(
-                    f"email {index + 1} Single Send returned no id"
+                parent_send_id = str(entry.get("id") or "")
+            else:
+                payload = self._email_payload(
+                    index, email, self._email_segment_id(email)
                 )
-            confirmed = self.api.get_single_send(single_send_id)
-            if confirmed.get("name") != payload["name"]:
-                raise CampaignLaunchError(
-                    f"email {index + 1} created Single Send name mismatch"
+                parent_send_id, record = self._provision(
+                    payload, send_at, f"email {index + 1}"
                 )
+                record["segment_id"] = self._email_segment_id(email)
+                state.setdefault("sends", {})[str(index)] = record
+                self._save_state(state)
+                results.append({**record, "skipped": False})
 
-            self.api.schedule_single_send(single_send_id, send_at)
-            scheduled = self.api.get_single_send(single_send_id)
-            if (
-                scheduled.get("status") != "scheduled"
-                or scheduled.get("send_at") != send_at
-            ):
-                raise CampaignLaunchError(
-                    f"email {index + 1} schedule verification failed"
+            # A resend child is provisioned only after its parent has been
+            # scheduled, because its audience is that parent's non-openers and its
+            # timing is measured from the parent's send. It stays checked even when
+            # the parent was already scheduled, so a resumed launch still completes
+            # a child that a prior run had not created yet.
+            resend = email.get("resend")
+            if resend:
+                results.append(
+                    self._provision_resend(
+                        index, email, resend, parent_send_id, start_date, state
+                    )
                 )
-
-            record = {
-                "id": single_send_id,
-                "segment_id": self._email_segment_id(email),
-                "name": payload["name"],
-                "send_at": send_at,
-                "status": "scheduled",
-                "verified_at": self.now_fn().astimezone(timezone.utc).isoformat(),
-            }
-            state.setdefault("sends", {})[str(index)] = record
-            self._save_state(state)
-            results.append({**record, "skipped": False})
 
         return {
             "journey_id": self.journey["journey_id"],

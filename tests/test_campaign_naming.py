@@ -1,6 +1,11 @@
 import pytest
 
-from sendgrid_mailings import campaign_label, campaign_single_send_name
+from sendgrid_mailings import (
+    campaign_label,
+    campaign_non_opener_segment_name,
+    campaign_resend_send_name,
+    campaign_single_send_name,
+)
 
 
 def test_campaign_label_format():
@@ -50,3 +55,22 @@ def test_single_send_name_rejects_hyphen():
 def test_single_send_name_rejects_bad_month():
     with pytest.raises(ValueError, match="month must be"):
         campaign_single_send_name(2026, 0, "Transitions", 0)
+
+
+def test_resend_send_name_extends_the_email_name():
+    assert campaign_resend_send_name(2026, 9, "Transitions", 2) == (
+        "2026_09: Transitions: Email 3: Resend"
+    )
+
+
+def test_non_opener_segment_name_extends_the_email_name():
+    assert campaign_non_opener_segment_name(2026, 9, "Transitions", 2) == (
+        "2026_09: Transitions: Email 3: Non Openers"
+    )
+
+
+def test_resend_names_reject_hyphen():
+    with pytest.raises(ValueError, match="prohibited punctuation"):
+        campaign_resend_send_name(2026, 9, "Back-to-Routine", 0)
+    with pytest.raises(ValueError, match="prohibited punctuation"):
+        campaign_non_opener_segment_name(2026, 9, "Back-to-Routine", 0)
