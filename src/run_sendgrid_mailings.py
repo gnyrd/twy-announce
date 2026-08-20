@@ -74,6 +74,10 @@ def _periods(now: datetime) -> list[tuple[int, int]]:
     return [current, following]
 
 
+# The campaign model owns 2026_10 onward, so this runner's last period is 2026_09.
+LEGACY_FINAL_PERIOD = (2026, 9)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -115,6 +119,19 @@ def main(argv: list[str] | None = None) -> int:
         local_now = now.astimezone(MOUNTAIN)
         periods = _periods(local_now)
         explicit = False
+
+    periods = [
+        period for period in periods if period <= LEGACY_FINAL_PERIOD
+    ]
+    if explicit and not periods:
+        final_period = (
+            f"{LEGACY_FINAL_PERIOD[0]:04d}_{LEGACY_FINAL_PERIOD[1]:02d}"
+        )
+        raise SystemExit(
+            f"--month {arguments.month} is beyond the legacy runner's "
+            f"final period {final_period}. The campaign model owns "
+            "everything after that."
+        )
 
     reports = {}
     problems = []
