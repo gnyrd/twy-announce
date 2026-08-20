@@ -72,7 +72,11 @@ def _build_launcher_factory():
     from provision_recording_product import recording_ready
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import SendGridCampaigns, SendGridRegistry
-    from sendgrid_newsletter_workflow import read_local_sections
+    from sendgrid_newsletter_workflow import (
+        ensure_recording_draft,
+        read_local_sections,
+        resolve_section_tokens,
+    )
     from twy_paths import newsletters_dir, sendgrid_registry_path
 
     key = os.getenv("SENDGRID_API_KEY", "")
@@ -83,7 +87,28 @@ def _build_launcher_factory():
     today = datetime.now(MOUNTAIN).date()
 
     def launch_one(pinned, year, month):
-        real = real_habit_class_date(year, month)
+        try:
+            real = real_habit_class_date(year, month)
+        except Exception as exc:  # noqa: BLE001 - fail-soft is the point
+            # real_habit_class_date already swallows a plain classes-API
+            # network failure and returns None; this catches anything else it
+            # might raise (a malformed response). Either way, a classes-API
+            # hiccup must hold the recording seed, never abort this journey's
+            # whole launch for the tick: read_local_sections and the launcher
+            # still run below, exactly as if no class were confirmed yet.
+            log.warning(
+                "%04d_%02d: could not resolve the real habit class date, "
+                "recording draft seed skipped this tick: %s",
+                year, month, exc,
+            )
+            real = None
+        if real is not None:
+            # Seeds the month's recording draft from the canonical template the
+            # same way run_sendgrid_mailings.py does, guarded by the same fact
+            # (a confirmed Habit class this month). Idempotent, so a daily tick
+            # after the first no-ops here. Makes the campaign path
+            # self-sufficient once the old newsletter workflow retires.
+            ensure_recording_draft(year, month)
         context = GateContext(
             class_exists=real is not None,
             # The Class Recording email holds until the edited recording is
@@ -102,6 +127,18 @@ def _build_launcher_factory():
             registry=registry,
             state_path=newsletters_dir() / f"{year:04d}-{month:02d}" / ".sendgrid.json",
         )
+        # This period's reviewed newsletter drafts, with the token vocabulary
+        # (CLASS_TITLE, RECORDING_CTA, ...) resolved against this month's facts,
+        # so a campaign email tagged with a section sends real copy rather than
+        # a literal {CLASS_TITLE}. resolve_section_tokens deliberately leaves a
+        # token in place when the fact it needs is not there yet (no recording
+        # record), and the launcher's own fail-closed guard holds that email
+        # until it is.
+        raw_sections = read_local_sections(year, month)
+        sections = {
+            key: resolve_section_tokens(key, section, year=year, month=month)
+            for key, section in raw_sections.items()
+        }
         launcher = CampaignLauncher(
             api=api,
             registry=registry,
@@ -110,10 +147,7 @@ def _build_launcher_factory():
                 f"{pinned['journey_id']}_{year:04d}_{month:02d}"
             ),
             gate_context=context,
-            # This period's reviewed newsletter drafts, so a campaign email
-            # tagged with a section sends that draft's copy. An email whose
-            # section has no draft yet holds this period, like a false gate.
-            sections=read_local_sections(year, month),
+            sections=sections,
             # The handle for building the dynamic audiences (follow-ups'
             # interested-non-members, gentle reminder's openers-not-registered).
             campaigns=campaigns,

@@ -821,11 +821,13 @@ def ensure_recording_draft(year: int, month: int) -> bool:
     target = newsletter_path(year, month, "recording")
     if not target.exists():
         template = RECORDING_TEMPLATE_DIR / "recording.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            template.read_text(encoding="utf-8"), encoding="utf-8"
-        )
-        changed = True
+        try:
+            locked_create(target, template.read_text(encoding="utf-8"))
+            changed = True
+        except FileExistsError:
+            # A concurrent seed beat us to it; either way the file is there
+            # now, so this caller has nothing new to report.
+            pass
     metadata = _load_metadata(year, month)
     drafts = metadata.setdefault("drafts", {})
     entry = drafts.setdefault("recording", {})

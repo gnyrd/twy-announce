@@ -154,3 +154,20 @@ def test_campaign_sections_match_the_newsletter_section_keys():
     from sendgrid_newsletter_workflow import SECTION_PURPOSES
 
     assert set(CAMPAIGN_SECTIONS) == set(SECTION_PURPOSES)
+
+
+def test_unresolved_token_guard_is_imported_not_a_duplicate_literal():
+    """campaign_launch's fail-closed guard must be the newsletter workflow's own
+    UNRESOLVED_TOKEN, imported, never an independent re.compile literal that
+    could silently drift out of sync with it (the two were separate literals
+    until this test)."""
+    import inspect
+    import campaign_launch
+    import sendgrid_newsletter_workflow
+
+    source = inspect.getsource(campaign_launch)
+    assert "re.compile" not in source
+    assert (
+        campaign_launch._UNRESOLVED_TOKEN
+        is sendgrid_newsletter_workflow.UNRESOLVED_TOKEN
+    )

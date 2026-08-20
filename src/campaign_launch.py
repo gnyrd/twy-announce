@@ -18,15 +18,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
-import re
 import time as _time
 from zoneinfo import ZoneInfo
-
-# A newsletter draft template carries tokens like {CLASS_TITLE} that the old
-# workflow resolves at lock time. The campaign content path reads the draft
-# directly, so it must never send one still carrying a token. Matches the
-# workflow's own UNRESOLVED_TOKEN.
-_UNRESOLVED_TOKEN = re.compile(r"\{[A-Z][A-Z0-9_]*\}")
 
 from newsletter_rendering import render_newsletter
 from sendgrid_mailings import (
@@ -42,6 +35,11 @@ from sendgrid_mailings import (
     opener_not_registered_query,
     registered_query,
 )
+# A newsletter draft template carries tokens like {CLASS_TITLE} that the old
+# workflow resolves at lock time. The campaign content path reads the draft
+# directly, so it must never send one still carrying a token. Imported, never
+# an independent literal, so the two guards cannot drift apart.
+from sendgrid_newsletter_workflow import UNRESOLVED_TOKEN as _UNRESOLVED_TOKEN
 from twy_platform import locked_write
 from twy_platform.journeys import (
     ANCHOR_CLASS_DATE,
