@@ -72,6 +72,7 @@ def _build_launcher_factory():
     from provision_recording_product import recording_ready
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import SendGridRegistry
+    from sendgrid_newsletter_workflow import read_local_sections
     from twy_paths import sendgrid_registry_path
 
     key = os.getenv("SENDGRID_API_KEY", "")
@@ -101,6 +102,10 @@ def _build_launcher_factory():
                 f"{pinned['journey_id']}_{year:04d}_{month:02d}"
             ),
             gate_context=context,
+            # This period's reviewed newsletter drafts, so a campaign email
+            # tagged with a section sends that draft's copy. An email whose
+            # section has no draft yet holds this period, like a false gate.
+            sections=read_local_sections(year, month),
         )
         return launcher.launch(date(year, month, 1))
 

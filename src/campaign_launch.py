@@ -120,6 +120,7 @@ class CampaignLauncher:
         now_fn=None,
         sleep_fn=_time.sleep,
         gate_context: GateContext = None,
+        sections: dict = None,
     ):
         if journey_type(journey) != TYPE_CAMPAIGN:
             raise CampaignLaunchError("not a campaign journey")
@@ -130,6 +131,11 @@ class CampaignLauncher:
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._sleep = sleep_fn
         self.gate_context = gate_context
+        # This period's newsletter drafts, keyed by section, as
+        # read_local_sections returns them. A campaign email carrying a `section`
+        # draws its copy from here instead of its static text; production passes
+        # the resolved drafts in, a test supplies them directly.
+        self.sections = sections or {}
         month = str(journey.get("campaign_month") or "")
         if len(month) != 7 or month[4] != "_":
             raise CampaignLaunchError("campaign month must be YYYY_MM")
@@ -374,10 +380,35 @@ class CampaignLauncher:
                 f"{label} contains prohibited punctuation: {offenders}"
             )
 
-    def _email_payload(self, index: int, email: dict, segment_id: str) -> dict:
-        subject = str(email.get("subject") or "")
-        preheader = str(email.get("preheader") or "")
-        body = str(email.get("body") or "")
+    def _email_content(self, email: dict):
+        """This email's subject, preheader and body for the period, or None.
+
+        An email carrying a `section` draws its copy from that section's draft in
+        this period's newsletter (self.sections); None means the draft is not
+        ready yet, so the email holds this period the way a false gate does. An
+        email with no section keeps its own typed copy, which is how a one-off
+        campaign works.
+        """
+        section = str(email.get("section") or "").strip()
+        if section:
+            resolved = self.sections.get(section)
+            if not resolved:
+                return None
+            return {
+                "subject": str(resolved.get("subject") or ""),
+                "preheader": str(resolved.get("preheader") or ""),
+                "body": str(resolved.get("body") or ""),
+            }
+        return {
+            "subject": str(email.get("subject") or ""),
+            "preheader": str(email.get("preheader") or ""),
+            "body": str(email.get("body") or ""),
+        }
+
+    def _email_payload(self, index: int, content: dict, segment_id: str) -> dict:
+        subject = content["subject"]
+        preheader = content["preheader"]
+        body = content["body"]
         self._guard_prohibited(f"email {index + 1}", subject, preheader, body)
         return {
             "name": campaign_single_send_name(
@@ -387,11 +418,11 @@ class CampaignLauncher:
             "email_config": self._email_config(subject, preheader, body),
         }
 
-    def _resend_payload(self, index: int, parent_email: dict, resend: dict, segment_id: str) -> dict:
+    def _resend_payload(self, index: int, parent_content: dict, resend: dict, segment_id: str) -> dict:
         """The resend child's Single Send: the parent copy unless overridden here."""
-        subject = str(resend.get("subject") or parent_email.get("subject") or "")
-        preheader = str(resend.get("preheader") or parent_email.get("preheader") or "")
-        body = str(resend.get("body") or parent_email.get("body") or "")
+        subject = str(resend.get("subject") or parent_content.get("subject") or "")
+        preheader = str(resend.get("preheader") or parent_content.get("preheader") or "")
+        body = str(resend.get("body") or parent_content.get("body") or "")
         self._guard_prohibited(f"email {index + 1} resend", subject, preheader, body)
         return {
             "name": campaign_resend_send_name(
@@ -460,11 +491,13 @@ class CampaignLauncher:
         self._save_state(state)
         return segment_id
 
-    def _provision_resend(self, index, parent_email, resend, parent_send_id, start_date, state) -> dict:
+    def _provision_resend(self, index, parent_content, resend, parent_send_id, start_date, state) -> dict:
         """Create the resend child once its parent has been scheduled.
 
         The child sends the parent's copy, or the override, to the parent's
-        non-openers, a set number of days after the parent's own send date.
+        non-openers, a set number of days after the parent's own send date. The
+        parent's copy is its resolved content for the period, so a resend of a
+        draft-sourced parent carries this month's draft copy.
         """
         parent_day = self._email_dates(start_date)[index]
         child_send_at = self._format(
@@ -474,7 +507,7 @@ class CampaignLauncher:
         if entry and self._already_scheduled(entry, child_send_at):
             return {**entry, "resend_of": index, "skipped": True}
         segment_id = self._ensure_non_opener_segment(index, parent_send_id, state)
-        payload = self._resend_payload(index, parent_email, resend, segment_id)
+        payload = self._resend_payload(index, parent_content, resend, segment_id)
         _child_id, record = self._provision(
             payload, child_send_at, f"email {index + 1} resend"
         )
@@ -507,10 +540,13 @@ class CampaignLauncher:
         rows = []
         for index, email in enumerate(self.journey.get("emails") or []):
             audience = email.get("audience") or {}
+            content = self._email_content(email)
             rows.append({
                 "index": index,
                 "position": index + 1,
-                "subject": str(email.get("subject") or ""),
+                "subject": content["subject"] if content else str(email.get("subject") or ""),
+                "section": email.get("section"),
+                "content_pending": content is None,
                 "name": campaign_single_send_name(
                     self._year, self._month, self._name, index
                 ),
@@ -562,13 +598,28 @@ class CampaignLauncher:
                     "skipped": True,
                 })
                 continue
+            content = self._email_content(email)
+            if content is None:
+                # A draft-sourced email whose section has no draft this period.
+                # It holds like a gated one, nothing is created, and a later run
+                # provisions it once the draft is ready.
+                results.append({
+                    "index": index,
+                    "name": campaign_single_send_name(
+                        self._year, self._month, self._name, index
+                    ),
+                    "section": email.get("section"),
+                    "content_pending": True,
+                    "skipped": True,
+                })
+                continue
             entry = (state.get("sends") or {}).get(str(index))
             if entry and self._already_scheduled(entry, send_at):
                 results.append({**entry, "skipped": True})
                 parent_send_id = str(entry.get("id") or "")
             else:
                 payload = self._email_payload(
-                    index, email, self._email_segment_id(email)
+                    index, content, self._email_segment_id(email)
                 )
                 parent_send_id, record = self._provision(
                     payload, send_at, f"email {index + 1}"
@@ -587,7 +638,7 @@ class CampaignLauncher:
             if resend:
                 results.append(
                     self._provision_resend(
-                        index, email, resend, parent_send_id, start_date, state
+                        index, content, resend, parent_send_id, start_date, state
                     )
                 )
 
