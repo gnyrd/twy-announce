@@ -33,6 +33,7 @@ from sendgrid_mailings import (
     interested_nonmember_query,
     non_opener_query,
     opener_not_registered_query,
+    registered_query,
 )
 from twy_platform import locked_write
 from twy_platform.journeys import (
@@ -363,6 +364,15 @@ class CampaignLauncher:
                 purpose=purpose, year=self._year, month=self._month,
                 query_dsl=query,
             )
+        elif kind == "registered":
+            registered = self.campaigns.ensure_list(
+                habit_activity_name(self._year, self._month, "Registered")
+            )
+            query, parent_ids = registered_query(registered)
+            segment = self.campaigns.ensure_segment(
+                purpose=purpose, year=self._year, month=self._month,
+                query_dsl=query, parent_list_ids=parent_ids,
+            )
         else:
             raise CampaignLaunchError(
                 f"email {index + 1} unknown dynamic audience: {kind}"
@@ -639,6 +649,7 @@ class CampaignLauncher:
         dynamic_names = {
             "interested_nonmember": "Interested non-members (built at send)",
             "opener_not_registered": "Openers not registered (built at send)",
+            "registered": "Registered for the class (built at send)",
         }
         for index, email in enumerate(self.journey.get("emails") or []):
             audience = email.get("audience") or {}

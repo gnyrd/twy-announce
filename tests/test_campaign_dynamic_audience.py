@@ -120,6 +120,22 @@ def test_opener_audience_holds_when_the_parent_did_not_send(tmp_path):
     assert len(pending) == 1
 
 
+def test_registered_audience_builds_a_segment_over_the_registered_list(tmp_path):
+    api, camp = FakeAPI(), FakeCampaigns()
+    journey = _campaign(emails=[
+        {"subject": "Reminder", "preheader": "", "body": "x",
+         "interval_days": 0, "section": "reminder",
+         "audience": {"dynamic": "registered"}},
+    ])
+    sections = {"reminder": {"subject": "R", "preheader": "", "body": "rb"}}
+    _launcher(journey, tmp_path, api, camp, sections=sections).launch(date(2026, 9, 12))
+    assert len(camp.segments) == 1
+    seg = camp.segments[0]
+    assert seg["purpose"] == MailingPurpose.REGISTERED_REMINDER
+    assert seg["parent_list_ids"]  # scoped to the registered list
+    assert api.created_single_sends[0]["send_to"]["segment_ids"] == [seg["id"]]
+
+
 def test_static_audience_needs_no_campaigns_handle(tmp_path):
     api = FakeAPI()
     journey = _campaign()  # two plain emails, campaign-default segment

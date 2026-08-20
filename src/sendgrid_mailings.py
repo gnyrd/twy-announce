@@ -307,3 +307,19 @@ def interested_nonmember_query(
         f"WHERE NOT array_contains(list_ids, ['{member}'])"
     )
     return query, [interested]
+
+
+def registered_query(registered_list_id: str) -> tuple[str, list[str]]:
+    """Everyone on the month's Registered list, as a segment.
+
+    The registered reminder and the class recording send to this list in the
+    workflow. Expressed as a segment scoped to that list so the campaign model,
+    which sends to segments, reaches the same people.
+    """
+    registered = _provider_id(registered_list_id)
+    query = (
+        "SELECT contact_id, updated_at "
+        "FROM contact_data "
+        f"WHERE array_contains(list_ids, ['{registered}'])"
+    )
+    return query, [registered]
