@@ -69,6 +69,35 @@ def _client():
     return Client(auth_token=get_token())
 
 
+def recording_ready(year: int, month: int, *, client_factory=_client, path=None) -> bool:
+    """Whether the month's Habit recording is attached to its free product.
+
+    This is the resolver behind the campaign ``recording_ready`` gate: the Class
+    Recording email may go out only when a registrant can actually claim a
+    recording. True iff the provisioning state file names a product AND that
+    product still carries at least one piece of media at the provider right now.
+
+    Fails closed. A missing state file (not provisioned), a state file with no
+    product id, a product that no longer exists, an empty product, or any
+    provider error all return False, holding the email rather than promising a
+    recording that is not there. This matches provision()'s own idempotent
+    verification, so the gate reads the same fact the writer wrote.
+    """
+    p = path or state_path(year, month)
+    if not p.exists():
+        return False
+    try:
+        recorded = json.loads(p.read_text(encoding="utf-8"))
+        product_id = int(recorded["product_id"])
+    except (ValueError, KeyError, TypeError, OSError):
+        return False
+    try:
+        product = client_factory().get_product(product_id)
+    except Exception:
+        return False
+    return bool(product) and int(product.get("content_count") or 0) > 0
+
+
 def provision(year: int, month: int, *, dry_run: bool = False) -> dict | None:
     plan = habit_class(year, month)
     if not plan:

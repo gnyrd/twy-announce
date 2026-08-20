@@ -69,6 +69,7 @@ def _build_launcher_factory():
     import os
 
     from campaign_launch import CampaignLauncher, GateContext
+    from provision_recording_product import recording_ready
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import SendGridRegistry
     from twy_paths import sendgrid_registry_path
@@ -84,9 +85,11 @@ def _build_launcher_factory():
         real = real_habit_class_date(year, month)
         context = GateContext(
             class_exists=real is not None,
-            # No resolver yet for whether the edited recording is attached to its
-            # free product, so the Class Recording email holds until one exists.
-            recording_ready=False,
+            # The Class Recording email holds until the edited recording is
+            # actually attached to its free product at the provider. The resolver
+            # fails closed, so a provider hiccup holds the email rather than
+            # promising a recording that is not there.
+            recording_ready=recording_ready(year, month),
             class_date=real or get_habit_class_date(year, month),
             now=today,
         )
