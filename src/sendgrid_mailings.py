@@ -28,6 +28,25 @@ class MailingPurpose(str, Enum):
     FOLLOW_UP_2 = "Follow Up 2"
 
 
+# Which newsletter draft section supplies each mailing purpose, and the reverse.
+# Shared here, the home of the mailing vocabulary, so the newsletter workflow and
+# the campaign launcher name the same segment for the same purpose rather than
+# each carrying its own copy of the map.
+SECTION_PURPOSES = {
+    "lifestyle": MailingPurpose.MONTHLY,
+    "non_lifestyle": MailingPurpose.GENERAL_INVITATION,
+    "non_opener": MailingPurpose.RESEND,
+    "gentle_nudge": MailingPurpose.GENTLE_REMINDER,
+    "reminder": MailingPurpose.REGISTERED_REMINDER,
+    "recording": MailingPurpose.CLASS_RECORDING,
+    "ph1": MailingPurpose.FOLLOW_UP_1,
+    "ph2": MailingPurpose.FOLLOW_UP_2,
+}
+PURPOSE_SECTIONS = {
+    purpose.value: key for key, purpose in SECTION_PURPOSES.items()
+}
+
+
 def validate_sendgrid_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:

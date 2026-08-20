@@ -12,6 +12,8 @@ from sendgrid_campaigns import SendGridCampaigns
 from sendgrid_mailings import (
     EMAIL_SUBSCRIBED,
     MEMBER_YOGA_LIFESTYLE,
+    PURPOSE_SECTIONS,
+    SECTION_PURPOSES,
     MailingPurpose,
     general_invitation_query,
     habit_activity_name,
@@ -37,22 +39,8 @@ from twy_platform.text import find_prohibited
 from twy_platform import locked_create, locked_write
 
 
-SECTION_PURPOSES = {
-    "lifestyle": MailingPurpose.MONTHLY,
-    "non_lifestyle": MailingPurpose.GENERAL_INVITATION,
-    "non_opener": MailingPurpose.RESEND,
-    "gentle_nudge": MailingPurpose.GENTLE_REMINDER,
-    "reminder": MailingPurpose.REGISTERED_REMINDER,
-    "recording": MailingPurpose.CLASS_RECORDING,
-    "ph1": MailingPurpose.FOLLOW_UP_1,
-    "ph2": MailingPurpose.FOLLOW_UP_2,
-}
-
 MATERIALIZATION_WINDOW = timedelta(hours=24)
 UNRESOLVED_TOKEN = re.compile(r"\{[A-Z][A-Z0-9_]*\}")
-PURPOSE_SECTIONS = {
-    purpose.value: key for key, purpose in SECTION_PURPOSES.items()
-}
 
 
 def _split_newsletter_markdown(text: str) -> tuple[str, str]:
