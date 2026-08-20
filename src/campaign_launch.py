@@ -24,10 +24,15 @@ from zoneinfo import ZoneInfo
 from newsletter_rendering import render_newsletter
 from sendgrid_mailings import (
     INTERNAL_SEND_COPY,
+    MEMBER_YOGA_LIFESTYLE,
+    SECTION_PURPOSES,
     campaign_non_opener_segment_name,
     campaign_resend_send_name,
     campaign_single_send_name,
+    habit_activity_name,
+    interested_nonmember_query,
     non_opener_query,
+    opener_not_registered_query,
 )
 from twy_platform import locked_write
 from twy_platform.journeys import (
@@ -121,11 +126,18 @@ class CampaignLauncher:
         sleep_fn=_time.sleep,
         gate_context: GateContext = None,
         sections: dict = None,
+        campaigns=None,
     ):
         if journey_type(journey) != TYPE_CAMPAIGN:
             raise CampaignLaunchError("not a campaign journey")
         self.api = api
         self.registry = registry
+        # A SendGridCampaigns handle, used only to build a dynamic audience at
+        # launch (the follow-ups' interested-non-members, the gentle reminder's
+        # openers-not-registered). It ensures the same locked-name segment the
+        # newsletter workflow does, so the two never mint a duplicate. A campaign
+        # with only static audiences never touches it.
+        self.campaigns = campaigns
         self.journey = journey
         self.state_path = Path(state_path)
         self.now_fn = now_fn or (lambda: datetime.now(timezone.utc))
@@ -284,6 +296,88 @@ class CampaignLauncher:
         audience = email.get("audience") or {}
         return str(audience.get("segment_id") or "").strip() or self._segment_id
 
+    @staticmethod
+    def _dynamic_kind(email: dict):
+        """The dynamic audience kind for this email, or None for a static one."""
+        audience = email.get("audience") or {}
+        return str(audience.get("dynamic") or "").strip() or None
+
+    def _purpose_for(self, index: int, email: dict):
+        """The mailing purpose that names a dynamic audience's segment.
+
+        A dynamic audience is built for a specific mailing (the gentle reminder,
+        a follow-up), so it borrows that mailing's section to name its segment
+        with the same locked name the workflow uses. No section, no name.
+        """
+        section = str(email.get("section") or "").strip()
+        if not section or section not in SECTION_PURPOSES:
+            raise CampaignLaunchError(
+                f"email {index + 1} has a dynamic audience but no section to "
+                f"name its segment"
+            )
+        return SECTION_PURPOSES[section]
+
+    def _resolve_audience(self, index: int, email: dict, state: dict):
+        """The segment id one email sends to this period.
+
+        A static audience returns its own segment or the campaign default. A
+        dynamic audience is built now against the live lists and, for the opener
+        case, the parent's own send. Returns None when a dynamic audience cannot
+        be built yet this period (the opener parent has not sent), so the caller
+        holds that one email the way a gate does.
+        """
+        kind = self._dynamic_kind(email)
+        if not kind:
+            return self._email_segment_id(email)
+        if self.campaigns is None:
+            raise CampaignLaunchError(
+                f"email {index + 1} needs a dynamic audience but the launcher "
+                f"was given no campaigns handle to build it"
+            )
+        purpose = self._purpose_for(index, email)
+        if kind == "interested_nonmember":
+            interested = self.campaigns.ensure_list(
+                habit_activity_name(self._year, self._month, "Interested")
+            )
+            member = self.campaigns.registry.list_id(MEMBER_YOGA_LIFESTYLE)
+            query, parent_ids = interested_nonmember_query(
+                interested_list_id=interested, member_list_id=member
+            )
+            segment = self.campaigns.ensure_segment(
+                purpose=purpose, year=self._year, month=self._month,
+                query_dsl=query, parent_list_ids=parent_ids,
+            )
+        elif kind == "opener_not_registered":
+            of = (email.get("audience") or {}).get("of")
+            parent = (state.get("sends") or {}).get(str(of)) or {}
+            parent_send_id = str(parent.get("id") or "")
+            if not parent_send_id:
+                # The parent email did not send this period, so there are no
+                # openers to build from. Hold this one, like a gate.
+                return None
+            registered = self.campaigns.ensure_list(
+                habit_activity_name(self._year, self._month, "Registered")
+            )
+            query = opener_not_registered_query(parent_send_id, registered)
+            segment = self.campaigns.ensure_segment(
+                purpose=purpose, year=self._year, month=self._month,
+                query_dsl=query,
+            )
+        else:
+            raise CampaignLaunchError(
+                f"email {index + 1} unknown dynamic audience: {kind}"
+            )
+        segment_id = str((segment or {}).get("id") or "")
+        if not segment_id:
+            raise CampaignLaunchError(
+                f"email {index + 1} dynamic audience returned no segment id"
+            )
+        state.setdefault("dynamic_segments", {})[str(index)] = {
+            "id": segment_id, "kind": kind,
+        }
+        self._save_state(state)
+        return segment_id
+
     def _gated_out(self, index: int, email: dict) -> bool:
         """Whether this message's send gate holds it back this period.
 
@@ -314,6 +408,10 @@ class CampaignLauncher:
         """
         ids = []
         for email in self.journey.get("emails") or []:
+            # A dynamic audience is built at launch, not confirmed up front, so
+            # it contributes no id here.
+            if self._dynamic_kind(email):
+                continue
             segment_id = self._email_segment_id(email)
             if segment_id not in ids:
                 ids.append(segment_id)
@@ -538,9 +636,14 @@ class CampaignLauncher:
         """
         schedule = self._schedule(start_date)
         rows = []
+        dynamic_names = {
+            "interested_nonmember": "Interested non-members (built at send)",
+            "opener_not_registered": "Openers not registered (built at send)",
+        }
         for index, email in enumerate(self.journey.get("emails") or []):
             audience = email.get("audience") or {}
             content = self._email_content(email)
+            kind = self._dynamic_kind(email)
             rows.append({
                 "index": index,
                 "position": index + 1,
@@ -551,8 +654,14 @@ class CampaignLauncher:
                     self._year, self._month, self._name, index
                 ),
                 "send_at": self._format(schedule[index]),
-                "segment_id": self._email_segment_id(email),
-                "segment_name": audience.get("segment_name") or self.journey.get("segment_name"),
+                # A dynamic audience has no id until launch, so the preview names
+                # it rather than guessing a segment.
+                "segment_id": None if kind else self._email_segment_id(email),
+                "segment_name": (
+                    dynamic_names.get(kind, kind) if kind
+                    else audience.get("segment_name") or self.journey.get("segment_name")
+                ),
+                "dynamic_audience": kind,
                 "gate": email.get("gate"),
                 "gated_out": self._gated_out(index, email),
             })
@@ -618,13 +727,25 @@ class CampaignLauncher:
                 results.append({**entry, "skipped": True})
                 parent_send_id = str(entry.get("id") or "")
             else:
-                payload = self._email_payload(
-                    index, content, self._email_segment_id(email)
-                )
+                segment_id = self._resolve_audience(index, email, state)
+                if segment_id is None:
+                    # A dynamic audience that cannot be built this period (its
+                    # opener parent did not send). Held, and a later run builds
+                    # it once the parent is out.
+                    results.append({
+                        "index": index,
+                        "name": campaign_single_send_name(
+                            self._year, self._month, self._name, index
+                        ),
+                        "audience_pending": True,
+                        "skipped": True,
+                    })
+                    continue
+                payload = self._email_payload(index, content, segment_id)
                 parent_send_id, record = self._provision(
                     payload, send_at, f"email {index + 1}"
                 )
-                record["segment_id"] = self._email_segment_id(email)
+                record["segment_id"] = segment_id
                 state.setdefault("sends", {})[str(index)] = record
                 self._save_state(state)
                 results.append({**record, "skipped": False})

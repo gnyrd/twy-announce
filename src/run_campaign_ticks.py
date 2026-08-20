@@ -71,9 +71,9 @@ def _build_launcher_factory():
     from campaign_launch import CampaignLauncher, GateContext
     from provision_recording_product import recording_ready
     from sendgrid_api import SendGridAPI
-    from sendgrid_campaigns import SendGridRegistry
+    from sendgrid_campaigns import SendGridCampaigns, SendGridRegistry
     from sendgrid_newsletter_workflow import read_local_sections
-    from twy_paths import sendgrid_registry_path
+    from twy_paths import newsletters_dir, sendgrid_registry_path
 
     key = os.getenv("SENDGRID_API_KEY", "")
     if not key:
@@ -94,6 +94,14 @@ def _build_launcher_factory():
             class_date=real or get_habit_class_date(year, month),
             now=today,
         )
+        # Shares the newsletter workflow's own SendGrid state file for the
+        # period, so a dynamic audience the launcher builds reuses the same
+        # locked-name segment the workflow would, never a duplicate.
+        campaigns = SendGridCampaigns(
+            api=api,
+            registry=registry,
+            state_path=newsletters_dir() / f"{year:04d}-{month:02d}" / ".sendgrid.json",
+        )
         launcher = CampaignLauncher(
             api=api,
             registry=registry,
@@ -106,6 +114,9 @@ def _build_launcher_factory():
             # tagged with a section sends that draft's copy. An email whose
             # section has no draft yet holds this period, like a false gate.
             sections=read_local_sections(year, month),
+            # The handle for building the dynamic audiences (follow-ups'
+            # interested-non-members, gentle reminder's openers-not-registered).
+            campaigns=campaigns,
         )
         return launcher.launch(date(year, month, 1))
 
