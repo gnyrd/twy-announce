@@ -32,6 +32,7 @@ from sendgrid_mailings import (
 from twy_platform import locked_write
 from twy_platform.journeys import (
     ANCHOR_CLASS_DATE,
+    ANCHOR_CLASS_WEEKDAY_BEFORE,
     ANCHOR_FIRST_WEEKDAY,
     GATE_CLASS_EXISTS,
     GATE_CLASS_HAPPENED,
@@ -54,6 +55,21 @@ def _first_weekday(year: int, month: int) -> date:
     while day.weekday() >= 5:  # Saturday is 5, Sunday is 6
         day += timedelta(days=1)
     return day
+
+
+def _previous_weekday_strictly_before(day: date, weekday: int) -> date:
+    """The given weekday (0=Monday..6=Sunday) strictly before this date.
+
+    Mirrors the live workflow's sendgrid_mailings helper of the same name so a
+    campaign anchored on a weekday reproduces the invitation, resend and gentle
+    reminder dates exactly. The two implementations are held in agreement by the
+    cutover parity tests, which assert the campaign schedule equals
+    mailing_schedule for these mailings across class weekdays.
+    """
+    delta = (day.weekday() - weekday) % 7
+    if delta == 0:
+        delta = 7
+    return day - timedelta(days=delta)
 
 
 class CampaignLaunchError(ValueError):
@@ -150,10 +166,8 @@ class CampaignLauncher:
         )
 
     # ---- schedule math --------------------------------------------------
-    def _send_at(self, day) -> datetime:
-        local = datetime.combine(
-            day, time(SEND_HOUR, SEND_MINUTE), tzinfo=MOUNTAIN
-        )
+    def _send_at(self, day, hour: int = SEND_HOUR, minute: int = SEND_MINUTE) -> datetime:
+        local = datetime.combine(day, time(hour, minute), tzinfo=MOUNTAIN)
         return local.astimezone(timezone.utc)
 
     def _class_date(self) -> date:
@@ -169,11 +183,17 @@ class CampaignLauncher:
             )
         return ctx.class_date
 
-    def _anchor_date(self, anchor: str, offset_days: int) -> date:
+    def _anchor_date(self, anchor: str, offset_days: int, weekday=None) -> date:
         if anchor == ANCHOR_FIRST_WEEKDAY:
             base = _first_weekday(self._year, self._month)
         elif anchor == ANCHOR_CLASS_DATE:
             base = self._class_date()
+        elif anchor == ANCHOR_CLASS_WEEKDAY_BEFORE:
+            if weekday is None:
+                raise CampaignLaunchError(
+                    "a class_weekday_before email needs a weekday (0=Monday..6=Sunday)"
+                )
+            base = _previous_weekday_strictly_before(self._class_date(), int(weekday))
         else:
             raise CampaignLaunchError(f"unknown campaign anchor: {anchor}")
         return base + timedelta(days=offset_days)
@@ -193,7 +213,11 @@ class CampaignLauncher:
         for index, email in enumerate(self.journey.get("emails") or []):
             anchor = email.get("anchor")
             if anchor:
-                resolved = self._anchor_date(anchor, int(email.get("offset_days") or 0))
+                resolved = self._anchor_date(
+                    anchor,
+                    int(email.get("offset_days") or 0),
+                    email.get("weekday"),
+                )
             elif index == 0:
                 resolved = start_date
             elif email.get("send_date"):
@@ -212,10 +236,18 @@ class CampaignLauncher:
         return dates
 
     def _schedule(self, start_date) -> dict:
-        return {
-            index: self._send_at(day)
-            for index, day in self._email_dates(start_date).items()
-        }
+        emails = self.journey.get("emails") or []
+        schedule = {}
+        for index, day in self._email_dates(start_date).items():
+            email = emails[index]
+            hour = email.get("send_hour")
+            minute = email.get("send_minute")
+            schedule[index] = self._send_at(
+                day,
+                SEND_HOUR if hour is None else int(hour),
+                SEND_MINUTE if minute is None else int(minute),
+            )
+        return schedule
 
     @staticmethod
     def _format(moment: datetime) -> str:
