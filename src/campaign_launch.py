@@ -18,8 +18,15 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import time as _time
 from zoneinfo import ZoneInfo
+
+# A newsletter draft template carries tokens like {CLASS_TITLE} that the old
+# workflow resolves at lock time. The campaign content path reads the draft
+# directly, so it must never send one still carrying a token. Matches the
+# workflow's own UNRESOLVED_TOKEN.
+_UNRESOLVED_TOKEN = re.compile(r"\{[A-Z][A-Z0-9_]*\}")
 
 from newsletter_rendering import render_newsletter
 from sendgrid_mailings import (
@@ -502,11 +509,18 @@ class CampaignLauncher:
             resolved = self.sections.get(section)
             if not resolved:
                 return None
-            return {
+            content = {
                 "subject": str(resolved.get("subject") or ""),
                 "preheader": str(resolved.get("preheader") or ""),
                 "body": str(resolved.get("body") or ""),
             }
+            # The draft still carries an unresolved template token (the campaign
+            # content path does not resolve tokens the way the old workflow's
+            # locking does), so hold rather than send a literal {CLASS_TITLE}.
+            combined = "\n".join(content.values())
+            if _UNRESOLVED_TOKEN.search(combined):
+                return None
+            return content
         return {
             "subject": str(email.get("subject") or ""),
             "preheader": str(email.get("preheader") or ""),

@@ -76,6 +76,21 @@ def test_section_email_with_no_draft_this_period_is_pending(tmp_path):
     assert launcher._email_content(launcher.journey["emails"][0]) is None
 
 
+def test_a_draft_with_an_unresolved_token_holds_rather_than_sending_it(tmp_path):
+    """The campaign content path does not resolve tokens; a draft still carrying
+    one must hold, never send a literal {CLASS_TITLE}."""
+    sections = {"recording": {
+        "subject": "Your {CLASS_TITLE} recording",
+        "preheader": "",
+        "body": "Thank you for joining {CLASS_TITLE}.",
+    }}
+    launcher = _launcher(
+        [{"section": "recording", "subject": "S", "body": "B"}],
+        tmp_path, sections=sections,
+    )
+    assert launcher._email_content(launcher.journey["emails"][0]) is None
+
+
 def test_launch_sends_the_draft_copy_for_a_section_email(tmp_path):
     api = FakeAPI()
     sections = {"non_lifestyle": {
