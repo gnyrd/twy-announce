@@ -54,6 +54,22 @@ def is_due(journey: dict) -> bool:
     )
 
 
+def before_first_period(journey: dict, year: int, month: int) -> bool:
+    """Whether this period is earlier than the campaign's first period.
+
+    A recurring campaign may name the first period it should run (`first_period`,
+    YYYY_MM), so it can be turned On and approved ahead of time without the tick
+    launching it early. This is what lets the Habit and TYL campaigns be armed in
+    August to start in October while September stays the Transitions one-off.
+    Absent means it runs from any period. YYYY_MM compares lexically because it
+    is zero padded.
+    """
+    first = str(journey.get("first_period") or "").strip()
+    if not first:
+        return False
+    return f"{year:04d}_{month:02d}" < first
+
+
 def period_journey(journey: dict, year: int, month: int) -> dict:
     """A copy of the campaign pinned to one period.
 
@@ -79,7 +95,7 @@ def launch_due_campaigns(journeys, year, month, *, launch_one, log=None) -> list
     results = []
     for journey in journeys:
         jid = journey.get("journey_id")
-        if not is_due(journey):
+        if not is_due(journey) or before_first_period(journey, year, month):
             continue
         pinned = period_journey(journey, year, month)
         try:
