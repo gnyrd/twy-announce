@@ -572,3 +572,94 @@ def test_slack_dm_rejection_does_not_write_state(tmp_path):
         )
 
     assert not state_path.exists()
+
+
+# --- page-state-aware habit recommendation (2026-08-23) ---------------------
+
+
+def fake_month_dates(dates):
+    """dict {(year, month): date | None} -> resolver, raising on missing keys."""
+    def resolver(year, month):
+        return dates[(year, month)]
+    return resolver
+
+
+def test_pre_class_days_gap_between_class_and_next_plan(monkeypatch):
+    # August class happened on the 8th; September has no plan yet. Every day of
+    # the Aug 9-15 window is post-class, matching the live page's behavior.
+    monkeypatch.setattr(
+        weekly, "_habit_class_date_for_month",
+        fake_month_dates({(2026, 8): date(2026, 8, 8), (2026, 9): None}),
+    )
+    assert weekly._habit_pre_class_days(date(2026, 8, 15)) == (0, 7)
+
+
+def test_pre_class_days_after_next_plan_exists(monkeypatch):
+    # September's plan exists, so the page rolls forward and shows Register.
+    monkeypatch.setattr(
+        weekly, "_habit_class_date_for_month",
+        fake_month_dates({(2026, 8): date(2026, 8, 8), (2026, 9): date(2026, 9, 12)}),
+    )
+    assert weekly._habit_pre_class_days(date(2026, 8, 23)) == (7, 7)
+
+
+def test_pre_class_days_window_straddles_class_day(monkeypatch):
+    # Aug 5-11 window: Aug 5-8 are pre-class (class day counts, registration
+    # runs to the 9:00 start); Aug 9-11 post-class while September is unplanned.
+    monkeypatch.setattr(
+        weekly, "_habit_class_date_for_month",
+        fake_month_dates({(2026, 8): date(2026, 8, 8), (2026, 9): None}),
+    )
+    assert weekly._habit_pre_class_days(date(2026, 8, 11)) == (4, 7)
+
+
+def test_pre_class_days_unknown_when_classes_api_down(monkeypatch):
+    import requests
+
+    def boom(year, month):
+        raise requests.RequestException("down")
+
+    monkeypatch.setattr(weekly, "_habit_class_date_for_month", boom)
+    assert weekly._habit_pre_class_days(date(2026, 8, 23)) is None
+
+
+def habit_performance(visitors, register_clicks):
+    return {
+        "main": {"status": "error", "latest_7_days": {}, "top_sources": [], "top_entry_pages": []},
+        "habit": {
+            "status": "ok",
+            "latest_7_days": {"visitors": visitors},
+            "funnel_events": {"Habit Register Click": register_clicks},
+        },
+    }
+
+
+def test_habit_recommendation_states_post_class_window(monkeypatch):
+    monkeypatch.setattr(weekly, "_habit_pre_class_days", lambda week_end, days=7: (0, 7))
+    lines = weekly._website_recommendations(habit_performance(11, 0), date(2026, 8, 17))
+    assert len(lines) == 1
+    assert "post-class the whole window" in lines[0]
+    assert "No CTA change indicated" in lines[0]
+
+
+def test_habit_recommendation_keeps_review_on_pre_class_days(monkeypatch):
+    monkeypatch.setattr(weekly, "_habit_pre_class_days", lambda week_end, days=7: (4, 7))
+    lines = weekly._website_recommendations(habit_performance(11, 0), date(2026, 8, 11))
+    assert len(lines) == 1
+    assert "Review the /ig CTA path" in lines[0]
+    assert "4 pre-class day(s)" in lines[0]
+
+
+def test_habit_recommendation_flags_unknown_state(monkeypatch):
+    monkeypatch.setattr(weekly, "_habit_pre_class_days", lambda week_end, days=7: None)
+    lines = weekly._website_recommendations(habit_performance(11, 0), date(2026, 8, 17))
+    assert len(lines) == 1
+    assert "page state unknown" in lines[0]
+
+
+def test_habit_recommendation_silent_when_clicks_exist(monkeypatch):
+    def explode(week_end, days=7):
+        raise AssertionError("state lookup must not run when clicks exist")
+
+    monkeypatch.setattr(weekly, "_habit_pre_class_days", explode)
+    assert weekly._website_recommendations(habit_performance(11, 3), date(2026, 8, 17)) == []

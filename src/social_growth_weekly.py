@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ DEFAULT_DAYS = 7
 MIN_POST_AGE_HOURS = 24
 MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION = 10
 SLACK_STATE_FILE = ".weekly_slack_state.json"
+CLASSES_API = "http://localhost:5003"
 
 WEBSITE_PROPERTIES = {
     "main": {
@@ -478,7 +481,68 @@ def _first_dimension(rows: list[dict[str, Any]]) -> str | None:
     return text or None
 
 
-def _website_recommendations(website_performance: dict[str, Any]) -> list[str]:
+def _habit_class_date_for_month(year: int, month: int) -> date | None:
+    """The month's Habit class date from the classes API, or None when no plan.
+
+    Mirrors the landing page's own honesty rule: a month with no Habit plan has
+    no Habit date, never a guessed second Saturday. Raises RequestException
+    when the API is unreachable so the caller can tell unknown from absent.
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    response = requests.get(
+        f"{CLASSES_API}/api/plans",
+        params={
+            "from": f"{year:04d}-{month:02d}-01",
+            "to": f"{year:04d}-{month:02d}-{last_day:02d}",
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    for plan in response.json():
+        if plan.get("class_type") == "Habit":
+            return date.fromisoformat(plan["date"])
+    return None
+
+
+def _habit_pre_class_days(week_end: date, days: int = DEFAULT_DAYS) -> tuple[int, int] | None:
+    """(pre_class_days, total_days) for the rolling window, or None when unknown.
+
+    A day counts as pre_class when the class the landing page would SHOW that
+    day had not yet happened, mirroring yoga-habit's fetch_habit_plan: this
+    month's class until its day passes, then next month's class once that
+    month's plan exists. Days between a finished class and the authoring of the
+    next month's plan are post_class, and the page hides Register on them by
+    design. The class day itself counts as pre_class (registration runs until
+    the 9:00 MT start). None means the classes API was unreachable, so the
+    caller must not claim either state.
+    """
+    dates: dict[tuple[int, int], date | None] = {}
+
+    def month_date(year: int, month: int) -> date | None:
+        key = (year, month)
+        if key not in dates:
+            dates[key] = _habit_class_date_for_month(year, month)
+        return dates[key]
+
+    pre = 0
+    try:
+        for offset in range(days):
+            day = week_end - timedelta(days=days - 1 - offset)
+            shown = month_date(day.year, day.month)
+            if shown is not None and day <= shown:
+                pre += 1
+                continue
+            next_month = (day.month % 12) + 1
+            next_year = day.year + (1 if next_month == 1 else 0)
+            if month_date(next_year, next_month) is not None:
+                pre += 1
+    except requests.RequestException as exc:
+        print(f"[weekly] classes API unreachable for page-state split: {exc}", file=sys.stderr)
+        return None
+    return pre, days
+
+
+def _website_recommendations(website_performance: dict[str, Any], week_end: date) -> list[str]:
     recommendations: list[str] = []
     main = website_performance["main"]
     main_visitors = _website_visitors(main)
@@ -499,9 +563,19 @@ def _website_recommendations(website_performance: dict[str, Any]) -> list[str]:
         and habit_visitors >= MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION
         and register_clicks == 0
     ):
-        recommendations.append(
-            f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click. Review the /ig CTA path."
-        )
+        split = _habit_pre_class_days(week_end)
+        if split is not None and split[0] == 0:
+            recommendations.append(
+                f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors with no register click, and the page was post-class the whole window (Register is hidden by design until the next class is schedulable). No CTA change indicated."
+            )
+        elif split is not None:
+            recommendations.append(
+                f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click across {split[0]} pre-class day(s). Review the /ig CTA path."
+            )
+        else:
+            recommendations.append(
+                f"Habit campaign traffic reached {habit_visitors:g} rolling 7-day unique visitors without a register click. Review the /ig CTA path (page state unknown, classes API unreachable)."
+            )
     return recommendations
 
 
@@ -526,7 +600,19 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     if 0 < funnel["visitors"] < 10:
         recommendations.append("Landing traffic is too small to judge conversion. Keep measuring before changing the page.")
     if funnel["visitors"] >= 10 and funnel["habit_register_clicks"] == 0:
-        recommendations.append("Review the Instagram bio link and landing-page CTA path. Visits did not become register clicks.")
+        split = _habit_pre_class_days(parse_date(report["week_end"]))
+        if split is not None and split[0] == 0:
+            recommendations.append(
+                "Landing visits produced no register clicks, and the page was post-class the whole window (Register is hidden by design until the next class is schedulable). No CTA change indicated."
+            )
+        elif split is not None:
+            recommendations.append(
+                f"Review the Instagram bio link and landing-page CTA path. Visits did not become register clicks across {split[0]} pre-class day(s)."
+            )
+        else:
+            recommendations.append(
+                "Review the Instagram bio link and landing-page CTA path. Visits did not become register clicks (page state unknown, classes API unreachable)."
+            )
     if funnel["habit_register_clicks"] > 0 and habit_delta is not None and habit_delta <= 0:
         recommendations.append("Inspect the HeyMarvelous registration handoff. Register clicks did not increase Habit registrations.")
     if follower_delta is not None and follower_delta < 0:
@@ -555,7 +641,7 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
             recommendations.append(
                 f"Review {variant['key']} by reach, watch time, and growth actions separately. Its result is mixed."
             )
-    recommendations.extend(_website_recommendations(report["website_performance"]))
+    recommendations.extend(_website_recommendations(report["website_performance"], parse_date(report["week_end"])))
     if not recommendations:
         recommendations.append("Keep the current campaign running until the next weekly review has published-post evidence.")
     return recommendations
