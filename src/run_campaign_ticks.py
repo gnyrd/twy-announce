@@ -35,12 +35,18 @@ MOUNTAIN = ZoneInfo("America/Denver")
 
 
 def real_habit_class_date(year: int, month: int):
-    """The month's real Habit class date from an authored plan, or None.
+    """The month's Habit class date from an AUTHORED plan, or None.
 
     get_habit_class_date falls back to the second Saturday so a schedule always
-    resolves; the class_exists gate needs the stricter fact of whether a plan was
-    actually authored. On an API error this returns None, which HOLDS the
-    class-gated invitations rather than sending against an unconfirmed class.
+    resolves; the class_exists gate needs the stricter fact of whether a plan
+    was actually authored. Until 2026-08-23 this checked only that a Habit plan
+    existed, so a published placeholder (the Sept "Yoga Habits Class"
+    boilerplate) would have sent invitations for an unwritten class. The
+    classes API now stamps every plan with authored (content-based, computed
+    by plan_authored in the classes app); a missing stamp counts as authored
+    so an older API keeps the pre-stamp behavior. On an API error this returns
+    None, which HOLDS the class-gated invitations rather than sending against
+    an unconfirmed class.
     """
     last_day = calendar.monthrange(year, month)[1]
     try:
@@ -52,7 +58,7 @@ def real_habit_class_date(year: int, month: int):
         )
         if resp.ok:
             for plan in resp.json():
-                if plan.get("class_type") == "Habit":
+                if plan.get("class_type") == "Habit" and plan.get("authored", True):
                     return date.fromisoformat(plan["date"])
     except requests.RequestException as exc:
         log.warning("classes API unreachable resolving class_exists: %s", exc)

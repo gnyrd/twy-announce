@@ -255,3 +255,52 @@ def test_factory_is_fail_soft_when_class_date_resolution_raises(
     assert calls == []
     assert len(result["sends"]) == 1
     assert result["sends"][0]["skipped"] is False
+
+
+# --- class_exists requires an AUTHORED plan (2026-08-23) --------------------
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.ok = True
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _plans_response(monkeypatch, plans):
+    monkeypatch.setattr(
+        runner.requests, "get", lambda *a, **k: _FakeResponse(plans)
+    )
+
+
+def test_real_habit_class_date_accepts_authored_plan(monkeypatch):
+    _plans_response(monkeypatch, [
+        {"class_type": "Habit", "date": "2026-09-12", "authored": True},
+    ])
+    assert runner.real_habit_class_date(2026, 9) == date(2026, 9, 12)
+
+
+def test_real_habit_class_date_refuses_placeholder(monkeypatch):
+    # The Sept 2026 placeholder shape: a published Habit plan the classes API
+    # stamps authored: False. class_exists must hold, not invite.
+    _plans_response(monkeypatch, [
+        {"class_type": "Habit", "date": "2026-09-12", "authored": False},
+    ])
+    assert runner.real_habit_class_date(2026, 9) is None
+
+
+def test_real_habit_class_date_missing_stamp_keeps_old_behavior(monkeypatch):
+    _plans_response(monkeypatch, [
+        {"class_type": "Habit", "date": "2026-09-12"},
+    ])
+    assert runner.real_habit_class_date(2026, 9) == date(2026, 9, 12)
+
+
+def test_real_habit_class_date_api_error_holds(monkeypatch):
+    def boom(*a, **k):
+        raise runner.requests.RequestException("down")
+
+    monkeypatch.setattr(runner.requests, "get", boom)
+    assert runner.real_habit_class_date(2026, 9) is None
