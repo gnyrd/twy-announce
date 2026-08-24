@@ -71,12 +71,30 @@ def _parse_generated(text: str) -> tuple[str, str, str]:
     return subject, preheader, "\n".join(body_lines).strip()
 
 
-def assemble_prompt(audience: str, overview: dict, plans: dict, year: int, month: int) -> str:
-    """The Tweee prompt for one audience, assembled from the Overview and plans."""
+def assemble_prompt(
+    audience: str,
+    overview: dict,
+    plans: dict,
+    year: int,
+    month: int,
+    style_note: str | None = None,
+) -> str:
+    """The Tweee prompt for one audience, assembled from the Overview and plans.
+
+    style_note carries per-period editorial direction decided by a human (for
+    example the Aug 24 2026 call's September direction: lead with the series,
+    marketing-forward tone). It is appended to the assembled prompt so the
+    standing prompt builders stay untouched and the direction is visible in
+    the prompt record for that period.
+    """
     key = audience.replace("-", "_")
     if key not in _ASSEMBLERS:
         raise AutogenError(f"no autogen assembler for audience {audience!r}")
-    return _ASSEMBLERS[key](overview, plans, year, month)
+    prompt = _ASSEMBLERS[key](overview, plans, year, month)
+    note = (style_note or "").strip()
+    if note:
+        prompt = prompt + "\n\nAdditional direction for this period:\n" + note
+    return prompt
 
 
 def generate_from_prompt(audience: str, prompt: str, generate_fn) -> dict:

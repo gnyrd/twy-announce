@@ -46,6 +46,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="generate and validate but do not post the drafts",
     )
+    parser.add_argument(
+        "--style-note",
+        default="",
+        help="per-period editorial direction appended to every assembled prompt"
+             " (human-decided, e.g. from a weekly call)",
+    )
+    parser.add_argument(
+        "--show-body",
+        action="store_true",
+        help="print each generated body in full (dry-run inspection)",
+    )
     args = parser.parse_args(argv)
 
     overview = load_month_overview(args.month)
@@ -59,7 +70,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sections: dict[str, dict] = {}
     for audience in [a.strip() for a in args.audiences.split(",") if a.strip()]:
-        prompt = autogen.assemble_prompt(audience, overview, plans, args.year, args.month)
+        prompt = autogen.assemble_prompt(
+            audience, overview, plans, args.year, args.month,
+            style_note=args.style_note,
+        )
         draft = autogen.generate_from_prompt(audience, prompt, generate_fn)
         sections[audience] = {
             "subject": draft["subject"],
@@ -70,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
             f"{audience}: subject={draft['subject'][:60]!r} "
             f"preheader={len(draft['preheader'])}c body={len(draft['body'])}c"
         )
+        if args.show_body:
+            print("--- " + audience + " preheader: " + draft["preheader"])
+            print(draft["body"])
+            print("--- end " + audience)
 
     if args.dry_run:
         print("DRY RUN: generated and validated, nothing posted or notified.")

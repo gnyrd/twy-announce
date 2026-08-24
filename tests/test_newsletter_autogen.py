@@ -90,3 +90,22 @@ def test_assemble_prompt_normalizes_the_audience_hyphen():
     finally:
         import habit_newsletter_prompt as hnp
         autogen._ASSEMBLERS["non_lifestyle"] = hnp.assemble_non_lifestyle_prompt
+
+
+def test_assemble_prompt_appends_style_note(monkeypatch):
+    # Per-period human direction (e.g. the Aug 24 2026 call's September
+    # direction) rides the assembled prompt; the standing builders stay put.
+    import newsletter_autogen as autogen
+
+    monkeypatch.setitem(autogen._ASSEMBLERS, "lifestyle", lambda o, p, y, m: "BASE PROMPT")
+    with_note = autogen.assemble_prompt(
+        "lifestyle", {}, {}, 2026, 9, style_note="Lead with the Transitions series."
+    )
+    assert with_note.startswith("BASE PROMPT")
+    assert "Additional direction for this period:" in with_note
+    assert "Lead with the Transitions series." in with_note
+
+    without = autogen.assemble_prompt("lifestyle", {}, {}, 2026, 9)
+    assert without == "BASE PROMPT"
+    blank = autogen.assemble_prompt("lifestyle", {}, {}, 2026, 9, style_note="   ")
+    assert blank == "BASE PROMPT"
