@@ -31,7 +31,7 @@ def _campaign(emails):
     }
 
 
-def _launcher(emails, tmp_path, sections=None, api=None):
+def _launcher(emails, tmp_path, sections=None, api=None, approvals=None):
     return CampaignLauncher(
         api=api if api is not None else FakeAPI(),
         registry=FakeRegistry(),
@@ -40,6 +40,12 @@ def _launcher(emails, tmp_path, sections=None, api=None):
         now_fn=lambda: NOW,
         gate_context=GateContext(class_date=date(2026, 9, 12)),
         sections=sections,
+        # Tests supply drafts as already approved unless a test is about the
+        # per-month approval hold itself.
+        section_approvals=(
+            approvals if approvals is not None
+            else {key: True for key in (sections or {})}
+        ),
     )
 
 
@@ -171,3 +177,22 @@ def test_unresolved_token_guard_is_imported_not_a_duplicate_literal():
         campaign_launch._UNRESOLVED_TOKEN
         is sendgrid_newsletter_workflow.UNRESOLVED_TOKEN
     )
+
+
+def test_launch_holds_a_section_email_until_its_period_draft_is_approved(tmp_path):
+    """Approval is per month (JP 2026-08-24): the same email that sends when
+    its period draft is approved holds when it is not."""
+    api = FakeAPI()
+    sections = {"non_lifestyle": {
+        "subject": "Invite", "preheader": "", "body": "Invite body.",
+    }}
+    launcher = _launcher(
+        [{"section": "non_lifestyle", "subject": "S", "body": "B"}],
+        tmp_path, sections=sections, api=api,
+        approvals={"non_lifestyle": False},
+    )
+    result = launcher.launch(date(2026, 9, 1))
+    pending = [r for r in result["sends"] if r.get("content_pending")]
+    assert api.created_single_sends == []
+    assert len(pending) == 1
+    assert pending[0].get("skipped") is True

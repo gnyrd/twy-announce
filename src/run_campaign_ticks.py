@@ -82,6 +82,7 @@ def _build_launcher_factory():
         ensure_recording_draft,
         read_local_sections,
         resolve_section_tokens,
+        section_approvals,
     )
     from twy_paths import newsletters_dir, sendgrid_registry_path
 
@@ -154,6 +155,9 @@ def _build_launcher_factory():
             ),
             gate_context=context,
             sections=sections,
+            # Approval is per month: a section-sourced email holds until this
+            # period's draft of its section is approved (JP 2026-08-24).
+            section_approvals=section_approvals(year, month),
             # The handle for building the dynamic audiences (follow-ups'
             # interested-non-members, gentle reminder's openers-not-registered).
             campaigns=campaigns,

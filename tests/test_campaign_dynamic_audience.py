@@ -53,7 +53,7 @@ class FakeCampaigns:
         return {"id": rec["id"], "name": f"{year}_{month:02d}: {purpose.value}"}
 
 
-def _launcher(journey, tmp_path, api, campaigns, sections=None, gate=None):
+def _launcher(journey, tmp_path, api, campaigns, sections=None, gate=None, approvals=None):
     return CampaignLauncher(
         api=api,
         registry=FakeRegistry(),
@@ -62,6 +62,10 @@ def _launcher(journey, tmp_path, api, campaigns, sections=None, gate=None):
         now_fn=lambda: NOW,
         campaigns=campaigns,
         sections=sections,
+        section_approvals=(
+            approvals if approvals is not None
+            else {key: True for key in (sections or {})}
+        ),
         gate_context=gate or GateContext(class_date=date(2026, 9, 12)),
     )
 
@@ -160,6 +164,7 @@ def test_dynamic_audience_without_a_campaigns_handle_is_refused(tmp_path):
         state_path=tmp_path / "s.json", now_fn=lambda: NOW,
         gate_context=GateContext(class_date=date(2026, 9, 12)),
         sections={"ph1": {"subject": "FU", "preheader": "", "body": "fu body"}},
+        section_approvals={"ph1": True},
     )
     with pytest.raises(CampaignLaunchError):
         launcher.launch(date(2026, 9, 12))

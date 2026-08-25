@@ -114,6 +114,26 @@ def _no_live_class_date(monkeypatch):
     monkeypatch.setattr(runner, "get_habit_class_date", lambda year, month: None)
 
 
+def _approve_section(tmp_path, key):
+    """Stamp approved_at on one section draft in the period metadata: the
+    per-month approval the campaign path requires (JP 2026-08-24)."""
+    import json as _json
+
+    path = (
+        tmp_path / "data" / "newsletters" / f"{YEAR:04d}-{MONTH:02d}"
+        / ".metadata.json"
+    )
+    payload = (
+        _json.loads(path.read_text()) if path.exists()
+        else {"version": 1, "drafts": {}}
+    )
+    payload.setdefault("drafts", {}).setdefault(key, {})[
+        "approved_at"
+    ] = "2030-01-01T00:00:00+00:00"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(payload))
+
+
 def test_section_email_copy_reaches_the_launcher_resolved(monkeypatch, tmp_path):
     monkeypatch.setenv("SENDGRID_API_KEY", "test-key")
     monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
@@ -126,6 +146,7 @@ def test_section_email_copy_reaches_the_launcher_resolved(monkeypatch, tmp_path)
     # fact to substitute the tokens with.
     assert ensure_recording_draft(YEAR, MONTH) is True
     _write_recording_record(tmp_path)
+    _approve_section(tmp_path, "recording")
 
     pinned = _campaign(
         [{"section": "recording", "subject": "STATIC", "body": "STATIC"}]

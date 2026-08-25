@@ -132,6 +132,7 @@ class CampaignLauncher:
         sleep_fn=_time.sleep,
         gate_context: GateContext = None,
         sections: dict = None,
+        section_approvals: dict = None,
         campaigns=None,
     ):
         if journey_type(journey) != TYPE_CAMPAIGN:
@@ -154,6 +155,12 @@ class CampaignLauncher:
         # draws its copy from here instead of its static text; production passes
         # the resolved drafts in, a test supplies them directly.
         self.sections = sections or {}
+        # Which of this period's drafts Tiff has approved, keyed by section
+        # (workflow section_approvals). Approval is a per-month fact: a
+        # section-sourced email holds until its period draft is approved, so
+        # every new month starts unapproved (JP 2026-08-24). Fail closed: no
+        # entry reads as unapproved.
+        self.section_approvals = section_approvals or {}
         month = str(journey.get("campaign_month") or "")
         if len(month) != 7 or month[4] != "_":
             raise CampaignLaunchError("campaign month must be YYYY_MM")
@@ -506,6 +513,11 @@ class CampaignLauncher:
         if section:
             resolved = self.sections.get(section)
             if not resolved:
+                return None
+            # Approval is a per-month fact: the period's draft of this section
+            # must be approved before its copy may send (JP 2026-08-24).
+            # Fail closed: unknown reads as unapproved.
+            if not self.section_approvals.get(section):
                 return None
             content = {
                 "subject": str(resolved.get("subject") or ""),

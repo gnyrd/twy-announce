@@ -222,6 +222,24 @@ def read_local_sections(year: int, month: int) -> dict[str, dict]:
     return sections
 
 
+def section_approvals(year: int, month: int) -> dict[str, bool]:
+    """Whether each section's draft for this period is approved, by key.
+
+    Out-of-band from read_local_sections on purpose: the section dicts feed
+    snapshots and provider payload builders, so a flag added there would leak
+    into stored snapshots and drift comparisons. The campaign path reads this
+    beside the sections to hold any section-sourced email whose period draft
+    Tiff has not approved, which is what makes approval a per-month fact
+    rather than a one-time checkbox (JP 2026-08-24).
+    """
+    metadata = _load_metadata(year, month)
+    drafts = metadata.get("drafts") or {}
+    return {
+        key: bool((drafts.get(key) or {}).get("approved_at"))
+        for key in SECTION_PURPOSES
+    }
+
+
 def sections_due_for_materialization(
     *,
     year: int,
