@@ -49,6 +49,7 @@ import sys
 
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
+from sendgrid_contact_source import SOURCE_FREE_CLASS_CLAIM, stamp_new_contacts
 from sendgrid_list_sync import ensure_list
 from sendgrid_mailings import EMAIL_SUBSCRIBED
 from twy_paths import load_env, marvy_db_path, sendgrid_registry_path
@@ -151,7 +152,10 @@ def main() -> int:
         )
         return 0
 
-    job_id = api.upsert_contacts([subscribed_list_id], eligible)
+    job_id = api.upsert_contacts(
+        [subscribed_list_id],
+        stamp_new_contacts(api, eligible, source=SOURCE_FREE_CLASS_CLAIM),
+    )
     api.wait_contact_job(job_id, timeout_s=300)
     log.info(
         "%d free class claimants, %d added to %s, %d skipped as unsubscribed",

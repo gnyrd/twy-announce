@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sendgrid_campaigns import SendGridRegistry
+from sendgrid_contact_source import stamp_new_contacts
 from sendgrid_mailings import validate_sendgrid_name
 
 
@@ -41,6 +42,8 @@ def sync_exact_list(
     destination_list_id: str,
     desired_contacts: list[dict],
     additive_list_ids: list[str] | None = None,
+    source: str | None = None,
+    source_detail: str = "",
 ) -> dict:
     by_email = {
         normalized["email"]: normalized
@@ -58,7 +61,15 @@ def sync_exact_list(
                 if identifier != destination_list_id
             ],
         ]
-        job_id = api.upsert_contacts(list_ids, desired)
+        # Acquisition source, stamped on contacts this sync is about to create.
+        # stamp_new_contacts leaves anyone SendGrid already holds untouched, so
+        # a nightly re-run never rewrites a person's original origin.
+        payload = desired
+        if source:
+            payload = stamp_new_contacts(
+                api, desired, source=source, detail=source_detail
+            )
+        job_id = api.upsert_contacts(list_ids, payload)
         api.wait_contact_job(job_id, timeout_s=300)
 
     desired_emails = set(by_email)

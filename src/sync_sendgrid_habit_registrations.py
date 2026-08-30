@@ -16,6 +16,7 @@ import requests
 
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
+from sendgrid_contact_source import SOURCE_HABIT_SYNC
 from sendgrid_list_sync import ensure_list, sync_exact_list
 from sendgrid_mailings import EMAIL_SUBSCRIBED, habit_activity_name
 from twy_paths import load_env, sendgrid_registry_path
@@ -190,6 +191,8 @@ def sync_event_lists(
         destination_list_id=attended_list_id,
         desired_contacts=attendees,
         additive_list_ids=None,
+        source=SOURCE_HABIT_SYNC,
+        source_detail=attended_name,
     )
 
     result = sync_exact_list(
@@ -197,6 +200,8 @@ def sync_event_lists(
         destination_list_id=registered_list_id,
         desired_contacts=registrants,
         additive_list_ids=[interested_list_id, subscribed_list_id],
+        source=SOURCE_HABIT_SYNC,
+        source_detail=registered_name,
     )
     return {
         **result,

@@ -90,6 +90,16 @@ class FakeAPI:
     def list_contacts(self, list_id):
         return self.present
 
+    def field_definitions(self):
+        return [
+            {"id": "e1_T", "name": "twy_source"},
+            {"id": "e2_T", "name": "twy_source_detail"},
+        ]
+
+    def contacts_by_emails(self, emails):
+        known = {str(c["email"]).lower() for c in self.present}
+        return {email: {"email": email} for email in emails if email in known}
+
     def upsert_contacts(self, list_ids, contacts):
         self.upserted.append((list_ids, contacts))
         return "job-1"

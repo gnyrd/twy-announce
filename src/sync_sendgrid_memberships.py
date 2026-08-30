@@ -15,6 +15,7 @@ from marvelous_memberships import (
 )
 from sendgrid_api import SendGridAPI
 from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
+from sendgrid_contact_source import SOURCE_MEMBER_SYNC
 from sendgrid_list_sync import ensure_list, sync_exact_list
 from twy_paths import load_env, sendgrid_registry_path
 
@@ -90,6 +91,8 @@ def sync_membership_lists(
             destination_list_id=list_id,
             desired_contacts=memberships.get(name, []),
             additive_list_ids=None,
+            source=SOURCE_MEMBER_SYNC,
+            source_detail=name,
         )
     return results
 

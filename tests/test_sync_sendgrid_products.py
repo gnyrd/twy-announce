@@ -185,6 +185,10 @@ class RecordingAPI:
         self.calls = []
         self.contacts = {}
         self.suppressions = {"sub@example.com"}
+        self.custom_fields = [
+            {"id": "e1_T", "name": "twy_source"},
+            {"id": "e2_T", "name": "twy_source_detail"},
+        ]
         self.list_exports = {
             "subscribed-list-id": [
                 {"id": "contact-1", "email": "sub@example.com"},
@@ -194,6 +198,14 @@ class RecordingAPI:
     def list_contacts(self, list_id):
         self.calls.append(("list_contacts", list_id))
         return self.list_exports.get(list_id, [])
+
+    def field_definitions(self):
+        return list(self.custom_fields)
+
+    def create_field_definition(self, name, field_type):  # pragma: no cover
+        raise AssertionError(
+            f"the source custom field {name} should already exist"
+        )
 
     def create_list(self, name):
         self.calls.append(("create_list", name))
@@ -317,9 +329,11 @@ def test_apply_renews_consent_before_import_and_persists_after_verification(
     assert names.index("remove_group_suppression") < names.index(
         "upsert_contacts"
     )
-    assert names.index("wait_contact_job") < names.index(
-        "contacts_by_emails"
-    )
+    # The membership VERIFICATION lookup runs after the import job completes.
+    # Source stamping also calls contacts_by_emails, before the upsert, so this
+    # reads the last occurrence rather than the first.
+    last_lookup = len(names) - 1 - names[::-1].index("contacts_by_emails")
+    assert names.index("wait_contact_job") < last_lookup
     assert registry.ids["Product: Violet Flame Meditation"] == (
         "product-list-id"
     )

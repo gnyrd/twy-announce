@@ -19,6 +19,7 @@ from journey_enrollment import (
     plan_enrollment,
     record_enrollments,
 )
+from sendgrid_contact_source import SOURCE_PRODUCT_PURCHASE, stamp_new_contacts
 from sendgrid_list_sync import ensure_list
 from sendgrid_mailings import product_attribute_name
 from twy_platform.journeys import active_journeys_by_product
@@ -413,7 +414,12 @@ def apply_product_plan(
         jobs.append(
             api.upsert_contacts(
                 [subscribed_list_id, product_list_ids[product_id]],
-                list(contacts),
+                stamp_new_contacts(
+                    api,
+                    list(contacts),
+                    source=SOURCE_PRODUCT_PURCHASE,
+                    detail=next_state.product_list_names[product_id],
+                ),
             )
         )
     for job_id in jobs:
