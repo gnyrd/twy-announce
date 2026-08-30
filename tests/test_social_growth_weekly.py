@@ -222,8 +222,10 @@ def test_weekly_review_computes_deltas_funnel_totals_and_campaigns(tmp_path):
         "recent_variants": ["habit_entry_regular_reels:steady_first_step"],
         "upcoming_variants": ["habit_entry_regular_reels:find_out"],
     }
+    # The "let the scheduled campaign publish" line went with the CTA variant
+    # experiment (stopped 2026-08-30): it fired every week, waiting for evidence
+    # a zero-growth-action baseline could never produce.
     assert report["recommendations"] == [
-        "Let the scheduled campaign publish before changing copy. No published variant evidence exists yet.",
         "Landing traffic is too small to judge conversion. Keep measuring before changing the page.",
     ]
 

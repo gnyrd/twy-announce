@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from snapshot_list_membership import membership_delta
 from twy_paths import data_root as default_data_root
-from twy_paths import load_env
+from twy_paths import email_membership_dir, load_env
 
 
 DEFAULT_DAYS = 7
@@ -339,6 +340,88 @@ def _campaign_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _acquisition(
+    *,
+    week_start: date,
+    week_end: date,
+    membership_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Where this week's new email contacts came from.
+
+    This replaces the CTA-variant comparison as the review's evidence about what
+    is working. The variant experiment could not answer it: comparing wordings
+    against a baseline of zero growth actions produced a recommendation to wait,
+    every week, forever. Acquisition source is a fact rather than a comparison,
+    and it separates a contact that was created from one a sync merely swept
+    onto a list, which the subscriber count never could.
+
+    Fed by snapshot_list_membership. Reports unavailable rather than guessing
+    when the window holds fewer than two snapshots, which is every review before
+    2026-09-06 since the first snapshot is 2026-08-30.
+    """
+    directory = membership_dir or email_membership_dir()
+    try:
+        paths = sorted(
+            path
+            for path in directory.glob("*.json")
+            if week_start.isoformat()
+            <= path.stem
+            <= week_end.isoformat()
+        )
+    except OSError:
+        paths = []
+
+    if len(paths) < 2:
+        return {
+            "available": False,
+            "reason": (
+                "fewer than two membership snapshots in this window; "
+                "daily collection began 2026-08-30"
+            ),
+            "snapshot_count": len(paths),
+        }
+
+    previous = read_json(paths[0])
+    current = read_json(paths[-1])
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        return {
+            "available": False,
+            "reason": "membership snapshot is unreadable",
+            "snapshot_count": len(paths),
+        }
+
+    delta = membership_delta(previous, current)
+    lists = current.get("lists") or {}
+    subscribed_id = next(
+        (
+            list_id
+            for list_id, name in lists.items()
+            if name == "Email: Subscribed"
+        ),
+        "",
+    )
+    refiled = len((delta["list_added"] or {}).get(subscribed_id, []))
+
+    return {
+        "available": True,
+        "from": delta["from"],
+        "to": delta["to"],
+        "snapshot_count": len(paths),
+        "created": len(delta["created"]),
+        "deleted": len(delta["deleted"]),
+        "by_source": dict(
+            sorted(
+                delta["created_by_source"].items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
+        # Existing contacts a sync added to the newsletter audience. These move
+        # the subscriber count without being new people, which is exactly the
+        # confusion that made the 2026-08-09 jump of 18 unreadable.
+        "refiled_onto_subscribed": refiled,
+    }
+
+
 def _post_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
     aggregate = _aggregate_posts(posts)
     return {
@@ -588,15 +671,10 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     follower_delta = metrics["instagram_followers"]["delta"]
     subscriber_delta = metrics["email_subscribers"]["delta"]
     habit_delta = metrics["next_habit_registrations"]["delta"]
-    upcoming = report["campaigns"]["upcoming_variants"]
     performance = report["post_performance"]
-    variants = report["campaign_performance"]["variants"]
+    acquisition = report.get("acquisition") or {}
 
     recommendations: list[str] = []
-    if upcoming and not variants:
-        recommendations.append(
-            "Let the scheduled campaign publish before changing copy. No published variant evidence exists yet."
-        )
     if 0 < funnel["visitors"] < 10:
         recommendations.append("Landing traffic is too small to judge conversion. Keep measuring before changing the page.")
     if funnel["visitors"] >= 10 and funnel["habit_register_clicks"] == 0:
@@ -619,27 +697,42 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
         recommendations.append("Review the posts from the down-follower week before changing the next variant.")
     if subscriber_delta is not None and subscriber_delta <= 0 and funnel["habit_signup_success"] > 0:
         recommendations.append("Check SendGrid signup attribution. Signup successes did not move subscriber count.")
+    # Saves and shares are how a Reel reaches anyone who does not already
+    # follow the account, so zero of them is a distribution finding, not a copy
+    # finding. Reported as content evidence rather than as a CTA verdict: the
+    # variant experiment that used to live here was stopped 2026-08-30 because
+    # comparing wordings against a zero baseline can never resolve.
     if performance["posts_analyzed"] and performance["totals"]["growth_actions"] == 0:
         recommendations.append(
-            "The reviewed Reels produced no follows, saves, shares, or clicks. Use this as the baseline the next variant must beat."
+            "No saves, shares, follows or clicks on any reviewed Reel. Reels reach non-followers through saves and shares, so this is a distribution problem in what the posts are, not in the CTA wording."
         )
-    for variant in variants:
-        comparison = variant["comparison_to_baseline"]
-        if variant["post_count"] < 3:
+    followers = metrics["instagram_followers"].get("end")
+    average_reach = performance.get("averages", {}).get("reach")
+    if performance["posts_analyzed"] and followers and average_reach:
+        share = average_reach / followers
+        if share < 0.15:
             recommendations.append(
-                f"Keep {variant['key']} running until at least three published posts have mature analytics."
+                f"Average reach is {average_reach:,.0f} against {followers:,.0f} followers ({share:.1%}). Posts are barely leaving the existing audience."
             )
-        elif comparison["assessment"] == "better":
+
+    if acquisition.get("available"):
+        by_source = acquisition.get("by_source") or {}
+        social_sources = {"habit_signup"}
+        if acquisition["created"] == 0:
             recommendations.append(
-                f"Keep {variant['key']} for another week. It improved most measured post averages over baseline."
+                "No new email contacts this week. Email is the only channel that has been converting, so this is the number to watch."
             )
-        elif comparison["assessment"] == "weaker":
+        elif not (set(by_source) & social_sources):
             recommendations.append(
-                f"Replace or revise {variant['key']}. It underperformed the baseline on most measured post averages."
+                f"All {acquisition['created']} new contacts came from {', '.join(by_source) or 'unattributed'}. None arrived through the landing-page signup, which is the only path social traffic has."
             )
-        elif comparison["assessment"] == "mixed":
+        if by_source.get("unattributed"):
             recommendations.append(
-                f"Review {variant['key']} by reach, watch time, and growth actions separately. Its result is mixed."
+                f"{by_source['unattributed']} new contacts carry no source. Check for a bulk write outside the four stamped sync paths."
+            )
+        if acquisition.get("refiled_onto_subscribed"):
+            recommendations.append(
+                f"{acquisition['refiled_onto_subscribed']} of this week's subscriber-count movement was existing contacts being refiled by a sync, not new people. Read the count accordingly."
             )
     recommendations.extend(_website_recommendations(report["website_performance"], parse_date(report["week_end"])))
     if not recommendations:
@@ -766,6 +859,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         },
         "post_performance": _post_performance(posts),
         "campaign_performance": _campaign_performance(posts),
+        "acquisition": _acquisition(week_start=week_start, week_end=week_end),
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
@@ -852,19 +946,25 @@ def render_markdown(report: dict[str, Any]) -> str:
     if not performance["posts"]:
         lines.append("| No mature post analytics in this period |  |  |  |  |  |  |  |  |")
 
-    lines.extend(["", "## Campaign Variants", ""])
-    variants = report["campaign_performance"]["variants"]
-    if variants:
-        for variant in variants:
-            comparison = variant["comparison_to_baseline"]
-            lines.append(
-                f"- `{variant['key']}`: {variant['post_count']} posts, "
-                f"{_format_number(variant['averages']['reach'])} average reach, "
-                f"{variant['averages']['watch_time_seconds']:.2f}s average watch, "
-                f"assessment `{comparison['assessment']}`"
-            )
+    lines.extend(["", "## Acquisition", ""])
+    acquisition = report.get("acquisition") or {}
+    if not acquisition.get("available"):
+        lines.append(f"- Not available: {acquisition.get('reason', 'unknown')}.")
     else:
-        lines.append("- No campaign variant had published posts with mature analytics in this period.")
+        lines.append(
+            f"- {acquisition['created']} new contacts "
+            f"({acquisition['from']} to {acquisition['to']})."
+        )
+        for source, count in (acquisition["by_source"] or {}).items():
+            lines.append(f"  - {source}: {count}")
+        if acquisition["refiled_onto_subscribed"]:
+            lines.append(
+                f"- {acquisition['refiled_onto_subscribed']} existing contacts "
+                "were added to Email: Subscribed by a sync. They moved the "
+                "subscriber count without being new people."
+            )
+        if acquisition["deleted"]:
+            lines.append(f"- {acquisition['deleted']} contacts removed.")
 
     cross = report.get("meta_cross_check") or {}
     lines.extend(["", "## Meta cross-check (Instagram)", ""])
