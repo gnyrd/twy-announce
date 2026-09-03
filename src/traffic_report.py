@@ -235,14 +235,23 @@ def top_list(rows: list[tuple[str, int]], n: int = TOP_N) -> str:
     kept = [(name or "(direct)", count) for name, count in rows if count > 0][:n]
     if not kept:
         return "none"
-    return ", ".join(f"{name} {count}" for name, count in kept)
+    return "  |  ".join(f"{name} {count}" for name, count in kept)
 
 
 def source_label(source: str) -> str:
     return "Direct" if source in ("Direct / None", "") else source
 
 
+def pipe(parts: list[str]) -> str:
+    return "  |  ".join(parts)
+
+
 def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date) -> str:
+    """One label per line with its number, deltas on an indented line.
+
+    Matches the daily membership report JP already reads: bold label, colon,
+    the number, then a Delta line. No sentences, no bullets, no footer.
+    """
     y = main["yesterday"]
     lw = main["last_week_same_day"]
     mtd = main["mtd"]
@@ -254,34 +263,47 @@ def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date)
     previous_month_name = (day.replace(day=1) - timedelta(days=1)).strftime("%B")
 
     lines = [
-        f"*Website traffic: {day.strftime('%A %b %-d, %Y')}*",
+        f"*{day.strftime('%A, %B %-d')}* ({SITE_LABELS.get(main['site_id'], main['site_id'])})",
         "",
-        f"*Yesterday* ({SITE_LABELS.get(main['site_id'], main['site_id'])})",
-        f"• {y['visitors']} visitors, {y['pageviews']} pageviews. Same day last week: {lw['visitors']} visitors, {delta(y['visitors'], lw['visitors'])}.",
-        f"• From search: {main['search_day']}. From AI tools: {main['ai_day']}.",
-        f"• Top sources: {top_list([(source_label(s), c) for s, c in main['sources']])}.",
-        f"• Top pages: {top_list(main['pages'])}.",
+        f"*Visitors*: {y['visitors']}",
+        f"    \u0394 same day last week: {delta(y['visitors'], lw['visitors'])}",
+        f"*Pageviews*: {y['pageviews']}",
         "",
-        f"*{month_name} so far* (through the {day.day}{ordinal(day.day)})",
-        f"• {mtd['visitors']} visitors, {mtd['pageviews']} pageviews. Same span in {previous_month_name}: {pm_same['visitors']} visitors, {delta(mtd['visitors'], pm_same['visitors'])}.",
-        f"• All of {previous_month_name}: {pm_full['visitors']} visitors.",
-        f"• From search this month: {main['search_mtd']}. From AI tools: {main['ai_mtd']}.",
+        f"*{month_name}*: {mtd['visitors']}",
+        "    "
+        + pipe(
+            [
+                f"\u0394 same span in {previous_month_name}: {delta(mtd['visitors'], pm_same['visitors'])}",
+                f"all of {previous_month_name}: {pm_full['visitors']}",
+            ]
+        ),
+        f"*{day.year}*: {ytd['visitors']}",
+    ]
+    if py["visitors"]:
+        lines.append(
+            f"    \u0394 same span in {day.year - 1}: {delta(ytd['visitors'], py['visitors'])}"
+        )
+    lines += [
         "",
-        f"*{day.year} so far*",
-        f"• {ytd['visitors']} visitors, {ytd['pageviews']} pageviews. Same span in {day.year - 1}: "
-        + (f"{py['visitors']} visitors, {delta(ytd['visitors'], py['visitors'])}." if py["visitors"] else "no data (tracking started in 2026)."),
+        "*Search*: " + pipe([f"day: {main['search_day']}", f"month: {main['search_mtd']}"]),
+        "*AI tools*: " + pipe([f"day: {main['ai_day']}", f"month: {main['ai_mtd']}"]),
+        "",
+        f"*Top pages*: {top_list(main['pages'])}",
+        f"*Top sources*: {top_list([(source_label(s), c) for s, c in main['sources']])}",
     ]
     if briefs:
         lines.append("")
-        lines.append("*Other sites*")
         for brief in briefs:
             label = SITE_LABELS.get(brief["site_id"], brief["site_id"])
             lines.append(
-                f"• {label}: {brief['yesterday']['visitors']} yesterday, {brief['mtd']['visitors']} this month "
-                f"({delta(brief['mtd']['visitors'], brief['previous_month_same_span']['visitors'])} vs the same span last month)."
+                f"*{label}*: "
+                + pipe(
+                    [
+                        f"day: {brief['yesterday']['visitors']}",
+                        f"month: {brief['mtd']['visitors']}",
+                    ]
+                )
             )
-    lines.append("")
-    lines.append("_Source: Plausible. Search means Google, Bing and the like; AI tools means visits referred by ChatGPT, Perplexity, Claude, Gemini or Copilot._")
     return "\n".join(lines)
 
 

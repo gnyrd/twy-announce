@@ -95,21 +95,24 @@ def test_report_reads_three_scales_and_the_other_sites():
         ["tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"],
         date(2026, 9, 2),
     )
-    assert text.startswith("*Website traffic: Wednesday Sep 2, 2026*")
-    assert "• 23 visitors, 31 pageviews. Same day last week: 20 visitors, +3 (+15%)." in text
-    assert "• From search: 12. From AI tools: 2." in text
-    assert "• Top sources: Google 12, Direct 9, chatgpt.com 2." in text
-    assert "• Top pages: / 15, /membership/ 6." in text
-    assert "*September so far* (through the 2nd)" in text
-    assert "• 45 visitors, 60 pageviews. Same span in August: 30 visitors, +15 (+50%)." in text
-    assert "• All of August: 333 visitors." in text
-    assert "*2026 so far*" in text
-    assert "• 900 visitors, 1200 pageviews. Same span in 2025: no data (tracking started in 2026)." in text
-    # The fake answers by date range, so the other sites echo the main numbers.
-    assert "• Studio (HeyMarvelous): 23 yesterday, 45 this month (+15 (+50%) vs the same span last month)." in text
-    assert "• Yoga Habit page: 23 yesterday, 45 this month" in text
-    assert "—" not in text and "–" not in text
-    # Every query names the site it is about.
+    assert text.startswith("*Wednesday, September 2* (tiffanywoodyoga.com)")
+    assert "*Visitors*: 23" in text
+    assert "    \u0394 same day last week: +3 (+15%)" in text
+    assert "*Pageviews*: 31" in text
+    assert "*September*: 45" in text
+    assert "    \u0394 same span in August: +15 (+50%)  |  all of August: 333" in text
+    assert "*2026*: 900" in text
+    assert "same span in 2025" not in text
+    assert "*Search*: day: 12  |  month: 12" in text
+    assert "*AI tools*: day: 2  |  month: 2" in text
+    assert "*Top pages*: / 15  |  /membership/ 6" in text
+    assert "*Top sources*: Google 12  |  Direct 9  |  chatgpt.com 2" in text
+    assert "*Studio (HeyMarvelous)*: day: 23  |  month: 45" in text
+    assert "*Yoga Habit page*: day: 23  |  month: 45" in text
+    assert "\u2014" not in text and "\u2013" not in text
+    assert "\u2022" not in text
+    assert "Source: Plausible" not in text
+
     assert {call["site_id"] for call in calls} == {
         "tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"
     }
