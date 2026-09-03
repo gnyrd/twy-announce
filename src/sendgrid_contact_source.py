@@ -33,6 +33,7 @@ SOURCE_FIELD_TYPES = {SOURCE_FIELD: "Text", DETAIL_FIELD: "Text"}
 
 # The closed vocabulary. One value per write path that can create a contact.
 SOURCE_HABIT_SIGNUP = "habit_signup"
+SOURCE_NEWSLETTER_SIGNUP = "newsletter_signup"
 SOURCE_HABIT_SYNC = "habit_sync"
 SOURCE_PRODUCT_PURCHASE = "product_purchase"
 SOURCE_FREE_CLASS_CLAIM = "free_class_claim"
@@ -43,6 +44,7 @@ SOURCE_MANUAL_IMPORT = "manual_import"
 KNOWN_SOURCES = frozenset(
     {
         SOURCE_HABIT_SIGNUP,
+        SOURCE_NEWSLETTER_SIGNUP,
         SOURCE_HABIT_SYNC,
         SOURCE_PRODUCT_PURCHASE,
         SOURCE_FREE_CLASS_CLAIM,
