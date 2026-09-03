@@ -161,10 +161,10 @@ def test_zeros_and_missing_baselines_are_suppressed():
         "ai_day": 0, "ai_week": 0, "ai_mtd": 0, "ai_pm": 0,
     }
     block = "\n".join(tr.format_site(record, with_top=False, weekly=False))
-    # month only; Search has no baseline so it shows a raw +3; AI absent.
-    assert block == "*Studio*: 5\n    \u0394 month: +2 (+20%)\n    *Search*: 0\n        \u0394 month: +3"
+    # month only; Search and AI have zero visitors yesterday so both drop.
+    assert block == "*Studio*: 5\n    \u0394 month: +2 (+20%)"
     assert "week:" not in block
-    assert "AI" not in block
+    assert "Search" not in block and "AI" not in block
 
 
 def test_sample_report_populates_every_field():

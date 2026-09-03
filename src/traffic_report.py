@@ -316,7 +316,7 @@ def sub_metric(label: str, day: int, mtd: int, pm: int) -> list[str]:
     Month only: a channel's day-to-day counts are too small to read
     week over week.
     """
-    if not (day or mtd):
+    if not day:
         return []
     lines = [f"    *{label}*: {day}"]
     body = period_delta(mtd, pm, "month")
