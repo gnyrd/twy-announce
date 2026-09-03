@@ -243,8 +243,13 @@ def collect_brief(query: Query, site_id: str, day: date) -> dict[str, Any]:
 
 
 def delta(current: int, previous: int) -> str:
+    """Signed change with percent, or a raw `+N` when there is no baseline.
+
+    Returns "" when nothing moved from nothing (both zero), so the caller
+    drops the period rather than printing a meaningless zero.
+    """
     if previous == 0:
-        return "no earlier data" if current == 0 else "no earlier data to compare"
+        return "" if current == 0 else f"+{current}"
     change = current - previous
     pct = round(100 * change / previous)
     sign = "+" if change >= 0 else ""
@@ -278,72 +283,71 @@ def short_label(site_id: str) -> str:
 
 
 def period_delta(current: int, previous: int, label: str) -> str:
-    """A labeled delta, or empty when there is no prior period to compare."""
-    if previous == 0:
-        return ""
-    return f"{label}: {delta(current, previous)}"
+    """`label: <delta>`, or empty when nothing moved from nothing."""
+    text = delta(current, previous)
+    return f"{label}: {text}" if text else ""
 
 
-def delta_line(record: dict[str, Any]) -> str:
-    body = pipe(
-        [
+def delta_line(record: dict[str, Any], *, weekly: bool) -> str:
+    parts = []
+    if weekly:
+        parts.append(
             period_delta(
                 record["yesterday"]["visitors"],
                 record["last_week_same_day"]["visitors"],
                 "week",
-            ),
-            period_delta(
-                record["mtd"]["visitors"],
-                record["previous_month_same_span"]["visitors"],
-                "month",
-            ),
-        ]
+            )
+        )
+    parts.append(
+        period_delta(
+            record["mtd"]["visitors"],
+            record["previous_month_same_span"]["visitors"],
+            "month",
+        )
     )
+    body = pipe(parts)
     return f"    \u0394 {body}" if body else ""
 
 
-def sub_metric(label: str, day: int, week: int, mtd: int, pm: int) -> list[str]:
-    """A `Label: <day>` line and its `\u0394 week | month` line, or nothing.
+def sub_metric(label: str, day: int, mtd: int, pm: int) -> list[str]:
+    """A bold `*Label*: <day>` line and its month delta, or nothing.
 
-    Suppressed entirely when there is no traffic in this channel (day and
-    month both zero); a delta period drops when it has no prior baseline.
+    Suppressed when the channel has no traffic (day and month both zero).
+    Month only: a channel's day-to-day counts are too small to read
+    week over week.
     """
     if not (day or mtd):
         return []
-    lines = [f"    {label}: {day}"]
-    body = pipe([period_delta(day, week, "week"), period_delta(mtd, pm, "month")])
+    lines = [f"    *{label}*: {day}"]
+    body = period_delta(mtd, pm, "month")
     if body:
         lines.append(f"        \u0394 {body}")
     return lines
 
 
-def format_site(record: dict[str, Any], *, with_top: bool) -> list[str]:
+def format_site(record: dict[str, Any], *, with_top: bool, weekly: bool) -> list[str]:
     """One site block: headline visitors, then only the lines that have data.
 
-    Mirrors the daily Reports post: a value, a labeled `\u0394 week | month`
-    line, no zeros (JP, 2026-09-03). Search and AI are their own sub-metrics
-    with the same week and month deltas, on any site once there is traffic.
+    Mirrors the daily Reports post: a value and a labeled delta line, no
+    zeros (JP, 2026-09-03). The week delta appears on the main site only;
+    every other line is month over month. Search and AI are bold
+    sub-metrics that show once a site has that traffic.
     """
+    label = short_label(record["site_id"]).capitalize()
     lines = [
-        f"*{short_label(record['site_id'])}*: {record['yesterday']['visitors']}",
-        delta_line(record),
+        f"*{label}*: {record['yesterday']['visitors']}",
+        delta_line(record, weekly=weekly),
     ]
     if with_top:
         lines.append(f"    top: {top_list(record['pages'])}")
-    lines += sub_metric(
-        "Search", record["search_day"], record["search_week"],
-        record["search_mtd"], record["search_pm"],
-    )
-    lines += sub_metric(
-        "AI", record["ai_day"], record["ai_week"],
-        record["ai_mtd"], record["ai_pm"],
-    )
+    lines += sub_metric("Search", record["search_day"], record["search_mtd"], record["search_pm"])
+    lines += sub_metric("AI", record["ai_day"], record["ai_mtd"], record["ai_pm"])
     return [line for line in lines if line]
 
 
 def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date) -> str:
-    blocks = [format_site(main, with_top=True)]
-    blocks += [format_site(brief, with_top=False) for brief in briefs]
+    blocks = [format_site(main, with_top=True, weekly=True)]
+    blocks += [format_site(brief, with_top=False, weekly=False) for brief in briefs]
     return "\n\n".join("\n".join(block) for block in blocks)
 
 

@@ -42,8 +42,8 @@ def test_spans_compare_like_with_like():
 def test_delta_wording():
     assert tr.delta(120, 100) == "+20 (+20%)"
     assert tr.delta(80, 100) == "-20 (-20%)"
-    assert tr.delta(5, 0) == "no earlier data to compare"
-    assert tr.delta(0, 0) == "no earlier data"
+    assert tr.delta(5, 0) == "+5"
+    assert tr.delta(0, 0) == ""
 
 
 def test_ai_sources_are_counted_case_insensitively():
@@ -95,16 +95,15 @@ def test_report_reads_three_scales_and_the_other_sites():
         ["tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"],
         date(2026, 9, 2),
     )
-    assert text.startswith("*main*: 23\n")
+    assert text.startswith("*Main*: 23\n")
     assert "    \u0394 week: +3 (+15%)  |  month: +15 (+50%)" in text
     assert "    top: / 15, /membership/ 6" in text
-    # The stub returns the same search/AI totals for every window, so the
-    # sub-metrics appear with their headline value; deltas are exercised in
-    # the sample and zero-suppression tests.
-    assert "    Search: 12" in text
-    assert "    AI: 2" in text
-    assert "*studio*: 23" in text
-    assert "*habit*: 23" in text
+    assert "    *Search*: 12" in text
+    assert "*Studio*: 23" in text
+    assert "*Habit*: 23" in text
+    # week delta only on main; studio/habit are month only
+    studio_block = text.split("*Studio*:")[1].split("*Habit*:")[0]
+    assert "week:" not in studio_block
     assert "MTD" not in text and "YTD" not in text
     assert "Sep" not in text and "Aug" not in text
     assert "\u2014" not in text and "\u2013" not in text and "\u2022" not in text
@@ -161,22 +160,22 @@ def test_zeros_and_missing_baselines_are_suppressed():
         "search_day": 0, "search_week": 0, "search_mtd": 3, "search_pm": 0,
         "ai_day": 0, "ai_week": 0, "ai_mtd": 0, "ai_pm": 0,
     }
-    block = "\n".join(tr.format_site(record, with_top=False))
-    # No week baseline, so the visitor delta shows month only. Search has
-    # month data but no baseline, so it shows its value with no delta line.
-    # AI has nothing, so it is absent.
-    assert block == "*studio*: 5\n    \u0394 month: +2 (+20%)\n    Search: 0"
+    block = "\n".join(tr.format_site(record, with_top=False, weekly=False))
+    # month only; Search has no baseline so it shows a raw +3; AI absent.
+    assert block == "*Studio*: 5\n    \u0394 month: +2 (+20%)\n    *Search*: 0\n        \u0394 month: +3"
     assert "week:" not in block
     assert "AI" not in block
 
 
 def test_sample_report_populates_every_field():
     text = tr.format_report(*tr.sample_data())
-    assert text.startswith("*main*: 48")
+    assert text.startswith("*Main*: 48")
     assert "\u0394 week:" in text and "month:" in text
-    for site in ("*main*", "*studio*", "*habit*"):
+    for site in ("*Main*", "*Studio*", "*Habit*"):
         assert site in text
-    assert text.count("Search:") == 3
-    assert text.count("AI:") == 3
+    assert text.count("*Search*:") == 3
+    assert text.count("*AI*:") == 3
     assert "top:" in text and text.count("top:") == 1
+    # week delta on main only
+    assert text.count("week:") == 1
     assert "\u2014" not in text and "\u2013" not in text
