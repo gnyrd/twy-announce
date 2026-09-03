@@ -631,7 +631,7 @@ def main(dry_run: bool = False):
             if dry_run:
                 print("\n[DRY RUN] Skipping Slack post")
             else:
-                post_to_slack(message, "#status-social")
+                post_to_slack(message)
         else:
             print("\n✓ Skipping report (no changes)")
 
