@@ -182,29 +182,47 @@ def ai_visitors(sources: list[tuple[str, int]]) -> int:
     return sum(count for source, count in sources if source.strip().lower() in AI_SOURCES)
 
 
+def channel_metrics(query: Query, site_id: str, day: date) -> dict[str, int]:
+    """Search and AI visitors across the four windows the deltas need.
+
+    Search is Plausible's Organic Search channel; AI is the answer-engine
+    referrers in ai_visitors. Same day / same weekday last week / month to
+    date / previous month same span, so Search and AI each get a week and a
+    month delta like the visitor line.
+    """
+    def counts(date_range: list[str]) -> tuple[int, int]:
+        sources = breakdown(query, site_id, date_range, "visit:source")
+        search = channel_visitors(query, site_id, date_range).get("Organic Search", 0)
+        return search, ai_visitors(sources)
+
+    search_day, ai_day = counts(span(day, day))
+    search_week, ai_week = counts(same_weekday_last_week(day))
+    search_mtd, ai_mtd = counts(month_to_date(day))
+    search_pm, ai_pm = counts(previous_month_same_span(day))
+    return {
+        "search_day": search_day, "search_week": search_week,
+        "search_mtd": search_mtd, "search_pm": search_pm,
+        "ai_day": ai_day, "ai_week": ai_week,
+        "ai_mtd": ai_mtd, "ai_pm": ai_pm,
+    }
+
+
 def collect(query: Query, site_id: str, day: date) -> dict[str, Any]:
     yesterday = span(day, day)
     mtd = month_to_date(day)
     ytd = year_to_date(day)
-    sources = breakdown(query, site_id, yesterday, "visit:source")
-    channels_day = channel_visitors(query, site_id, yesterday)
-    channels_mtd = channel_visitors(query, site_id, mtd)
     return {
         "site_id": site_id,
         "day": day.isoformat(),
         "yesterday": totals(query, site_id, yesterday),
         "last_week_same_day": totals(query, site_id, same_weekday_last_week(day)),
-        "sources": sources,
         "pages": breakdown(query, site_id, yesterday, "event:page"),
-        "search_day": channels_day.get("Organic Search", 0),
-        "ai_day": ai_visitors(sources),
         "mtd": totals(query, site_id, mtd),
         "previous_month_same_span": totals(query, site_id, previous_month_same_span(day)),
         "previous_month_full": totals(query, site_id, previous_month_full(day)),
-        "search_mtd": channels_mtd.get("Organic Search", 0),
-        "ai_mtd": ai_visitors(breakdown(query, site_id, mtd, "visit:source")),
         "ytd": totals(query, site_id, ytd),
         "previous_year_same_span": totals(query, site_id, previous_year_same_span(day)),
+        **channel_metrics(query, site_id, day),
     }
 
 
@@ -212,8 +230,10 @@ def collect_brief(query: Query, site_id: str, day: date) -> dict[str, Any]:
     return {
         "site_id": site_id,
         "yesterday": totals(query, site_id, span(day, day)),
+        "last_week_same_day": totals(query, site_id, same_weekday_last_week(day)),
         "mtd": totals(query, site_id, month_to_date(day)),
         "previous_month_same_span": totals(query, site_id, previous_month_same_span(day)),
+        **channel_metrics(query, site_id, day),
     }
 
 
@@ -257,57 +277,74 @@ def short_label(site_id: str) -> str:
     return SHORT_LABELS.get(site_id, site_id)
 
 
-def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date) -> str:
-    """One short block per site: the numbers, then a Delta line.
+def period_delta(current: int, previous: int, label: str) -> str:
+    """A labeled delta, or empty when there is no prior period to compare."""
+    if previous == 0:
+        return ""
+    return f"{label}: {delta(current, previous)}"
 
-    JP, 2026-09-03: the first version read as prose and was painfully
-    verbose. Sites are separate and named short (main, studio, habit); the
-    main site alone carries year to date, search and top pages.
-    """
-    y = main["yesterday"]
-    lw = main["last_week_same_day"]
-    mtd = main["mtd"]
-    pm_same = main["previous_month_same_span"]
-    ytd = main["ytd"]
-    mon = day.strftime("%b")
-    prev_mon = (day.replace(day=1) - timedelta(days=1)).strftime("%b")
-    weekday = day.strftime("%a")
 
-    lines = [
-        # No date header: Slack stamps the message, and the report always
-        # covers the day before the run (JP, 2026-09-03).
-        "*main*: "
-        + pipe(
-            [
-                f"{y['visitors']} day",
-                f"{mtd['visitors']} {mon}",
-                f"{ytd['visitors']} {day.year}",
-            ]
-        ),
-        "    "
-        + pipe(
-            [
-                f"\u0394 {delta(y['visitors'], lw['visitors'])} vs last {weekday}",
-                f"{delta(mtd['visitors'], pm_same['visitors'])} vs {prev_mon} span",
-            ]
-        ),
-        f"    search {main['search_day']} day, {main['search_mtd']} {mon}"
-        f"  |  AI {main['ai_day']} day, {main['ai_mtd']} {mon}",
-        f"    top {top_list(main['pages'])}",
-    ]
-    for brief in briefs:
-        month_visitors = brief["mtd"]["visitors"]
-        lines += [
-            "",
-            f"*{short_label(brief['site_id'])}*: "
-            + pipe(
-                [f"{brief['yesterday']['visitors']} day", f"{month_visitors} {mon}"]
+def delta_line(record: dict[str, Any]) -> str:
+    body = pipe(
+        [
+            period_delta(
+                record["yesterday"]["visitors"],
+                record["last_week_same_day"]["visitors"],
+                "week",
             ),
-            f"    \u0394 "
-            + f"{delta(month_visitors, brief['previous_month_same_span']['visitors'])}"
-            + f" vs {prev_mon} span",
+            period_delta(
+                record["mtd"]["visitors"],
+                record["previous_month_same_span"]["visitors"],
+                "month",
+            ),
         ]
-    return "\n".join(lines)
+    )
+    return f"    \u0394 {body}" if body else ""
+
+
+def sub_metric(label: str, day: int, week: int, mtd: int, pm: int) -> list[str]:
+    """A `Label: <day>` line and its `\u0394 week | month` line, or nothing.
+
+    Suppressed entirely when there is no traffic in this channel (day and
+    month both zero); a delta period drops when it has no prior baseline.
+    """
+    if not (day or mtd):
+        return []
+    lines = [f"    {label}: {day}"]
+    body = pipe([period_delta(day, week, "week"), period_delta(mtd, pm, "month")])
+    if body:
+        lines.append(f"        \u0394 {body}")
+    return lines
+
+
+def format_site(record: dict[str, Any], *, with_top: bool) -> list[str]:
+    """One site block: headline visitors, then only the lines that have data.
+
+    Mirrors the daily Reports post: a value, a labeled `\u0394 week | month`
+    line, no zeros (JP, 2026-09-03). Search and AI are their own sub-metrics
+    with the same week and month deltas, on any site once there is traffic.
+    """
+    lines = [
+        f"*{short_label(record['site_id'])}*: {record['yesterday']['visitors']}",
+        delta_line(record),
+    ]
+    if with_top:
+        lines.append(f"    top: {top_list(record['pages'])}")
+    lines += sub_metric(
+        "Search", record["search_day"], record["search_week"],
+        record["search_mtd"], record["search_pm"],
+    )
+    lines += sub_metric(
+        "AI", record["ai_day"], record["ai_week"],
+        record["ai_mtd"], record["ai_pm"],
+    )
+    return [line for line in lines if line]
+
+
+def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date) -> str:
+    blocks = [format_site(main, with_top=True)]
+    blocks += [format_site(brief, with_top=False) for brief in briefs]
+    return "\n\n".join("\n".join(block) for block in blocks)
 
 
 def ordinal(n: int) -> str:
@@ -323,11 +360,39 @@ def build_report(query: Query, site_ids: list[str], day: date) -> str:
     return format_report(main, briefs, day)
 
 
+def sample_data() -> tuple[dict[str, Any], list[dict[str, Any]], date]:
+    """Invented numbers where every field is non-zero, for --sample.
+
+    Not real traffic: this exists only to show the maximal shape of the
+    report (week and month deltas, search, AI and top pages on every site).
+    """
+    def block(site_id: str, y: int, lw: int, m: int, pms: int) -> dict[str, Any]:
+        return {
+            "site_id": site_id,
+            "yesterday": {"visitors": y, "pageviews": y * 3},
+            "last_week_same_day": {"visitors": lw, "pageviews": lw * 3},
+            "mtd": {"visitors": m, "pageviews": m * 3},
+            "previous_month_same_span": {"visitors": pms, "pageviews": pms * 3},
+            "search_day": 4, "search_week": 3, "search_mtd": 37, "search_pm": 25,
+            "ai_day": 2, "ai_week": 1, "ai_mtd": 9, "ai_pm": 4,
+        }
+
+    main = block("tiffanywoodyoga.com", 48, 39, 512, 430)
+    main["pages"] = [("/", 22), ("/membership/", 9), ("/blog/", 6)]
+    studio = block("studio.tiffanywoodyoga.com", 31, 26, 288, 240)
+    habit = block("habit.tiffanywoodyoga.com", 12, 7, 64, 41)
+    return main, [studio, habit], date(2026, 9, 2)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="TWY daily website traffic report")
     parser.add_argument("--dry-run", action="store_true", help="Print the report, do not post")
     parser.add_argument("--date", help="Report day (YYYY-MM-DD); default is yesterday in Mountain time")
+    parser.add_argument("--sample", action="store_true", help="Print a fully-populated sample report and exit")
     args = parser.parse_args(argv)
+    if args.sample:
+        print(format_report(*sample_data()))
+        return 0
     load_env()
     day = date.fromisoformat(args.date) if args.date else report_day()
     try:

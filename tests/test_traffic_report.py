@@ -95,17 +95,18 @@ def test_report_reads_three_scales_and_the_other_sites():
         ["tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"],
         date(2026, 9, 2),
     )
-    assert text.startswith("*main*: 23 day")
-    assert "Traffic:" not in text and "Sep 2*" not in text
-    assert "*main*: 23 day  |  45 Sep  |  900 2026" in text
-    assert "    \u0394 +3 (+15%) vs last Wed  |  +15 (+50%) vs Aug span" in text
-    assert "    search 12 day, 12 Sep  |  AI 2 day, 2 Sep" in text
-    assert "    top / 15, /membership/ 6" in text
-    assert "*studio*: 23 day  |  45 Sep" in text
-    assert "*habit*: 23 day  |  45 Sep" in text
-    assert "    \u0394 +15 (+50%) vs Aug span" in text
-    assert "pageviews" not in text.lower()
-    assert "Source: Plausible" not in text
+    assert text.startswith("*main*: 23\n")
+    assert "    \u0394 week: +3 (+15%)  |  month: +15 (+50%)" in text
+    assert "    top: / 15, /membership/ 6" in text
+    # The stub returns the same search/AI totals for every window, so the
+    # sub-metrics appear with their headline value; deltas are exercised in
+    # the sample and zero-suppression tests.
+    assert "    Search: 12" in text
+    assert "    AI: 2" in text
+    assert "*studio*: 23" in text
+    assert "*habit*: 23" in text
+    assert "MTD" not in text and "YTD" not in text
+    assert "Sep" not in text and "Aug" not in text
     assert "\u2014" not in text and "\u2013" not in text and "\u2022" not in text
 
     assert {call["site_id"] for call in calls} == {
@@ -148,3 +149,34 @@ def test_report_posts_as_the_reporter_bot_to_status_traffic() -> None:
     assert 'SLACK_CHANNEL = "#status-traffic"' in source
     assert "post_slack_as_reporter" in source
     assert "post_slack(" not in source
+
+
+def test_zeros_and_missing_baselines_are_suppressed():
+    record = {
+        "site_id": "studio.tiffanywoodyoga.com",
+        "yesterday": {"visitors": 5, "pageviews": 9},
+        "last_week_same_day": {"visitors": 0, "pageviews": 0},
+        "mtd": {"visitors": 12, "pageviews": 20},
+        "previous_month_same_span": {"visitors": 10, "pageviews": 15},
+        "search_day": 0, "search_week": 0, "search_mtd": 3, "search_pm": 0,
+        "ai_day": 0, "ai_week": 0, "ai_mtd": 0, "ai_pm": 0,
+    }
+    block = "\n".join(tr.format_site(record, with_top=False))
+    # No week baseline, so the visitor delta shows month only. Search has
+    # month data but no baseline, so it shows its value with no delta line.
+    # AI has nothing, so it is absent.
+    assert block == "*studio*: 5\n    \u0394 month: +2 (+20%)\n    Search: 0"
+    assert "week:" not in block
+    assert "AI" not in block
+
+
+def test_sample_report_populates_every_field():
+    text = tr.format_report(*tr.sample_data())
+    assert text.startswith("*main*: 48")
+    assert "\u0394 week:" in text and "month:" in text
+    for site in ("*main*", "*studio*", "*habit*"):
+        assert site in text
+    assert text.count("Search:") == 3
+    assert text.count("AI:") == 3
+    assert "top:" in text and text.count("top:") == 1
+    assert "\u2014" not in text and "\u2013" not in text
