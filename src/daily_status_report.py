@@ -526,9 +526,9 @@ def post_to_slack(message: str, channel: str = None):
     """Post message to Slack. An explicit channel uses the bot token
     (the webhook is bound to its own channel and cannot be redirected)."""
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-    bot_token = os.getenv("SLACK_BOT_TOKEN")
+    bot_token = os.getenv("TWY_REPORTER_BOT_TOKEN") or os.getenv("SLACK_BOT_TOKEN")
     if channel is None:
-        channel = os.getenv("SLACK_CHANNEL", "#twy-status")
+        channel = os.getenv("SLACK_CHANNEL", "#status-members")
     else:
         webhook_url = None  # explicit channel -> bot-token path only
 
@@ -631,7 +631,7 @@ def main(dry_run: bool = False):
             if dry_run:
                 print("\n[DRY RUN] Skipping Slack post")
             else:
-                post_to_slack(message)
+                post_to_slack(message, "#status-social")
         else:
             print("\n✓ Skipping report (no changes)")
 

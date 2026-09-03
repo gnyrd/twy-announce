@@ -95,23 +95,18 @@ def test_report_reads_three_scales_and_the_other_sites():
         ["tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"],
         date(2026, 9, 2),
     )
-    assert text.startswith("*Wednesday, September 2* (tiffanywoodyoga.com)")
-    assert "*Visitors*: 23" in text
-    assert "    \u0394 same day last week: +3 (+15%)" in text
-    assert "*Pageviews*: 31" in text
-    assert "*September*: 45" in text
-    assert "    \u0394 same span in August: +15 (+50%)  |  all of August: 333" in text
-    assert "*2026*: 900" in text
-    assert "same span in 2025" not in text
-    assert "*Search*: day: 12  |  month: 12" in text
-    assert "*AI tools*: day: 2  |  month: 2" in text
-    assert "*Top pages*: / 15  |  /membership/ 6" in text
-    assert "*Top sources*: Google 12  |  Direct 9  |  chatgpt.com 2" in text
-    assert "*Studio (HeyMarvelous)*: day: 23  |  month: 45" in text
-    assert "*Yoga Habit page*: day: 23  |  month: 45" in text
-    assert "\u2014" not in text and "\u2013" not in text
-    assert "\u2022" not in text
+    assert text.startswith("*main*: 23 day")
+    assert "Traffic:" not in text and "Sep 2*" not in text
+    assert "*main*: 23 day  |  45 Sep  |  900 2026" in text
+    assert "    \u0394 +3 (+15%) vs last Wed  |  +15 (+50%) vs Aug span" in text
+    assert "    search 12 day, 12 Sep  |  AI 2 day, 2 Sep" in text
+    assert "    top / 15, /membership/ 6" in text
+    assert "*studio*: 23 day  |  45 Sep" in text
+    assert "*habit*: 23 day  |  45 Sep" in text
+    assert "    \u0394 +15 (+50%) vs Aug span" in text
+    assert "pageviews" not in text.lower()
     assert "Source: Plausible" not in text
+    assert "\u2014" not in text and "\u2013" not in text and "\u2022" not in text
 
     assert {call["site_id"] for call in calls} == {
         "tiffanywoodyoga.com", "studio.tiffanywoodyoga.com", "habit.tiffanywoodyoga.com"
@@ -146,8 +141,8 @@ def test_main_fails_loudly_when_plausible_is_down(monkeypatch, capsys):
 def test_report_posts_as_the_reporter_bot_to_status_traffic() -> None:
     """JP reads #status-traffic and the cron identity is TWY Reporter.
 
-    The previous default, #twy-status, does not exist in the workspace, so
-    every post was refused with channel_not_found and swallowed.
+    An earlier default channel did not exist in the workspace, so every
+    post was refused with channel_not_found and swallowed.
     """
     source = Path(tr.__file__).read_text(encoding="utf-8")
     assert 'SLACK_CHANNEL = "#status-traffic"' in source

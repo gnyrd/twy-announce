@@ -16,9 +16,9 @@ def _post(token: str, token_name: str, channel: str, text: str) -> None:
 
     Slack answers a rejected post with HTTP 200 and {"ok": false, "error":
     ...}, so raise_for_status() alone reports success. The daily traffic
-    report ran every day from 2026-09-02 into #twy-status, a channel that
-    does not exist, printed "posted" and exited 0 for every one of those
-    runs; JP saw nothing and no alert fired. Checking `ok` here covers every
+    report ran every day from 2026-09-02 into a channel that did not exist,
+    printed "posted" and exited 0 for every one of those runs; JP saw
+    nothing and no alert fired. Checking `ok` here covers every
     caller on the announce side rather than each report remembering to.
     """
     if not token:

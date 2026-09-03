@@ -38,7 +38,7 @@ MT = ZoneInfo("America/Denver")
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 MAIN_SITE = "tiffanywoodyoga.com"
 # JP, 2026-09-03: the traffic report goes to #status-traffic, posted as
-# TWY Reporter. #twy-status, the old default, does not exist.
+# TWY Reporter. An earlier default channel did not exist in the workspace.
 SLACK_CHANNEL = "#status-traffic"
 SITE_LABELS = {
     "tiffanywoodyoga.com": "tiffanywoodyoga.com",
@@ -235,7 +235,7 @@ def top_list(rows: list[tuple[str, int]], n: int = TOP_N) -> str:
     kept = [(name or "(direct)", count) for name, count in rows if count > 0][:n]
     if not kept:
         return "none"
-    return "  |  ".join(f"{name} {count}" for name, count in kept)
+    return ", ".join(f"{name} {count}" for name, count in kept)
 
 
 def source_label(source: str) -> str:
@@ -243,67 +243,70 @@ def source_label(source: str) -> str:
 
 
 def pipe(parts: list[str]) -> str:
-    return "  |  ".join(parts)
+    return "  |  ".join(part for part in parts if part)
+
+
+SHORT_LABELS = {
+    "tiffanywoodyoga.com": "main",
+    "studio.tiffanywoodyoga.com": "studio",
+    "habit.tiffanywoodyoga.com": "habit",
+}
+
+
+def short_label(site_id: str) -> str:
+    return SHORT_LABELS.get(site_id, site_id)
 
 
 def format_report(main: dict[str, Any], briefs: list[dict[str, Any]], day: date) -> str:
-    """One label per line with its number, deltas on an indented line.
+    """One short block per site: the numbers, then a Delta line.
 
-    Matches the daily membership report JP already reads: bold label, colon,
-    the number, then a Delta line. No sentences, no bullets, no footer.
+    JP, 2026-09-03: the first version read as prose and was painfully
+    verbose. Sites are separate and named short (main, studio, habit); the
+    main site alone carries year to date, search and top pages.
     """
     y = main["yesterday"]
     lw = main["last_week_same_day"]
     mtd = main["mtd"]
     pm_same = main["previous_month_same_span"]
-    pm_full = main["previous_month_full"]
     ytd = main["ytd"]
-    py = main["previous_year_same_span"]
-    month_name = day.strftime("%B")
-    previous_month_name = (day.replace(day=1) - timedelta(days=1)).strftime("%B")
+    mon = day.strftime("%b")
+    prev_mon = (day.replace(day=1) - timedelta(days=1)).strftime("%b")
+    weekday = day.strftime("%a")
 
     lines = [
-        f"*{day.strftime('%A, %B %-d')}* ({SITE_LABELS.get(main['site_id'], main['site_id'])})",
-        "",
-        f"*Visitors*: {y['visitors']}",
-        f"    \u0394 same day last week: {delta(y['visitors'], lw['visitors'])}",
-        f"*Pageviews*: {y['pageviews']}",
-        "",
-        f"*{month_name}*: {mtd['visitors']}",
+        # No date header: Slack stamps the message, and the report always
+        # covers the day before the run (JP, 2026-09-03).
+        "*main*: "
+        + pipe(
+            [
+                f"{y['visitors']} day",
+                f"{mtd['visitors']} {mon}",
+                f"{ytd['visitors']} {day.year}",
+            ]
+        ),
         "    "
         + pipe(
             [
-                f"\u0394 same span in {previous_month_name}: {delta(mtd['visitors'], pm_same['visitors'])}",
-                f"all of {previous_month_name}: {pm_full['visitors']}",
+                f"\u0394 {delta(y['visitors'], lw['visitors'])} vs last {weekday}",
+                f"{delta(mtd['visitors'], pm_same['visitors'])} vs {prev_mon} span",
             ]
         ),
-        f"*{day.year}*: {ytd['visitors']}",
+        f"    search {main['search_day']} day, {main['search_mtd']} {mon}"
+        f"  |  AI {main['ai_day']} day, {main['ai_mtd']} {mon}",
+        f"    top {top_list(main['pages'])}",
     ]
-    if py["visitors"]:
-        lines.append(
-            f"    \u0394 same span in {day.year - 1}: {delta(ytd['visitors'], py['visitors'])}"
-        )
-    lines += [
-        "",
-        "*Search*: " + pipe([f"day: {main['search_day']}", f"month: {main['search_mtd']}"]),
-        "*AI tools*: " + pipe([f"day: {main['ai_day']}", f"month: {main['ai_mtd']}"]),
-        "",
-        f"*Top pages*: {top_list(main['pages'])}",
-        f"*Top sources*: {top_list([(source_label(s), c) for s, c in main['sources']])}",
-    ]
-    if briefs:
-        lines.append("")
-        for brief in briefs:
-            label = SITE_LABELS.get(brief["site_id"], brief["site_id"])
-            lines.append(
-                f"*{label}*: "
-                + pipe(
-                    [
-                        f"day: {brief['yesterday']['visitors']}",
-                        f"month: {brief['mtd']['visitors']}",
-                    ]
-                )
-            )
+    for brief in briefs:
+        month_visitors = brief["mtd"]["visitors"]
+        lines += [
+            "",
+            f"*{short_label(brief['site_id'])}*: "
+            + pipe(
+                [f"{brief['yesterday']['visitors']} day", f"{month_visitors} {mon}"]
+            ),
+            f"    \u0394 "
+            + f"{delta(month_visitors, brief['previous_month_same_span']['visitors'])}"
+            + f" vs {prev_mon} span",
+        ]
     return "\n".join(lines)
 
 
