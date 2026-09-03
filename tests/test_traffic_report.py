@@ -179,3 +179,52 @@ def test_sample_report_populates_every_field():
     # week delta on main only
     assert text.count("week:") == 1
     assert "\u2014" not in text and "\u2013" not in text
+
+
+def _conv_query(rows_by_key):
+    """A fake Plausible that answers a conversion query keyed by
+    (site_id, event:name filter, event:page filter)."""
+    def query(body):
+        event = page = None
+        for f in body.get("filters") or []:
+            if f[1] == "event:name":
+                event = f[2][0]
+            if f[1] == "event:page":
+                page = f[2][0]
+        rows = rows_by_key.get((body["site_id"], event, page), [])
+        return {"results": [{"dimensions": [s], "metrics": [c]} for s, c in rows]}
+    return query
+
+
+def test_last_30_days_span():
+    assert tr.last_30_days(date(2026, 9, 2)) == ["2026-08-04", "2026-09-02"]
+
+
+def test_conversion_tiers_merges_registration_sources():
+    q = _conv_query({
+        ("studio.tiffanywoodyoga.com", "Form: Submission", "/buy/product/"):
+            [("newsletter", 5), ("Direct / None", 2)],
+        ("studio.tiffanywoodyoga.com", "Form: Submission", "/event/details/"):
+            [("newsletter", 4)],
+        ("habit.tiffanywoodyoga.com", "Habit Register Click", None):
+            [("newsletter", 6), ("email", 1)],
+        ("habit.tiffanywoodyoga.com", "Habit Signup Success", None):
+            [("email", 3)],
+    })
+    tiers = dict(tr.conversion_tiers(q, date(2026, 9, 2)))
+    assert tiers["Purchases"] == {"newsletter": 5, "Direct": 2}
+    # studio event submits and habit register clicks, merged by source
+    assert tiers["Registrations"] == {"newsletter": 10, "email": 1}
+    assert tiers["Leads"] == {"email": 3}
+
+
+def test_format_conversions_shows_total_and_top_sources():
+    lines = tr.format_conversions([
+        ("Purchases", {"Direct": 7, "newsletter": 3, "Gmail": 1}),
+        ("Registrations", {"newsletter": 44, "email": 8}),
+        ("Leads", {}),
+    ])
+    assert lines[0].startswith("*Conversions*")
+    assert "*Purchases*: 11" in lines[1] and "Direct 7" in lines[1]
+    assert "*Registrations*: 52" in lines[2]
+    assert "*Leads*: 0" in lines[3]

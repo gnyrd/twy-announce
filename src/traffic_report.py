@@ -32,6 +32,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from twy_paths import load_env
+from twy_platform.plausible import conversion_tiers, last_30_days
 from slack_post import post_slack_as_reporter
 
 MT = ZoneInfo("America/Denver")
@@ -357,11 +358,37 @@ def ordinal(n: int) -> str:
     return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
+# Conversion-tier logic lives in twy_platform.plausible so the daily report and
+# the stats /conversions page read one source. This module keeps only the Slack
+# rendering of it.
+
+
+def format_conversions(tiers: list[tuple[str, dict[str, int]]]) -> list[str]:
+    """A `*Conversions*` block: each tier's total and its top sources."""
+    lines = ["*Conversions* (30 days, where they came from)"]
+    for label, sources in tiers:
+        total = sum(sources.values())
+        ordered = [
+            f"{source} {count}"
+            for source, count in sorted(sources.items(), key=lambda kv: kv[1], reverse=True)
+            if count > 0
+        ][:TOP_N]
+        top = ", ".join(ordered)
+        lines.append(f"    *{label}*: {total}" + (f"  |  {top}" if top else ""))
+    return lines
+
+
 def build_report(query: Query, site_ids: list[str], day: date) -> str:
     main_id = MAIN_SITE if MAIN_SITE in site_ids else site_ids[0]
     main = collect(query, main_id, day)
     briefs = [collect_brief(query, site_id, day) for site_id in site_ids if site_id != main_id]
-    return format_report(main, briefs, day)
+    report = format_report(main, briefs, day)
+    try:
+        conversions = format_conversions(conversion_tiers(query, day))
+    except Exception as exc:  # conversions are additive; never lose the traffic numbers
+        print(f"conversions section failed: {exc}", file=sys.stderr)
+        conversions = ["*Conversions* (30 days): unavailable"]
+    return report + "\n\n" + "\n".join(conversions)
 
 
 def sample_data() -> tuple[dict[str, Any], list[dict[str, Any]], date]:
