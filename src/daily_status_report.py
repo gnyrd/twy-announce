@@ -412,8 +412,13 @@ def format_product_delta_line(product: str, cycle: str, current: int,
     return "   𝚫 " + "  |  ".join(segments)
 
 
-def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> str:
-    """Format subscription data into Slack message with historical comparisons."""
+def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> tuple[str, str]:
+    """Build two Slack messages: (social, members).
+
+    Social carries Email, Instagram, Facebook and YouTube followers with
+    their week/month/year deltas; members carries TYL, TWA and the next
+    Habit class. Each keeps a delta line only where the delta exists.
+    """
     now = datetime.now()
     week_ago_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
     month_ago_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -454,7 +459,8 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         else:
             products[product]["Annual"] += row["# of Active Subscriptions"]
 
-    groups: List[List[str]] = []
+    social_groups: List[List[str]] = []
+    member_groups: List[List[str]] = []
 
     # Followers (Email / Instagram / YouTube)
     followers: List[str] = []
@@ -482,7 +488,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if delta:
             followers.append(delta)
     if followers:
-        groups.append(followers)
+        social_groups.append(followers)
 
     # TYL (The Yoga Lifestyle Membership)
     tyl_product = "The Yoga Lifestyle Membership"
@@ -497,7 +503,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             if delta:
                 tyl_lines.append(delta)
     if tyl_lines:
-        groups.append(tyl_lines)
+        member_groups.append(tyl_lines)
 
     # TWA (The Archive, yearly only)
     twa_product = "The Archive"
@@ -510,16 +516,18 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
             if delta:
                 twa_lines.append(delta)
     if twa_lines:
-        groups.append(twa_lines)
+        member_groups.append(twa_lines)
 
     # Habit
     habit = get_next_habit_event()
     if habit:
         start = datetime.fromisoformat(habit["start"].replace("Z", "+00:00"))
         date_str = f"{start.strftime('%B')} {start.day}"
-        groups.append([f"*Habit*: {date_str} - {habit['registrations']} registered"])
+        member_groups.append([f"*Habit*: {date_str} - {habit['registrations']} registered"])
 
-    return "\n\n".join("\n".join(g) for g in groups)
+    social_text = "\n\n".join("\n".join(g) for g in social_groups)
+    members_text = "\n\n".join("\n".join(g) for g in member_groups)
+    return social_text, members_text
 
 
 def post_to_slack(message: str, channel: str = None):
@@ -623,15 +631,24 @@ def main(dry_run: bool = False):
         print(f"\nSend decision: {'YES' if should_send else 'NO'} - {send_reason}")
 
         if should_send:
-            message = format_report(subscriptions, today, changes)
-            print("\nReport preview:")
+            social_text, members_text = format_report(subscriptions, today, changes)
+            print("\nSocial report (-> #status-social):")
             print("-" * 60)
-            print(message)
+            print(social_text or "(nothing to post)")
+            print("-" * 60)
+            print("\nMembers report (-> #status-members):")
+            print("-" * 60)
+            print(members_text or "(nothing to post)")
             print("-" * 60)
             if dry_run:
                 print("\n[DRY RUN] Skipping Slack post")
             else:
-                post_to_slack(message)
+                # Social keeps the webhook, which posts to #status-social as
+                # Reports. Members goes to #status-members via the bot token.
+                if social_text:
+                    post_to_slack(social_text)
+                if members_text:
+                    post_to_slack(members_text, "#status-members")
         else:
             print("\n✓ Skipping report (no changes)")
 
