@@ -120,12 +120,14 @@ def test_main_dry_run_prints_without_posting(monkeypatch, capsys):
     monkeypatch.setattr(tr, "load_env", lambda: None)
     monkeypatch.setattr(tr, "plausible_query_from_env", lambda: fake_query([]))
     monkeypatch.setattr(tr, "site_ids_from_env", lambda: ["tiffanywoodyoga.com"])
-    monkeypatch.setattr(tr, "post_slack", lambda channel, text: posted.append((channel, text)))
+    monkeypatch.setattr(
+        tr, "post_slack_as_reporter", lambda channel, text: posted.append((channel, text))
+    )
     assert tr.main(["--dry-run", "--date", "2026-09-02"]) == 0
     assert posted == []
     assert "[DRY RUN] not posted" in capsys.readouterr().out
     assert tr.main(["--date", "2026-09-02"]) == 0
-    assert posted and posted[0][0] == "#twy-status"
+    assert posted and posted[0][0] == "#status-traffic"
 
 
 def test_main_fails_loudly_when_plausible_is_down(monkeypatch, capsys):
@@ -136,3 +138,15 @@ def test_main_fails_loudly_when_plausible_is_down(monkeypatch, capsys):
     monkeypatch.setattr(tr, "plausible_query_from_env", broken)
     assert tr.main(["--dry-run", "--date", "2026-09-02"]) == 1
     assert "traffic report failed" in capsys.readouterr().err
+
+
+def test_report_posts_as_the_reporter_bot_to_status_traffic() -> None:
+    """JP reads #status-traffic and the cron identity is TWY Reporter.
+
+    The previous default, #twy-status, does not exist in the workspace, so
+    every post was refused with channel_not_found and swallowed.
+    """
+    source = Path(tr.__file__).read_text(encoding="utf-8")
+    assert 'SLACK_CHANNEL = "#status-traffic"' in source
+    assert "post_slack_as_reporter" in source
+    assert "post_slack(" not in source

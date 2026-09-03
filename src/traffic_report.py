@@ -32,11 +32,14 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from twy_paths import load_env
-from slack_post import post_slack
+from slack_post import post_slack_as_reporter
 
 MT = ZoneInfo("America/Denver")
 DEFAULT_PLAUSIBLE_BASE_URL = "https://analytics.tiffanywoodyoga.com"
 MAIN_SITE = "tiffanywoodyoga.com"
+# JP, 2026-09-03: the traffic report goes to #status-traffic, posted as
+# TWY Reporter. #twy-status, the old default, does not exist.
+SLACK_CHANNEL = "#status-traffic"
 SITE_LABELS = {
     "tiffanywoodyoga.com": "tiffanywoodyoga.com",
     "studio.tiffanywoodyoga.com": "Studio (HeyMarvelous)",
@@ -311,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n[DRY RUN] not posted")
         return 0
-    post_slack(os.getenv("SLACK_CHANNEL", "#twy-status"), text)
+    post_slack_as_reporter(os.getenv("TRAFFIC_SLACK_CHANNEL", SLACK_CHANNEL), text)
     print("posted")
     return 0
 
