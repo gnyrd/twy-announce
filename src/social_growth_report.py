@@ -21,6 +21,7 @@ from twy_paths import data_root as default_data_root
 from twy_paths import ig_publish_retry_path as default_retry_ledger_path
 from twy_paths import load_env
 from twy_paths import twy_root as default_twy_root
+from traffic_report import AI_SOURCES
 
 
 DEFAULT_ZERNIO_BASE_URL = "https://zernio.com/api/v1"
@@ -720,6 +721,31 @@ def collect_plausible_property(
                     }
                 )
                 results[label]["sources"] = source_payload.get("results") or []
+                # Search and AI search visitors for the stats /website page.
+                # Search is Plausible's Organic Search channel; AI is the
+                # answer-engine referrer set the daily traffic report uses.
+                channel_payload = post_query(
+                    {
+                        "site_id": site_id,
+                        "metrics": ["visitors"],
+                        "date_range": date_range,
+                        "dimensions": ["visit:channel"],
+                        "order_by": [["visitors", "desc"]],
+                        "pagination": {"limit": 20},
+                    }
+                )
+                channel_rows = channel_payload.get("results") or []
+                results[label]["channels"] = channel_rows
+                results[label]["search_visitors"] = sum(
+                    int((row.get("metrics") or [0])[0] or 0)
+                    for row in channel_rows
+                    if (row.get("dimensions") or [""])[0] == "Organic Search"
+                )
+                results[label]["ai_visitors"] = sum(
+                    int((row.get("metrics") or [0])[0] or 0)
+                    for row in results[label]["sources"]
+                    if str((row.get("dimensions") or [""])[0]).strip().lower() in AI_SOURCES
+                )
                 entry_page_payload = post_query(
                     {
                         "site_id": site_id,

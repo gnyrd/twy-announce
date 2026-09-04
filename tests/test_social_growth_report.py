@@ -377,9 +377,14 @@ def test_collect_plausible_status_queries_configured_site(monkeypatch):
         ],
     }
     assert [call["date_range"] for call in calls] == (
-        ["day"] * 4 + ["7d"] * 6 + ["30d"] * 6
+        ["day"] * 4 + ["7d"] * 7 + ["30d"] * 7
     )
     assert all(call["site_id"] == "habit.tiffanywoodyoga.com" for call in calls)
+    # The visit:channel query feeds search and AI counts for the stats page.
+    assert [c for c in calls if c.get("dimensions") == ["visit:channel"]]
+    assert status["metrics"]["last_7_days"]["search_visitors"] == 0
+    assert status["metrics"]["last_7_days"]["ai_visitors"] == 0
+
     event_calls = [
         call
         for call in calls
@@ -1109,3 +1114,30 @@ def test_the_recovered_alert_says_recovered_and_names_the_replacement():
     assert "6a7b390f5460ed9f2954248c" in text
     assert "No action needed." in text
     assert ":warning:" not in text
+
+
+def test_collect_plausible_property_search_and_ai_visitors():
+    def fake_post_query(body):
+        if body.get("dimensions") == ["visit:channel"]:
+            return {"results": [
+                {"dimensions": ["Organic Search"], "metrics": [12]},
+                {"dimensions": ["Direct"], "metrics": [30]},
+            ]}
+        if body.get("dimensions") == ["visit:source"]:
+            return {"results": [
+                {"dimensions": ["Google"], "metrics": [12, 13]},
+                {"dimensions": ["chatgpt.com"], "metrics": [4, 4]},
+                {"dimensions": ["Perplexity"], "metrics": [2, 2]},
+            ]}
+        return {"results": [{"metrics": [50, 55, 90, 95], "dimensions": []}], "query": {}}
+
+    prop = social_growth.collect_plausible_property(
+        site_id="tiffanywoodyoga.com",
+        role="main",
+        captured_at=datetime(2026, 9, 4, 20, 0, tzinfo=timezone.utc),
+        post_query=fake_post_query,
+    )
+    for window in ("last_7_days", "last_30_days"):
+        assert prop["metrics"][window]["search_visitors"] == 12
+        assert prop["metrics"][window]["ai_visitors"] == 6
+    assert "search_visitors" not in prop["metrics"]["day"]
