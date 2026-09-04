@@ -40,11 +40,29 @@ WEBCAL_URL = "webcal://calendar.tiffanywoodyoga.com/classes.ics"
 HTTPS_URL = "https://calendar.tiffanywoodyoga.com/classes.ics"
 
 
+# No registered or trademark mark in anything a subscriber reads. JP
+# 2026-08-12, verbatim: "I do not want to use (R) - not anywhere." The plans
+# still carry it (class_plan_schema.json holds nine occurrences of "Principles
+# of Anusara(R)" and the plans API serves the title through), so the feed
+# stripped nothing and published the mark on three September events. Removed
+# here rather than at the producer per JP 2026-09-04: this is the feed fix.
+_MARKS = ("®", "™", "(R)", "(TM)")
+
+
+def _strip_marks(text):
+    for mark in _MARKS:
+        text = text.replace(mark, "")
+    return text
+
+
 def _esc(text):
+    """Escape one ICS text value. Every outbound text field goes through here,
+    which is why the mark strip lives here and not at each call site."""
     if text is None:
         return ""
     return (
-        text.replace("\\", "\\\\")
+        _strip_marks(text)
+        .replace("\\", "\\\\")
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\n", "\\n")
