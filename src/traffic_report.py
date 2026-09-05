@@ -286,7 +286,9 @@ def short_label(site_id: str) -> str:
 def period_delta(current: int, previous: int, label: str) -> str:
     """`label: <delta>`, or empty when nothing moved from nothing."""
     text = delta(current, previous)
-    return f"{label}: {text}" if text else ""
+    # The delta is the number the reader came for, so it carries the bold
+    # (JP, 2026-09-05).
+    return f"{label}: *{text}*" if text else ""
 
 
 def delta_line(record: dict[str, Any], *, weekly: bool) -> str:
@@ -365,7 +367,7 @@ def ordinal(n: int) -> str:
 
 def format_conversions(tiers: list[tuple[str, dict[str, int]]]) -> list[str]:
     """A `*Conversions*` block: each tier's total and its top sources."""
-    lines = ["*Conversions* (30 days, where they came from)"]
+    lines = ["*Conversions* (30 days)"]
     for label, sources in tiers:
         total = sum(sources.values())
         ordered = [
