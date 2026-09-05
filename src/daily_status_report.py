@@ -494,7 +494,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
     tyl_product = "The Yoga Lifestyle Membership"
     tyl_lines: List[str] = []
     if tyl_product in products:
-        for cycle, display_cycle in (("Monthly", "Month"), ("Annual", "Annual")):
+        for cycle, display_cycle in (("Monthly", "Monthly"), ("Annual", "Yearly")):
             count = products[tyl_product][cycle]
             if count == 0:
                 continue
