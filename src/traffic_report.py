@@ -309,7 +309,7 @@ def delta_line(record: dict[str, Any], *, weekly: bool) -> str:
         )
     )
     body = pipe(parts)
-    return f"    \u0394 {body}" if body else ""
+    return f"    \U0001D6AB {body}" if body else ""
 
 
 def sub_metric(label: str, day: int, mtd: int, pm: int) -> list[str]:
@@ -324,7 +324,7 @@ def sub_metric(label: str, day: int, mtd: int, pm: int) -> list[str]:
     lines = [f"    *{label}*: {day}"]
     body = period_delta(mtd, pm, "month")
     if body:
-        lines.append(f"        \u0394 {body}")
+        lines.append(f"        \U0001D6AB {body}")
     return lines
 
 

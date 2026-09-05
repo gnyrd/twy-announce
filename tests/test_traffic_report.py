@@ -96,7 +96,7 @@ def test_report_reads_three_scales_and_the_other_sites():
         date(2026, 9, 2),
     )
     assert text.startswith("*Main*: 23\n")
-    assert "    \u0394 week: *+3 (+15%)*  |  month: *+15 (+50%)*" in text
+    assert "    \U0001D6AB week: *+3 (+15%)*  |  month: *+15 (+50%)*" in text
     assert "    top: / 15, /membership/ 6" in text
     assert "    *Search*: 12" in text
     assert "*Studio*: 23" in text
@@ -162,7 +162,7 @@ def test_zeros_and_missing_baselines_are_suppressed():
     }
     block = "\n".join(tr.format_site(record, with_top=False, weekly=False))
     # month only; Search and AI have zero visitors yesterday so both drop.
-    assert block == "*Studio*: 5\n    \u0394 month: *+2 (+20%)*"
+    assert block == "*Studio*: 5\n    \U0001D6AB month: *+2 (+20%)*"
     assert "week:" not in block
     assert "Search" not in block and "AI" not in block
 
@@ -170,7 +170,7 @@ def test_zeros_and_missing_baselines_are_suppressed():
 def test_sample_report_populates_every_field():
     text = tr.format_report(*tr.sample_data())
     assert text.startswith("*Main*: 48")
-    assert "\u0394 week:" in text and "month:" in text
+    assert "\U0001D6AB week:" in text and "month:" in text
     for site in ("*Main*", "*Studio*", "*Habit*"):
         assert site in text
     assert text.count("*Search*:") == 3
