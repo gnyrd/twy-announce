@@ -8,9 +8,12 @@ Usage:
     python3 src/search_console_report.py            # collect and write
     python3 src/search_console_report.py --dry-run  # collect, print, no write
 
-The service account key lives in twy-secrets and is named by
-GSC_SERVICE_ACCOUNT_FILE. The service account's email must be added as a
-user (Full or Restricted) on the Search Console property.
+Credentials live in twy-secrets. Either an OAuth user token
+(GSC_OAUTH_TOKEN_FILE, minted 2026-09-04 as admin@tiffanywoodyoga.com
+against the twy-search-console project's desktop client; the org policy
+iam.disableServiceAccountKeyCreation blocks service-account keys) or a
+service account key (GSC_SERVICE_ACCOUNT_FILE) whose email has been added
+as a user on the property.
 """
 from __future__ import annotations
 
@@ -58,13 +61,9 @@ class Client(Protocol):
 class ApiClient:
     """Thin wrapper over googleapiclient so the collector can be tested with a fake."""
 
-    def __init__(self, key_file: str, property_url: str = PROPERTY):
-        from google.oauth2 import service_account
+    def __init__(self, credentials, property_url: str = PROPERTY):
         from googleapiclient.discovery import build
 
-        credentials = service_account.Credentials.from_service_account_file(
-            key_file, scopes=SCOPES
-        )
         self._service = build("searchconsole", "v1", credentials=credentials, cache_discovery=False)
         self._property = property_url
 
@@ -83,13 +82,26 @@ class ApiClient:
         )
 
 
-def client_from_env() -> Client:
+def credentials_from_env():
+    token_file = os.getenv("GSC_OAUTH_TOKEN_FILE", "").strip()
     key_file = os.getenv("GSC_SERVICE_ACCOUNT_FILE", "").strip()
-    if not key_file:
-        raise RuntimeError("GSC_SERVICE_ACCOUNT_FILE is not set")
-    if not Path(key_file).exists():
-        raise RuntimeError(f"GSC_SERVICE_ACCOUNT_FILE does not exist: {key_file}")
-    return ApiClient(key_file)
+    if token_file:
+        if not Path(token_file).exists():
+            raise RuntimeError(f"GSC_OAUTH_TOKEN_FILE does not exist: {token_file}")
+        from google.oauth2.credentials import Credentials
+
+        return Credentials.from_authorized_user_file(token_file, scopes=SCOPES)
+    if key_file:
+        if not Path(key_file).exists():
+            raise RuntimeError(f"GSC_SERVICE_ACCOUNT_FILE does not exist: {key_file}")
+        from google.oauth2 import service_account
+
+        return service_account.Credentials.from_service_account_file(key_file, scopes=SCOPES)
+    raise RuntimeError("Neither GSC_OAUTH_TOKEN_FILE nor GSC_SERVICE_ACCOUNT_FILE is set")
+
+
+def client_from_env() -> Client:
+    return ApiClient(credentials_from_env())
 
 
 def _row(row: dict[str, Any], keys: list[str]) -> dict[str, Any]:

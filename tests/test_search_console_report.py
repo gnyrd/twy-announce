@@ -86,11 +86,22 @@ def test_write_snapshot_writes_day_file_and_latest(tmp_path):
     assert json.loads((out / "latest.json").read_text()) == {"status": "ok"}
 
 
-def test_client_from_env_requires_key_file(monkeypatch):
+def test_credentials_from_env_requires_a_credential_file(monkeypatch):
     monkeypatch.delenv("GSC_SERVICE_ACCOUNT_FILE", raising=False)
+    monkeypatch.delenv("GSC_OAUTH_TOKEN_FILE", raising=False)
     try:
-        gsc.client_from_env()
+        gsc.credentials_from_env()
     except RuntimeError as exc:
-        assert "GSC_SERVICE_ACCOUNT_FILE" in str(exc)
+        assert "GSC_OAUTH_TOKEN_FILE" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_credentials_from_env_reports_missing_token_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("GSC_OAUTH_TOKEN_FILE", str(tmp_path / "nope.json"))
+    try:
+        gsc.credentials_from_env()
+    except RuntimeError as exc:
+        assert "does not exist" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
