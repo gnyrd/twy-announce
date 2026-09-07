@@ -212,13 +212,37 @@ def _post_rows(
     )
 
 
-def _growth_actions(metrics: dict[str, Any]) -> int:
-    return int(
-        sum(
-            _metric(metrics, key)
-            for key in ("follows", "saves", "shares", "clicks")
-        )
-    )
+GROWTH_KEYS = ("follows", "saves", "shares", "clicks")
+# A Reel has no follows metric (Meta's Media Insights API refuses it for the
+# REELS product type, checked live 2026-09-07) and an organic Reel has no
+# clickable link, so for a Reel the sum is saves plus shares. Counting the
+# unmeasured pair as zero made the report claim "no follows or clicks".
+REEL_GROWTH_KEYS = ("saves", "shares")
+REEL_POST_TYPES = frozenset({"reel", "quote_reel", "reel_week"})
+
+
+def _is_reel(post: dict[str, Any]) -> bool:
+    if str(post.get("post_type") or "") in REEL_POST_TYPES:
+        return True
+    return "/reel/" in str(post.get("platform_post_url") or "")
+
+
+def _growth_keys(post: dict[str, Any]) -> tuple[str, ...]:
+    return REEL_GROWTH_KEYS if _is_reel(post) else GROWTH_KEYS
+
+
+def _growth_actions(metrics: dict[str, Any], keys: tuple[str, ...] = GROWTH_KEYS) -> int:
+    return int(sum(_metric(metrics, key) for key in keys))
+
+
+def _post_growth_actions(post: dict[str, Any]) -> int:
+    return _growth_actions(post.get("metrics") or {}, _growth_keys(post))
+
+
+def _growth_label(posts: list[dict[str, Any]]) -> str:
+    """What growth_actions summed for these posts, e.g. 'saves+shares'."""
+    keys = {key for post in posts for key in _growth_keys(post)} or set(GROWTH_KEYS)
+    return "+".join(key for key in GROWTH_KEYS if key in keys)
 
 
 def _aggregate_posts(posts: list[dict[str, Any]]) -> dict[str, Any]:
@@ -236,7 +260,8 @@ def _aggregate_posts(posts: list[dict[str, Any]]) -> dict[str, Any]:
             "clicks",
         )
     }
-    totals["growth_actions"] = sum(_growth_actions(row.get("metrics") or {}) for row in posts)
+    totals["growth_actions"] = sum(_post_growth_actions(row) for row in posts)
+    totals["growth_actions_label"] = _growth_label(posts)
     count = len(posts)
     averages = {
         "reach": round(totals["reach"] / count, 2) if count else 0,
@@ -268,7 +293,7 @@ def _top_post(posts: list[dict[str, Any]], *, key: str) -> dict[str, Any] | None
     if not posts:
         return None
     if key == "growth_actions":
-        return max(posts, key=lambda row: _growth_actions(row.get("metrics") or {}))
+        return max(posts, key=_post_growth_actions)
     return max(posts, key=lambda row: _metric(row.get("metrics") or {}, key))
 
 
@@ -704,7 +729,7 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
     # comparing wordings against a zero baseline can never resolve.
     if performance["posts_analyzed"] and performance["totals"]["growth_actions"] == 0:
         recommendations.append(
-            "No saves, shares, follows or clicks on any reviewed Reel. Reels reach non-followers through saves and shares, so this is a distribution problem in what the posts are, not in the CTA wording."
+            "No saves or shares on any reviewed Reel. Reels reach non-followers through saves and shares, so this is a distribution problem in what the posts are, not in the CTA wording."
         )
     followers = metrics["instagram_followers"].get("end")
     average_reach = performance.get("averages", {}).get("reach")
@@ -918,9 +943,18 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"Analyzed {performance['posts_analyzed']} published Reels with mature Zernio analytics.",
         "",
-        "| Target | Reach | Views | Engagement | Avg watch | Follows | Saves | Shares | Clicks |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    reels_only = all(_is_reel(post) for post in performance["posts"])
+    if reels_only:
+        lines += [
+            "| Target | Reach | Views | Engagement | Avg watch | Saves | Shares |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    else:
+        lines += [
+            "| Target | Reach | Views | Engagement | Avg watch | Follows | Saves | Shares | Clicks |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
     for post in performance["posts"]:
         post_metrics = post.get("metrics") or {}
         target = _post_label(post)
@@ -935,11 +969,20 @@ def render_markdown(report: dict[str, Any]) -> str:
                     _format_number(_metric(post_metrics, "views")),
                     f"{_metric(post_metrics, 'engagementRate'):.2f}%",
                     f"{_metric(post_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s",
-                    _format_number(_metric(post_metrics, "follows")),
-                    _format_number(_metric(post_metrics, "saves")),
-                    _format_number(_metric(post_metrics, "shares")),
-                    _format_number(_metric(post_metrics, "clicks")),
                 ]
+                + (
+                    [
+                        _format_number(_metric(post_metrics, "saves")),
+                        _format_number(_metric(post_metrics, "shares")),
+                    ]
+                    if reels_only
+                    else [
+                        _format_number(_metric(post_metrics, "follows")),
+                        _format_number(_metric(post_metrics, "saves")),
+                        _format_number(_metric(post_metrics, "shares")),
+                        _format_number(_metric(post_metrics, "clicks")),
+                    ]
+                )
             )
             + " |"
         )
@@ -1028,7 +1071,8 @@ def render_slack(report: dict[str, Any]) -> str:
         (
             f"*Posts:* {performance['posts_analyzed']} analyzed | "
             f"{_format_number(performance['totals']['reach'])} total reach | "
-            f"{_format_number(performance['totals']['growth_actions'])} follows+saves+shares+clicks"
+            f"{_format_number(performance['totals']['growth_actions'])} "
+            f"{performance['totals'].get('growth_actions_label') or '+'.join(GROWTH_KEYS)}"
         ),
     ]
     if top:

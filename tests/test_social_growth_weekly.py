@@ -665,3 +665,67 @@ def test_habit_recommendation_silent_when_clicks_exist(monkeypatch):
 
     monkeypatch.setattr(weekly, "_habit_pre_class_days", explode)
     assert weekly._website_recommendations(habit_performance(11, 3), date(2026, 8, 17)) == []
+
+
+def test_reel_growth_actions_count_only_saves_and_shares():
+    reel = {
+        "post_type": "reel",
+        "platform_post_url": "https://www.instagram.com/reel/abc/",
+        "metrics": {"follows": None, "saves": 2, "shares": 1, "clicks": 0, "reach": 10},
+    }
+    photo = {
+        "post_type": "photo",
+        "platform_post_url": "https://www.instagram.com/p/xyz/",
+        "metrics": {"follows": 1, "saves": 2, "shares": 1, "clicks": 3, "reach": 10},
+    }
+    reels = weekly._aggregate_posts([reel])
+    assert reels["totals"]["growth_actions"] == 3
+    assert reels["totals"]["growth_actions_label"] == "saves+shares"
+    assert weekly._aggregate_posts([photo])["totals"]["growth_actions"] == 7
+    assert weekly._aggregate_posts([reel, photo])["totals"]["growth_actions_label"] == "follows+saves+shares+clicks"
+
+
+def test_reel_table_and_slack_line_do_not_show_follows_or_clicks():
+    reel = {
+        "post_type": "quote_reel",
+        "platform_post_url": "https://www.instagram.com/reel/abc/",
+        "metrics": {"follows": None, "saves": 0, "shares": 0, "clicks": 0, "reach": 10, "views": 12, "engagementRate": 0, "igReelsAvgWatchTime": 5000},
+    }
+    performance = weekly._aggregate_posts([reel])
+    performance.update({"posts_analyzed": 1, "posts": [reel], "top_by_reach": reel, "top_by_growth_actions": reel})
+    report = {
+        "status": "ok",
+        "week_start": "2026-09-01",
+        "week_end": "2026-09-07",
+        "snapshot_count": 7,
+        "metrics": {
+            "instagram_followers": {"start": 2320, "end": 2320, "delta": 0},
+            "email_subscribers": {"start": 1, "end": 1, "delta": 0},
+            "next_habit_registrations": {"start": 0, "end": 0, "delta": 0},
+            "landing_page": {"visitors": 0, "pageviews": 0, "habit_register_clicks": 0, "habit_signup_success": 0},
+        },
+        "post_performance": performance,
+        "campaign_performance": {"variants": []},
+        "campaigns": {"recent_variants": [], "upcoming_variants": []},
+        "website_performance": {"main": {"status": "unavailable"}, "habit": {"status": "unavailable"}},
+        "acquisition": {"available": False, "reason": "none"},
+        "recommendations": weekly._recommendations({
+            "status": "ok", "week_end": "2026-09-07",
+            "metrics": {
+                "instagram_followers": {"start": 2320, "end": 2320, "delta": 0},
+                "email_subscribers": {"delta": 0},
+                "next_habit_registrations": {"delta": 0},
+                "landing_page": {"visitors": 0, "habit_register_clicks": 0, "habit_signup_success": 0},
+            },
+            "post_performance": performance,
+            "acquisition": {"available": False},
+            "website_performance": {"main": {"status": "unavailable"}, "habit": {"status": "unavailable"}},
+        }),
+    }
+    markdown = weekly.render_markdown(report)
+    table = markdown.split("## Post Performance")[1]
+    assert "Follows" not in table and "Clicks" not in table
+    assert "| Saves | Shares |" in table
+    assert "No saves or shares on any reviewed Reel." in markdown
+    assert "follows or clicks" not in markdown
+    assert "0 saves+shares" in weekly.render_slack(report)
