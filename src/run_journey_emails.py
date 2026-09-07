@@ -168,7 +168,7 @@ def build_payload(
     payload = {
         "personalizations": [{"to": [{"email": recipient}]}],
         "from": {"email": registry.sender_email, "name": SENDER_NAME},
-        "reply_to": {"email": registry.sender_email, "name": SENDER_NAME},
+        "reply_to": {"email": registry.reply_to_email, "name": SENDER_NAME},
         "subject": subject,
         "content": [
             {"type": "text/plain", "value": rendered.plain_text},

@@ -74,6 +74,19 @@ class SendGridRegistry:
         return str(self.payload["sender"]["email"])
 
     @property
+    def reply_to_email(self) -> str:
+        """Where a reply to any TWY email lands.
+
+        Single Sends (campaigns, newsletters) carry no reply-to of their own:
+        SendGrid resolves it from the sender object at send time. Journey
+        drips and the editor's Send test build their own /mail/send body, so
+        they read the same address from here. The registry mirrors the
+        sender's reply_to (tiffany@tiffanywoodyoga.com since 2026-09-07, per
+        Tiff on the 2026-09-07 call); change the sender and this together.
+        """
+        return str(self.payload["sender"].get("reply_to") or self.sender_email)
+
+    @property
     def suppression_group_id(self) -> int:
         return int(self.payload["suppression_group"]["id"])
 

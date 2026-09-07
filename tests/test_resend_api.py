@@ -6,7 +6,7 @@ from resend_api import ResendAPI, ResendAPIError, to_resend_payload
 SENDGRID_PAYLOAD = {
     "personalizations": [{"to": [{"email": "member@example.com"}]}],
     "from": {"email": "hello@mail.tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
-    "reply_to": {"email": "hello@tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
+    "reply_to": {"email": "tiffany@tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
     "subject": "Welcome",
     "content": [
         {"type": "text/plain", "value": "plain body"},
@@ -32,7 +32,7 @@ def test_translation_keeps_the_parts_that_carry_meaning():
 
 def test_reply_to_stays_on_the_apex_so_replies_reach_google_workspace():
     body = to_resend_payload(SENDGRID_PAYLOAD, from_address=FROM)
-    assert body["reply_to"] == "Tiffany Wood Yoga <hello@tiffanywoodyoga.com>"
+    assert body["reply_to"] == "Tiffany Wood Yoga <tiffany@tiffanywoodyoga.com>"
     assert "mail.tiffanywoodyoga.com" not in body["reply_to"]
 
 
