@@ -465,6 +465,40 @@ def _median(values: list[float]) -> float | None:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
+def _card_design_arms(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Quote posts grouped by the card look they used, both platforms together.
+
+    card_entry is "background:treatment:accent:text" from the approved spread,
+    recorded by every quote path from 2026-09-07. Posts without one (earlier
+    posts) are counted as unrecorded rather than guessed.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    unrecorded = 0
+    for row in posts:
+        design = str(row.get("card_entry") or "").strip()
+        if not design:
+            unrecorded += 1
+            continue
+        groups.setdefault(design, []).append(row)
+    designs = []
+    for design, rows in groups.items():
+        reach = [_metric(row.get("metrics") or {}, "reach") for row in rows]
+        parts = design.split(":")
+        designs.append({
+            "design": design,
+            "background": parts[0] if len(parts) > 0 else "",
+            "treatment": parts[1] if len(parts) > 1 else "",
+            "accent": parts[2] if len(parts) > 2 else "",
+            "posts": len(rows),
+            "median_reach": _median(reach),
+            "likes": int(sum(_metric(row.get("metrics") or {}, "likes") for row in rows)),
+            "saves": int(sum(_metric(row.get("metrics") or {}, "saves") for row in rows)),
+            "shares": int(sum(_metric(row.get("metrics") or {}, "shares") for row in rows)),
+        })
+    designs.sort(key=lambda item: (-item["posts"], -(item["median_reach"] or 0), item["design"]))
+    return {"designs": designs, "posts": sum(len(rows) for rows in groups.values()), "unrecorded": unrecorded}
+
+
 def _quote_format_arms(posts: list[dict[str, Any]], formats: tuple[str, str] = QUOTE_FORMATS) -> dict[str, Any]:
     """Quotes posted as Reels against quotes posted as photos, in aggregate.
 
@@ -938,6 +972,12 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         if row.get("is_quote")
     ]
     report["facebook_quote_formats"] = _quote_format_arms(facebook_quote_rows, FB_QUOTE_FORMATS)
+    instagram_quote_rows = [
+        row
+        for row in _post_rows(snapshots, week_start=format_window_start, week_end=week_end)
+        if row.get("post_type") in QUOTE_FORMATS
+    ]
+    report["quote_card_designs"] = _card_design_arms(instagram_quote_rows + facebook_quote_rows)
     report["recommendations"] = _recommendations(report)
     return report
 
@@ -1097,6 +1137,24 @@ def render_markdown(report: dict[str, Any]) -> str:
         formats=FB_QUOTE_FORMATS,
         empty="No Facebook quote posts in the analytics window yet. Four quote slots a week from 2026-09-07, format by slot; each quote posts once.",
     ))
+    designs = report.get("quote_card_designs") or {}
+    lines.extend(["", "## Quote card looks (both platforms)", ""])
+    if not designs.get("posts"):
+        lines.append("No quote posts with a recorded card look yet. Every quote path records its look (background, type treatment, accent) from 2026-09-07.")
+    else:
+        lines.append(f"Quote posts by the card look they used, last {QUOTE_FORMAT_LOOKBACK_WEEKS} weeks, Instagram and Facebook together. Reels and photo posts mixed; read alongside the format tables.")
+        lines.append("")
+        lines.append("| Background | Treatment | Accent | Posts | Median reach | Likes | Saves | Shares |")
+        lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |")
+        for item in designs["designs"]:
+            median = "" if item.get("median_reach") is None else _format_number(item["median_reach"])
+            lines.append(f"| {item['background']} | {item['treatment']} | {item['accent']} | {item['posts']} | {median} | {_format_number(item['likes'])} | {_format_number(item['saves'])} | {_format_number(item['shares'])} |")
+        if designs.get("unrecorded"):
+            lines.append("")
+            lines.append(f"{designs['unrecorded']} quote post(s) in the window carry no recorded look (posted before looks were recorded).")
+        if designs["designs"] and max(item["posts"] for item in designs["designs"]) < 4:
+            lines.append("")
+            lines.append("Too early to rank looks: no look has 4 posts yet.")
     lines.extend(["", "## Meta cross-check (Instagram)", ""])
     if cross.get("status") == "ok":
         lines.append(

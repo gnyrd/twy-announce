@@ -752,3 +752,20 @@ def test_facebook_quote_arms_come_from_the_facebook_section_and_only_count_quote
     arms = weekly._quote_format_arms(rows, weekly.FB_QUOTE_FORMATS)["arms"]
     assert arms["fb_reel"]["posts"] == 1 and arms["fb_reel"]["median_reach"] == 200
     assert arms["fb_photo"]["posts"] == 2 and arms["fb_photo"]["median_reach"] == 100 and arms["fb_photo"]["follows"] == 4
+
+
+def test_card_looks_are_grouped_across_platforms_and_unrecorded_posts_are_counted():
+    def row(kind, post_id, reach, design):
+        return {"post_type": kind, "zernio_post_id": post_id, "card_entry": design,
+                "metrics": {"reach": reach, "likes": 1, "saves": 1, "shares": 0}}
+    rows = [
+        row("quote_reel", "a", 100, "slate:italic_serif:cream:cream"),
+        row("fb_photo", "b", 300, "slate:italic_serif:cream:cream"),
+        row("quote_photo", "c", 50, "terra:bold_serif:cream:cream"),
+        row("fb_reel", "d", 500, None),
+    ]
+    out = weekly._card_design_arms(rows)
+    assert out["posts"] == 3 and out["unrecorded"] == 1
+    top = out["designs"][0]
+    assert top["background"] == "slate" and top["treatment"] == "italic_serif" and top["posts"] == 2 and top["median_reach"] == 200
+    assert out["designs"][1]["design"] == "terra:bold_serif:cream:cream"
