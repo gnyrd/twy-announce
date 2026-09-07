@@ -447,6 +447,41 @@ def _acquisition(
     }
 
 
+
+PAIR_FORMATS = ("quote_reel", "quote_photo")
+PAIR_METRIC_KEYS = ("reach", "views", "likes", "saves", "shares", "follows")
+PAIR_LOOKBACK_WEEKS = 8
+
+
+def _quote_pairs(posts: list[dict[str, Any]]) -> dict[str, Any]:
+    """The same quote posted as a Reel and as a photo, side by side.
+
+    Pairs come from the clips scheduler (pair_id on both posts). A pair whose
+    second half has not reached the analytics window yet is listed as open.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in posts:
+        pair_id = str(row.get("pair_id") or "").strip()
+        if pair_id and row.get("post_type") in PAIR_FORMATS:
+            groups.setdefault(pair_id, []).append(row)
+    pairs = []
+    for pair_id, rows in sorted(groups.items(), key=lambda item: min(str(r.get("scheduled_for") or "") for r in item[1])):
+        formats: dict[str, dict[str, Any]] = {}
+        for row in sorted(rows, key=lambda r: str(r.get("scheduled_for") or "")):
+            metrics = row.get("metrics") or {}
+            formats[str(row["post_type"])] = {
+                "scheduled_for": row.get("scheduled_for"),
+                "url": row.get("platform_post_url"),
+                **{key: (None if metrics.get(key) is None else int(_metric(metrics, key))) for key in PAIR_METRIC_KEYS},
+            }
+        pairs.append({"pair_id": pair_id, "complete": len(formats) == 2, "formats": formats})
+    complete = [pair for pair in pairs if pair["complete"]]
+    totals = {
+        fmt: {key: sum(int(pair["formats"][fmt].get(key) or 0) for pair in complete) for key in ("reach", "likes", "saves", "shares")}
+        for fmt in PAIR_FORMATS
+    }
+    return {"pairs": pairs, "complete_pairs": len(complete), "totals": totals}
+
 def _post_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
     aggregate = _aggregate_posts(posts)
     return {
@@ -888,6 +923,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
+    report["quote_pairs"] = _quote_pairs(_post_rows(snapshots, week_start=week_end - timedelta(weeks=PAIR_LOOKBACK_WEEKS), week_end=week_end))
     report["recommendations"] = _recommendations(report)
     return report
 
@@ -1010,6 +1046,37 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- {acquisition['deleted']} contacts removed.")
 
     cross = report.get("meta_cross_check") or {}
+    pairs = report.get("quote_pairs") or {}
+    lines.extend(["", "## Quote A/B: Reel vs photo (same words, same card)", ""])
+    if not pairs.get("pairs"):
+        lines.append("No paired quotes in the analytics window yet. Pairs start with the first quote slot after 2026-09-07.")
+    else:
+        lines.append(f"{pairs['complete_pairs']} complete pair(s) of {len(pairs['pairs'])}, last {PAIR_LOOKBACK_WEEKS} weeks.")
+        lines.append("")
+        lines.append("| Pair | Format | Posted | Reach | Views | Likes | Saves | Shares | Follows |")
+        lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+        for pair in pairs["pairs"]:
+            for fmt in PAIR_FORMATS:
+                half = pair["formats"].get(fmt)
+                if not half:
+                    lines.append(f"| {pair['pair_id']} | {'Reel' if fmt == 'quote_reel' else 'Photo'} | owed | | | | | | |")
+                    continue
+                label = "Reel" if fmt == "quote_reel" else "Photo"
+                if half.get("url"):
+                    label = f"[{label}]({half['url']})"
+                cells = [
+                    "n/a" if half.get(key) is None else _format_number(half[key])
+                    for key in PAIR_METRIC_KEYS
+                ]
+                lines.append(f"| {pair['pair_id']} | {label} | {str(half.get('scheduled_for') or '')[:10]} | " + " | ".join(cells) + " |")
+        if pairs["complete_pairs"]:
+            totals = pairs["totals"]
+            lines.append("")
+            lines.append(
+                f"Across complete pairs: Reel reach {_format_number(totals['quote_reel']['reach'])} vs photo {_format_number(totals['quote_photo']['reach'])}, "
+                f"saves {_format_number(totals['quote_reel']['saves'])} vs {_format_number(totals['quote_photo']['saves'])}, "
+                f"shares {_format_number(totals['quote_reel']['shares'])} vs {_format_number(totals['quote_photo']['shares'])}."
+            )
     lines.extend(["", "## Meta cross-check (Instagram)", ""])
     if cross.get("status") == "ok":
         lines.append(
@@ -1075,6 +1142,13 @@ def render_slack(report: dict[str, Any]) -> str:
             f"{performance['totals'].get('growth_actions_label') or '+'.join(GROWTH_KEYS)}"
         ),
     ]
+    pairs = report.get("quote_pairs") or {}
+    if pairs.get("complete_pairs"):
+        totals = pairs["totals"]
+        lines.append(
+            f"*Quote A/B:* {pairs['complete_pairs']} pair(s) | Reel reach {_format_number(totals['quote_reel']['reach'])} vs photo {_format_number(totals['quote_photo']['reach'])} | "
+            f"saves {_format_number(totals['quote_reel']['saves'])} vs {_format_number(totals['quote_photo']['saves'])}"
+        )
     if top:
         top_metrics = top.get("metrics") or {}
         top_label = _post_label(top)
