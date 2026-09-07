@@ -172,6 +172,7 @@ def _post_rows(
     *,
     week_start: date,
     week_end: date,
+    section: str = "zernio",
 ) -> list[dict[str, Any]]:
     campaigns = _campaign_metadata(snapshots)
     captured_times = [
@@ -182,7 +183,7 @@ def _post_rows(
     analysis_at = max(captured_times) if captured_times else datetime.now(timezone.utc)
     latest: dict[str, dict[str, Any]] = {}
     for snapshot in sorted(snapshots, key=lambda item: item.get("captured_at") or item.get("date") or ""):
-        for row in ((snapshot.get("zernio") or {}).get("analytics") or {}).get("posts") or []:
+        for row in ((snapshot.get(section) or {}).get("analytics") or {}).get("posts") or []:
             post_id = str(row.get("zernio_post_id") or "").strip()
             scheduled_date = _post_date(row)
             if not post_id or scheduled_date is None:
@@ -449,6 +450,8 @@ def _acquisition(
 
 
 QUOTE_FORMATS = ("quote_reel", "quote_photo")
+FB_QUOTE_FORMATS = ("fb_reel", "fb_photo")
+PHOTO_FORMATS = ("quote_photo", "fb_photo")
 QUOTE_FORMAT_LOOKBACK_WEEKS = 8
 
 
@@ -462,15 +465,16 @@ def _median(values: list[float]) -> float | None:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def _quote_format_arms(posts: list[dict[str, Any]]) -> dict[str, Any]:
+def _quote_format_arms(posts: list[dict[str, Any]], formats: tuple[str, str] = QUOTE_FORMATS) -> dict[str, Any]:
     """Quotes posted as Reels against quotes posted as photos, in aggregate.
 
     Every quote posts once; the slot decides the format and the assignment
     flips weekly, so the two arms are different quotes in the same slots.
-    Compared as groups, never as the same words twice.
+    Compared as groups, never as the same words twice. Instagram formats by
+    default; pass FB_QUOTE_FORMATS for the Facebook Page.
     """
     arms: dict[str, dict[str, Any]] = {}
-    for fmt in QUOTE_FORMATS:
+    for fmt in formats:
         rows = [row for row in posts if row.get("post_type") == fmt]
         reach = [_metric(row.get("metrics") or {}, "reach") for row in rows]
         arms[fmt] = {
@@ -481,7 +485,7 @@ def _quote_format_arms(posts: list[dict[str, Any]]) -> dict[str, Any]:
             "saves": int(sum(_metric(row.get("metrics") or {}, "saves") for row in rows)),
             "shares": int(sum(_metric(row.get("metrics") or {}, "shares") for row in rows)),
             # follows is measurable for feed photos only; for Reels it is absent.
-            "follows": int(sum(_metric(row.get("metrics") or {}, "follows") for row in rows)) if fmt == "quote_photo" else None,
+            "follows": int(sum(_metric(row.get("metrics") or {}, "follows") for row in rows)) if fmt in PHOTO_FORMATS else None,
         }
     return {"arms": arms, "posts": sum(arm["posts"] for arm in arms.values())}
 
@@ -926,7 +930,14 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
-    report["quote_formats"] = _quote_format_arms(_post_rows(snapshots, week_start=week_end - timedelta(weeks=QUOTE_FORMAT_LOOKBACK_WEEKS), week_end=week_end))
+    format_window_start = week_end - timedelta(weeks=QUOTE_FORMAT_LOOKBACK_WEEKS)
+    report["quote_formats"] = _quote_format_arms(_post_rows(snapshots, week_start=format_window_start, week_end=week_end))
+    facebook_quote_rows = [
+        row
+        for row in _post_rows(snapshots, week_start=format_window_start, week_end=week_end, section="zernio_facebook")
+        if row.get("is_quote")
+    ]
+    report["facebook_quote_formats"] = _quote_format_arms(facebook_quote_rows, FB_QUOTE_FORMATS)
     report["recommendations"] = _recommendations(report)
     return report
 
@@ -954,6 +965,31 @@ def _post_label(post: dict[str, Any] | None) -> str:
     target = str(post.get("posted_for_class") or post.get("scheduled_for") or "Unknown")
     return target
 
+
+
+def _format_arms_lines(arms_report: dict[str, Any], *, title: str, formats: tuple[str, str], empty: str) -> list[str]:
+    """Markdown block for one platform's Reel vs photo quote arms."""
+    lines = ["", title, ""]
+    arms = arms_report.get("arms") or {}
+    if not arms_report.get("posts"):
+        lines.append(empty)
+        return lines
+    lines.append(f"Different quotes, the same weekly slots, format flipping weekly, last {QUOTE_FORMAT_LOOKBACK_WEEKS} weeks. Compared as groups.")
+    lines.append("")
+    lines.append("| Format | Posts | Median reach | Mean reach | Likes | Saves | Shares | Follows |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    for fmt in formats:
+        label = "Photo post" if fmt in PHOTO_FORMATS else "Reel"
+        arm = arms.get(fmt) or {}
+        follows = "n/a" if arm.get("follows") is None else _format_number(arm["follows"])
+        median = "" if arm.get("median_reach") is None else _format_number(arm["median_reach"])
+        mean = "" if arm.get("mean_reach") is None else _format_number(arm["mean_reach"])
+        lines.append(f"| {label} | {arm.get('posts', 0)} | {median} | {mean} | {_format_number(arm.get('likes', 0))} | {_format_number(arm.get('saves', 0))} | {_format_number(arm.get('shares', 0))} | {follows} |")
+    smaller = min((arm.get("posts", 0) for arm in arms.values()), default=0)
+    if smaller < 6:
+        lines.append("")
+        lines.append(f"Too early to call: the smaller arm has {smaller} post(s). Read it at 6 or more per arm.")
+    return lines
 
 def render_markdown(report: dict[str, Any]) -> str:
     metrics = report["metrics"]
@@ -1049,26 +1085,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- {acquisition['deleted']} contacts removed.")
 
     cross = report.get("meta_cross_check") or {}
-    formats = report.get("quote_formats") or {}
-    lines.extend(["", "## Quote format test: Reels vs photo posts", ""])
-    arms = formats.get("arms") or {}
-    if not formats.get("posts"):
-        lines.append("No quote posts in the analytics window yet. Quotes alternate format by slot from the first slot after 2026-09-07; each quote posts once.")
-    else:
-        lines.append(f"Different quotes, same two weekly slots, format flipping weekly, last {QUOTE_FORMAT_LOOKBACK_WEEKS} weeks. Compared as groups.")
-        lines.append("")
-        lines.append("| Format | Posts | Median reach | Mean reach | Likes | Saves | Shares | Follows |")
-        lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-        for fmt, label in (("quote_reel", "Reel"), ("quote_photo", "Photo post")):
-            arm = arms.get(fmt) or {}
-            follows = "n/a" if arm.get("follows") is None else _format_number(arm["follows"])
-            median = "" if arm.get("median_reach") is None else _format_number(arm["median_reach"])
-            mean = "" if arm.get("mean_reach") is None else _format_number(arm["mean_reach"])
-            lines.append(f"| {label} | {arm.get('posts', 0)} | {median} | {mean} | {_format_number(arm.get('likes', 0))} | {_format_number(arm.get('saves', 0))} | {_format_number(arm.get('shares', 0))} | {follows} |")
-        smaller = min(arm.get("posts", 0) for arm in arms.values()) if arms else 0
-        if smaller < 6:
-            lines.append("")
-            lines.append(f"Too early to call: the smaller arm has {smaller} post(s). Read it at 6 or more per arm.")
+    lines.extend(_format_arms_lines(
+        report.get("quote_formats") or {},
+        title="## Quote format test: Reels vs photo posts (Instagram)",
+        formats=QUOTE_FORMATS,
+        empty="No quote posts in the analytics window yet. Quotes alternate format by slot from the first slot after 2026-09-07; each quote posts once.",
+    ))
+    lines.extend(_format_arms_lines(
+        report.get("facebook_quote_formats") or {},
+        title="## Quote format test: Reels vs photo posts (Facebook)",
+        formats=FB_QUOTE_FORMATS,
+        empty="No Facebook quote posts in the analytics window yet. Four quote slots a week from 2026-09-07, format by slot; each quote posts once.",
+    ))
     lines.extend(["", "## Meta cross-check (Instagram)", ""])
     if cross.get("status") == "ok":
         lines.append(
@@ -1140,6 +1168,14 @@ def render_slack(report: dict[str, Any]) -> str:
         reel, photo = arms["quote_reel"], arms["quote_photo"]
         lines.append(
             f"*Quote formats:* Reel {reel['posts']} post(s), median reach {_format_number(reel['median_reach'] or 0)} | "
+            f"photo {photo['posts']} post(s), median reach {_format_number(photo['median_reach'] or 0)}"
+        )
+    fb_formats = report.get("facebook_quote_formats") or {}
+    fb_arms = fb_formats.get("arms") or {}
+    if fb_formats.get("posts") and fb_arms.get("fb_photo", {}).get("posts"):
+        reel, photo = fb_arms["fb_reel"], fb_arms["fb_photo"]
+        lines.append(
+            f"*FB quote formats:* Reel {reel['posts']} post(s), median reach {_format_number(reel['median_reach'] or 0)} | "
             f"photo {photo['posts']} post(s), median reach {_format_number(photo['median_reach'] or 0)}"
         )
     if top:

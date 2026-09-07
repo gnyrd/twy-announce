@@ -18,6 +18,7 @@ from typing import Any
 
 import requests
 from twy_paths import data_root as default_data_root
+from twy_paths import fb_history_path
 from twy_paths import ig_publish_retry_path as default_retry_ledger_path
 from twy_paths import load_env
 from twy_paths import twy_root as default_twy_root
@@ -262,11 +263,11 @@ def zernio_fetcher_from_env() -> Callable[[str], dict[str, Any]] | None:
     return fetch
 
 
-def zernio_analytics_fetcher_from_env() -> Callable[[str], dict[str, Any]] | None:
+def zernio_analytics_fetcher_from_env(account_env: str = "ZERNIO_INSTAGRAM_ACCOUNT_ID") -> Callable[[str], dict[str, Any]] | None:
     api_key = os.getenv("ZERNIO_API_KEY", "").strip()
     if not api_key:
         return None
-    account_id = os.getenv("ZERNIO_INSTAGRAM_ACCOUNT_ID", "").strip()
+    account_id = os.getenv(account_env, "").strip()
     base_url = os.getenv("ZERNIO_BASE_URL", DEFAULT_ZERNIO_BASE_URL).rstrip("/")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -351,6 +352,7 @@ def zernio_post_row(entry: dict[str, Any], payload: dict[str, Any]) -> dict[str,
         "title": post.get("title"),
         "post_status": post.get("status"),
         "platform_status": platform.get("status"),
+        "is_quote": bool(entry.get("quote_text")),
         "content_type": content_type,
         "platform_post_url": platform.get("platformPostUrl"),
         "published_at": platform.get("publishedAt"),
@@ -401,6 +403,7 @@ def zernio_analytics_row(row: dict[str, Any], payload: dict[str, Any]) -> dict[s
         "class_name": row.get("class_name"),
         "clip_name": row.get("clip_name"),
         "zernio_post_id": row.get("zernio_post_id"),
+        "is_quote": bool(row.get("is_quote")),
         "platform_post_id": platform.get("platformPostId") or payload.get("platformPostId"),
         "platform_post_url": platform.get("platformPostUrl") or payload.get("platformPostUrl"),
         "sync_status": platform.get("syncStatus") or payload.get("syncStatus"),
@@ -1065,6 +1068,7 @@ def collect_snapshot(
     data_root: Path,
     zernio_fetch_post: Callable[[str], dict[str, Any]] | None,
     zernio_fetch_analytics: Callable[[str], dict[str, Any]] | None = None,
+    zernio_fetch_analytics_facebook: Callable[[str], dict[str, Any]] | None = None,
     zernio_account_health: Callable[[], dict[str, Any] | None] | None,
     zernio_lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     zernio_lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
@@ -1107,6 +1111,17 @@ def collect_snapshot(
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
             retry_ledger_path=default_retry_ledger_path(),
+        ),
+        # The Facebook Page ledger through the same reader: status plus Zernio
+        # analytics per post, so the weekly review can compare Facebook quote
+        # formats the way it compares Instagram's (2026-09-07).
+        "zernio_facebook": collect_zernio_recent_status(
+            history_path=fb_history_path(),
+            captured_at=captured_at,
+            fetch_post=zernio_fetch_post,
+            fetch_analytics=zernio_fetch_analytics_facebook,
+            lookback_hours=zernio_lookback_hours,
+            lookahead_hours=zernio_lookahead_hours,
         ),
         "websites": websites,
         "landing_page": {"plausible": habit_plausible},
@@ -1417,6 +1432,7 @@ def main() -> int:
         data_root=data_dir,
         zernio_fetch_post=zernio_fetcher_from_env(),
         zernio_fetch_analytics=zernio_analytics_fetcher_from_env(),
+        zernio_fetch_analytics_facebook=zernio_analytics_fetcher_from_env("ZERNIO_FACEBOOK_ACCOUNT_ID"),
         zernio_account_health=zernio_account_health_from_env,
         zernio_lookback_hours=args.lookback_hours,
         zernio_lookahead_hours=args.lookahead_hours,

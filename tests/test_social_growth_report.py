@@ -751,6 +751,7 @@ def test_collect_zernio_post_analytics_extracts_metrics():
         "class_name": "2026-07-15_breath",
         "clip_name": "06_teaching_score8_9s",
         "zernio_post_id": "post1",
+        "is_quote": False,
         "platform_post_id": "ig1",
         "platform_post_url": "https://www.instagram.com/reel/example/",
         "sync_status": "synced",

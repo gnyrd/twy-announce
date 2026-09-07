@@ -729,3 +729,26 @@ def test_reel_table_and_slack_line_do_not_show_follows_or_clicks():
     assert "No saves or shares on any reviewed Reel." in markdown
     assert "follows or clicks" not in markdown
     assert "0 saves+shares" in weekly.render_slack(report)
+
+
+def test_facebook_quote_arms_come_from_the_facebook_section_and_only_count_quotes():
+    def row(kind, post_id, reach, is_quote=True, day="2026-09-08"):
+        return {
+            "post_type": kind, "zernio_post_id": post_id, "is_quote": is_quote,
+            "scheduled_for": f"{day}T12:30:00-06:00",
+            "metrics": {"reach": reach, "likes": 1, "saves": 0, "shares": 0, "follows": 2 if kind == "fb_photo" else None},
+        }
+    snapshot = {
+        "date": "2026-09-14", "captured_at": "2026-09-14T13:20:00Z", "summary": {},
+        "campaigns": {"posts": []},
+        "zernio": {"analytics": {"posts": []}},
+        "zernio_facebook": {"analytics": {"posts": [
+            row("fb_reel", "a", 200), row("fb_photo", "b", 120), row("fb_photo", "c", 80),
+            row("fb_reel", "class-reel", 500, is_quote=False),
+        ]}},
+        "websites": {},
+    }
+    rows = [r for r in weekly._post_rows([snapshot], week_start=date(2026, 7, 21), week_end=date(2026, 9, 14), section="zernio_facebook") if r.get("is_quote")]
+    arms = weekly._quote_format_arms(rows, weekly.FB_QUOTE_FORMATS)["arms"]
+    assert arms["fb_reel"]["posts"] == 1 and arms["fb_reel"]["median_reach"] == 200
+    assert arms["fb_photo"]["posts"] == 2 and arms["fb_photo"]["median_reach"] == 100 and arms["fb_photo"]["follows"] == 4
