@@ -191,7 +191,7 @@ def test_identity_pass_stamps_known_contacts_without_touching_lists(tmp_path):
     )
 
     assert api.upserts == [([], [{"email": "a@example.com", "custom_fields": {"e5_T": "441"}}])]
-    assert counts == {"matched": 2, "already": 1, "stamped": 1, "restamped": 0}
+    assert counts == {"matched": 2, "already": 1, "stamped": 1, "restamped": 0, "deferred": 0}
     assert {r["email"]: r["fields"][IDENTITY_FIELD] for r in listed} == {
         "a@example.com": "441", "m@example.com": "9", "x@example.com": "",
     }

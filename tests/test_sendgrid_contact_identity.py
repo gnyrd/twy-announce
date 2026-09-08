@@ -97,5 +97,15 @@ def test_stamps_go_only_on_existing_contacts_hm_knows():
         {"email": "a@example.com", "custom_fields": {"e5_T": "1"}},
         {"email": "c@example.com", "custom_fields": {"e5_T": "3"}},
     ]
-    assert counts == {"matched": 3, "already": 1, "stamped": 1, "restamped": 1}
+    assert counts == {"matched": 3, "already": 1, "stamped": 1, "restamped": 1, "deferred": 0}
     assert all(p["email"] != "never@example.com" for p in payloads)
+
+
+def test_an_id_another_contact_still_carries_is_left_for_the_rename_planner():
+    # HeyMarvelous switched customer 441 from a@ to b@; a@ still carries the id.
+    listed = [_row("a@example.com", "441"), _row("b@example.com")]
+
+    payloads, counts = plan_identity_stamps(listed, {"b@example.com": "441"}, "e5_T")
+
+    assert payloads == []
+    assert counts == {"matched": 1, "already": 0, "stamped": 0, "restamped": 0, "deferred": 1}

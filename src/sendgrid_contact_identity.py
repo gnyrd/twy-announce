@@ -94,9 +94,21 @@ def plan_identity_stamps(
     Only contacts that already exist are ever stamped, never created. A contact
     carrying a different id than marvy.db now gives for its address is
     restamped, marvy.db being the source, and counted apart so it is visible.
+    An id that another contact still carries is deferred to the rename planner.
     """
+    # An id another contact already carries is a rename in waiting: the old
+    # address holds it and marvy.db now names the new one. Stamping the new
+    # address here would leave two contacts on one id, which the rename
+    # planner refuses to touch. Left alone, the planner sees the old holder
+    # and the new address and renames, stamping the new address itself.
+    held_by: dict[str, str] = {}
+    for row in listed:
+        current = str((row.get("fields") or {}).get(IDENTITY_FIELD) or "").strip()
+        if current:
+            held_by.setdefault(current, str(row.get("email") or "").strip().lower())
+
     payloads: list[dict] = []
-    counts = {"matched": 0, "already": 0, "stamped": 0, "restamped": 0}
+    counts = {"matched": 0, "already": 0, "stamped": 0, "restamped": 0, "deferred": 0}
     for row in listed:
         email = str(row.get("email") or "").strip().lower()
         customer_id = ids_by_email.get(email)
@@ -106,6 +118,10 @@ def plan_identity_stamps(
         current = str((row.get("fields") or {}).get(IDENTITY_FIELD) or "").strip()
         if current == customer_id:
             counts["already"] += 1
+            continue
+        holder = held_by.get(customer_id)
+        if holder and holder != email:
+            counts["deferred"] += 1
             continue
         counts["restamped" if current else "stamped"] += 1
         payloads.append({"email": email, "custom_fields": {field_id: customer_id}})
