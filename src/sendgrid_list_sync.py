@@ -33,6 +33,11 @@ def _normalize_contact(contact: dict) -> dict:
         value = str(contact.get(field) or "").strip()
         if value:
             normalized[field] = value
+    # Custom fields ride the same upsert as the name (the member sync stamps
+    # the HeyMarvelous customer id this way). Keyed by SendGrid field id.
+    custom = contact.get("custom_fields")
+    if isinstance(custom, dict) and custom:
+        normalized["custom_fields"] = dict(custom)
     return normalized
 
 

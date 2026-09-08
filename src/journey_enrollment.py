@@ -179,6 +179,59 @@ def enrollment_for(connection: sqlite3.Connection, journey_id: str, email: str):
     return dict(row) if row is not None else None
 
 
+def rename_email(connection: sqlite3.Connection, old: str, new: str) -> dict:
+    """Re-key one person's enrollment and send rows from old to new, atomically.
+
+    A member whose address changed keeps their place in a sequence. A row whose
+    (journey_id, new) pair already exists stays under old and is counted in
+    kept_existing: the newer address's own rows are the better record of that
+    person. Repeating the call is a no-op, which is what lets an interrupted
+    rename run again the next night.
+    """
+    old_key = str(old or "").strip().lower()
+    new_key = str(new or "").strip().lower()
+    empty = {"enrollments_moved": 0, "sends_moved": 0, "kept_existing": 0}
+    if not old_key or not new_key or old_key == new_key:
+        return empty
+    stamp = datetime.now(timezone.utc).isoformat()
+    with connection:
+        enrollments_moved = connection.execute(
+            """
+            UPDATE enrollments SET email = ?, updated_at = ?
+            WHERE email = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM enrollments AS other
+                WHERE other.journey_id = enrollments.journey_id
+                  AND other.email = ?
+              )
+            """,
+            (new_key, stamp, old_key, new_key),
+        ).rowcount
+        sends_moved = connection.execute(
+            """
+            UPDATE sends SET email = ?
+            WHERE email = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM sends AS other
+                WHERE other.journey_id = sends.journey_id
+                  AND other.email = ?
+                  AND other.email_index = sends.email_index
+              )
+            """,
+            (new_key, old_key, new_key),
+        ).rowcount
+        kept = connection.execute(
+            "SELECT (SELECT COUNT(*) FROM enrollments WHERE email = ?) "
+            "+ (SELECT COUNT(*) FROM sends WHERE email = ?)",
+            (old_key, old_key),
+        ).fetchone()[0]
+    return {
+        "enrollments_moved": int(enrollments_moved or 0),
+        "sends_moved": int(sends_moved or 0),
+        "kept_existing": int(kept or 0),
+    }
+
+
 def live_enrollments(connection: sqlite3.Connection, journey_id: str | None = None):
     """Enrollments still mid-sequence, oldest due first. The runner's queue."""
     if journey_id is None:

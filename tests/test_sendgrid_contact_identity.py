@@ -1,0 +1,82 @@
+"""sendgrid_contact_identity: the customer id field and its source of truth."""
+import sqlite3
+
+import pytest
+
+from sendgrid_contact_identity import (
+    IDENTITY_FIELD,
+    custom_field_ids,
+    customer_ids_by_email,
+    ensure_identity_field,
+    identity_field_id,
+)
+
+
+class FakeAPI:
+    def __init__(self, fields=None):
+        self.fields = list(fields or [])
+        self.created = []
+
+    def field_definitions(self):
+        return list(self.fields)
+
+    def create_field_definition(self, name, field_type):
+        self.created.append((name, field_type))
+        created = {"id": f"e{len(self.fields) + 1}_T", "name": name, "field_type": field_type}
+        self.fields.append(created)
+        return created
+
+
+def test_identity_field_is_created_once_then_found():
+    api = FakeAPI([{"id": "e3_T", "name": "twy_source", "field_type": "Text"}])
+
+    assert identity_field_id(api) == ""
+    first = ensure_identity_field(api)
+    second = ensure_identity_field(api)
+
+    assert first == second == "e2_T"
+    assert api.created == [(IDENTITY_FIELD, "Text")]
+    assert identity_field_id(api) == "e2_T"
+
+
+def test_a_field_created_without_an_id_is_refused():
+    class Broken(FakeAPI):
+        def create_field_definition(self, name, field_type):
+            return {}
+
+    with pytest.raises(ValueError, match="without an ID"):
+        ensure_identity_field(Broken())
+
+
+def test_custom_field_ids_map_every_named_field():
+    api = FakeAPI([
+        {"id": "e3_T", "name": "twy_source"},
+        {"id": "e4_T", "name": "twy_source_detail"},
+        {"id": "", "name": "nameless"},
+    ])
+    assert custom_field_ids(api) == {"twy_source": "e3_T", "twy_source_detail": "e4_T"}
+
+
+def _customers(path, rows):
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE customers (id INTEGER, email TEXT, first_name TEXT)")
+    connection.executemany("INSERT INTO customers VALUES (?, ?, ?)", rows)
+    connection.commit()
+    connection.close()
+
+
+def test_customer_ids_are_keyed_by_lowercase_email_as_strings(tmp_path):
+    db = tmp_path / "marvy.db"
+    _customers(db, [(441, "Buyer@Example.com", "B"), (7, "", "x"), (8, None, "y")])
+
+    assert customer_ids_by_email(db) == {"buyer@example.com": "441"}
+
+
+def test_customer_ids_open_the_database_read_only(tmp_path):
+    db = tmp_path / "marvy.db"
+    _customers(db, [(1, "a@example.com", "A")])
+    before = db.read_bytes()
+
+    customer_ids_by_email(db)
+
+    assert db.read_bytes() == before

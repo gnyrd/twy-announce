@@ -260,3 +260,58 @@ def test_the_queue_can_be_read_one_journey_at_a_time(tmp_path):
         connection.close()
 
     assert [row["journey_id"] for row in mine] == ["members_favorites_2025"]
+
+
+# --- rename: a member keeps their place when their address changes ----------
+
+
+def _store(tmp_path):
+    module = enrollment_module()
+    return module, module.connect(tmp_path / "journeys.db")
+
+
+def _enroll(module, connection, email, journey_id="yl"):
+    module.record_enrollments(connection, [module.PlannedEnrollment(
+        journey_id=journey_id, email=email, customer_id="441", product_id="52025",
+        purchase_id="1", enrolled_at="2026-09-01T00:00:00+00:00", next_index=1,
+        next_due_at="2026-09-02T00:00:00+00:00",
+    )])
+
+
+def test_rename_moves_enrollment_and_send_rows(tmp_path):
+    module, connection = _store(tmp_path)
+    _enroll(module, connection, "a@example.com")
+    module.claim_send(connection, journey_id="yl", email="a@example.com", email_index=0, subject="Welcome")
+    module.mark_sent(connection, journey_id="yl", email="a@example.com", email_index=0)
+
+    result = module.rename_email(connection, "A@Example.com", "b@example.com")
+
+    assert result == {"enrollments_moved": 1, "sends_moved": 1, "kept_existing": 0}
+    assert module.enrollment_for(connection, "yl", "b@example.com")["next_index"] == 1
+    assert module.enrollment_for(connection, "yl", "a@example.com") is None
+    assert [row["email"] for row in module.sends_for(connection, "yl")] == ["b@example.com"]
+
+
+def test_rename_keeps_rows_the_new_address_already_holds(tmp_path):
+    module, connection = _store(tmp_path)
+    _enroll(module, connection, "a@example.com")
+    _enroll(module, connection, "b@example.com")
+
+    result = module.rename_email(connection, "a@example.com", "b@example.com")
+
+    assert result == {"enrollments_moved": 0, "sends_moved": 0, "kept_existing": 1}
+    assert module.enrollment_for(connection, "yl", "a@example.com") is not None
+
+
+def test_rename_is_a_no_op_when_repeated_or_pointless(tmp_path):
+    module, connection = _store(tmp_path)
+    _enroll(module, connection, "a@example.com")
+
+    first = module.rename_email(connection, "a@example.com", "b@example.com")
+    second = module.rename_email(connection, "a@example.com", "b@example.com")
+
+    assert first["enrollments_moved"] == 1
+    assert second == {"enrollments_moved": 0, "sends_moved": 0, "kept_existing": 0}
+    assert module.rename_email(connection, "b@example.com", "b@example.com") == {
+        "enrollments_moved": 0, "sends_moved": 0, "kept_existing": 0,
+    }

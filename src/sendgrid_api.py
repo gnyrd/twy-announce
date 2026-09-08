@@ -289,7 +289,29 @@ class SendGridAPI:
                 )
         return result
 
-    def list_contacts(self, list_id: str) -> list[dict]:
+    def delete_contacts(self, contact_ids: list[str]) -> str:
+        """Delete contacts by immutable ID. Returns the async job id."""
+        if not contact_ids:
+            raise ValueError("at least one contact ID is required")
+        payload = self._request(
+            "DELETE",
+            "/marketing/contacts",
+            params={"ids": ",".join(contact_ids)},
+        )
+        job_id = str((payload or {}).get("job_id") or "")
+        if not job_id:
+            raise SendGridAPIError("SendGrid contact deletion returned no job_id")
+        return job_id
+
+    def list_contacts(
+        self, list_id: str, *, fields: tuple[str, ...] = ()
+    ) -> list[dict]:
+        """Every contact on a list as {"email", "id"}.
+
+        `fields` names custom-field columns to read off the export as well; the
+        export carries them under the field's name (`twy_source`), and they
+        come back under a `fields` key so existing callers see no change.
+        """
         if not list_id:
             raise ValueError("SendGrid list ID is required")
         started = self.start_contact_export([list_id])
@@ -335,8 +357,8 @@ class SendGridAPI:
                     "SendGrid contact export is not valid UTF-8"
                 ) from exc
             reader = csv.DictReader(io.StringIO(text))
-            fields = set(reader.fieldnames or [])
-            if not {"EMAIL", "CONTACT_ID"}.issubset(fields):
+            columns = set(reader.fieldnames or [])
+            if not {"EMAIL", "CONTACT_ID"}.issubset(columns):
                 raise SendGridAPIError(
                     "SendGrid contact export is missing required columns"
                 )
@@ -353,7 +375,12 @@ class SendGridAPI:
                     )
                 seen_ids.add(contact_id)
                 seen_emails.add(email)
-                contacts.append({"email": email, "id": contact_id})
+                entry = {"email": email, "id": contact_id}
+                if fields:
+                    entry["fields"] = {
+                        name: str(row.get(name) or "").strip() for name in fields
+                    }
+                contacts.append(entry)
 
         if expected != len(contacts):
             raise SendGridAPIError(

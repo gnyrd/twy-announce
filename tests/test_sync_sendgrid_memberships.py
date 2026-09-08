@@ -101,3 +101,125 @@ def test_membership_sync_does_not_touch_email_subscription_list(monkeypatch):
     )
 
     assert "Email: Subscribed" not in names
+
+
+# --- identity: members carry their HeyMarvelous id, renames run first --------
+
+from sendgrid_contact_identity import IDENTITY_FIELD
+
+
+def test_attach_customer_ids_stamps_the_field_and_counts_the_unknown():
+    memberships = {
+        "Member: Yoga Lifestyle": [{"email": "a@example.com", "first_name": "A"}, {"email": "b@example.com"}],
+        "Member: Archive": [{"email": "a@example.com"}],
+    }
+
+    stamped, count, unresolved = membership_sync.attach_customer_ids(
+        memberships, {"a@example.com": "441"}, "e5_T"
+    )
+
+    assert stamped["Member: Yoga Lifestyle"][0] == {
+        "email": "a@example.com", "first_name": "A", "custom_fields": {"e5_T": "441"},
+    }
+    assert stamped["Member: Archive"][0]["custom_fields"] == {"e5_T": "441"}
+    assert "custom_fields" not in stamped["Member: Yoga Lifestyle"][1]
+    assert count == 1 and unresolved == ["b@example.com"]
+    assert "custom_fields" not in memberships["Member: Yoga Lifestyle"][0]
+
+
+def test_without_the_field_nothing_is_stamped_and_known_ids_are_not_unresolved():
+    memberships = {"Member: Yoga Lifestyle": [{"email": "a@example.com"}, {"email": "b@example.com"}]}
+
+    stamped, count, unresolved = membership_sync.attach_customer_ids(
+        memberships, {"a@example.com": "441"}, ""
+    )
+
+    assert count == 0 and unresolved == ["b@example.com"]
+    assert "custom_fields" not in stamped["Member: Yoga Lifestyle"][0]
+
+
+def test_desired_customer_ids_span_both_lists():
+    memberships = {
+        "Member: Yoga Lifestyle": [{"email": "a@example.com"}],
+        "Member: Archive": [{"email": "c@example.com"}, {"email": "x@example.com"}],
+    }
+    assert membership_sync.desired_customer_ids(
+        memberships, {"a@example.com": "1", "c@example.com": "3"}
+    ) == {"a@example.com": "1", "c@example.com": "3"}
+
+
+class ListingAPI:
+    def __init__(self, rows):
+        self.rows = rows
+        self.requested = []
+
+    def list_contacts(self, list_id, *, fields=()):
+        self.requested.append((list_id, fields))
+        return list(self.rows.get(list_id, []))
+
+
+class Registry:
+    suppression_group_id = 35187
+
+    def __init__(self, ids):
+        self.ids = ids
+
+    def list_id(self, name):
+        if name in self.ids:
+            return self.ids[name]
+        raise KeyError(name)
+
+
+def _listed(email, customer_id):
+    return {"email": email, "id": f"c_{email}", "fields": {IDENTITY_FIELD: customer_id}}
+
+
+def test_rename_phase_dry_run_plans_and_writes_nothing(tmp_path, monkeypatch):
+    api = ListingAPI({"yl": [_listed("a@example.com", "441")]})
+    registry = Registry({"Member: Yoga Lifestyle": "yl"})
+
+    def must_not_apply(*args, **kwargs):
+        raise AssertionError("a dry run must not rename")
+
+    monkeypatch.setattr(membership_sync, "apply_rename", must_not_apply)
+
+    result = membership_sync.rename_phase(
+        api, registry, desired={"b@example.com": "441"},
+        ledger_path=tmp_path / "l.jsonl", enrollments_path=tmp_path / "j.db",
+        identity_field="e5_T", field_ids={}, dry_run=True,
+    )
+
+    assert result == {"planned": 1, "renamed": 0, "duplicates": 0, "conflicts": 0}
+    assert api.requested == [("yl", (IDENTITY_FIELD,))]
+    assert not (tmp_path / "j.db").exists()
+
+
+def test_rename_phase_applies_each_planned_rename_with_the_registry_group(tmp_path, monkeypatch):
+    api = ListingAPI({"yl": [_listed("a@example.com", "441")], "ar": []})
+    registry = Registry({"Member: Yoga Lifestyle": "yl", "Member: Archive": "ar"})
+    applied = []
+
+    def fake_apply(api_arg, **kwargs):
+        applied.append(kwargs)
+        return {"event": "completed"}
+
+    monkeypatch.setattr(membership_sync, "apply_rename", fake_apply)
+
+    result = membership_sync.rename_phase(
+        api, registry, desired={"b@example.com": "441"},
+        ledger_path=tmp_path / "l.jsonl", enrollments_path=tmp_path / "j.db",
+        identity_field="e5_T", field_ids={"twy_source": "e3_T"}, dry_run=False,
+    )
+
+    assert result == {"planned": 1, "renamed": 1, "duplicates": 0, "conflicts": 0}
+    rename = applied[0]["rename"]
+    assert (rename.old_email, rename.new_email, rename.customer_id) == ("a@example.com", "b@example.com", "441")
+    assert applied[0]["suppression_group_id"] == 35187
+    assert applied[0]["identity_field_id"] == "e5_T"
+    assert applied[0]["field_ids"] == {"twy_source": "e3_T"}
+    assert (tmp_path / "j.db").exists()
+
+
+def test_the_parser_knows_dry_run():
+    assert membership_sync.build_parser().parse_args(["--dry-run"]).dry_run is True
+    assert membership_sync.build_parser().parse_args([]).dry_run is False

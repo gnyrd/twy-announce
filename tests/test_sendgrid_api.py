@@ -754,3 +754,36 @@ def test_a_connection_error_on_a_read_is_retried_with_backoff():
     api = SendGridAPI("SG.secret-proof-key", session=session, sleep_fn=slept.append)
     assert api.user_email() == "admin@example.invalid"
     assert slept == [1.0]
+
+
+def test_list_contacts_reads_named_custom_field_columns_on_request():
+    csv_bytes = (
+        b'"EMAIL","CONTACT_ID","twy_marvelous_customer_id","twy_source"\n'
+        b'"a@example.com","contact-1","441","member_sync"\n'
+    )
+    api, fake = make_api(
+        FakeResponse(202, {"id": "export-1"}),
+        FakeResponse(200, {"id": "export-1", "status": "ready", "contact_count": 1,
+                           "urls": ["https://storage.example/export-1.csv"]}),
+        FakeResponse(200, content=csv_bytes),
+    )
+    assert api.list_contacts("list-1", fields=("twy_marvelous_customer_id", "twy_role")) == [
+        {"email": "a@example.com", "id": "contact-1",
+         "fields": {"twy_marvelous_customer_id": "441", "twy_role": ""}},
+    ]
+
+
+def test_delete_contacts_uses_the_ids_query_and_returns_the_job():
+    api, fake = make_api(FakeResponse(202, {"job_id": "del-1"}))
+    assert api.delete_contacts(["c-1", "c-2"]) == "del-1"
+    assert fake.calls[-1]["method"] == "DELETE"
+    assert fake.calls[-1]["url"].endswith("/v3/marketing/contacts")
+    assert fake.calls[-1]["params"] == {"ids": "c-1,c-2"}
+
+
+def test_delete_contacts_refuses_an_empty_call_and_a_missing_job():
+    api, fake = make_api(FakeResponse(202, {}))
+    with pytest.raises(ValueError):
+        api.delete_contacts([])
+    with pytest.raises(SendGridAPIError, match="no job_id"):
+        api.delete_contacts(["c-1"])

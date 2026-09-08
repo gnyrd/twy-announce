@@ -137,3 +137,12 @@ def test_creating_a_clean_list_still_works():
         "list-id"
     )
     assert registry.registered == {"Product: Yoga Lifestyle": "list-id"}
+
+
+def test_normalize_contact_keeps_custom_fields_for_the_upsert():
+    from sendgrid_list_sync import _normalize_contact
+
+    assert _normalize_contact({"email": "A@Example.com", "custom_fields": {"e5_T": "441"}}) == {
+        "email": "a@example.com", "custom_fields": {"e5_T": "441"},
+    }
+    assert _normalize_contact({"email": "a@example.com", "custom_fields": {}}) == {"email": "a@example.com"}
