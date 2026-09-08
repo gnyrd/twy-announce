@@ -787,3 +787,23 @@ def test_delete_contacts_refuses_an_empty_call_and_a_missing_job():
         api.delete_contacts([])
     with pytest.raises(SendGridAPIError, match="no job_id"):
         api.delete_contacts(["c-1"])
+
+
+def test_all_contacts_exports_the_whole_account_without_list_ids():
+    csv_bytes = b'"EMAIL","CONTACT_ID","twy_marvelous_customer_id"\n"a@example.com","contact-1","441"\n'
+    api, fake = make_api(
+        FakeResponse(202, {"id": "export-9"}),
+        FakeResponse(200, {"id": "export-9", "status": "ready", "contact_count": 1,
+                           "urls": ["https://storage.example/export-9.csv"]}),
+        FakeResponse(200, content=csv_bytes),
+    )
+    assert api.all_contacts(fields=("twy_marvelous_customer_id",)) == [
+        {"email": "a@example.com", "id": "contact-1", "fields": {"twy_marvelous_customer_id": "441"}},
+    ]
+    assert "list_ids" not in fake.calls[0]["json"]
+
+
+def test_upsert_without_lists_leaves_list_ids_out_of_the_body():
+    api, fake = make_api(FakeResponse(202, {"job_id": "job-2"}))
+    assert api.upsert_contacts([], [{"email": "a@example.com", "custom_fields": {"e5_T": "441"}}]) == "job-2"
+    assert fake.calls[-1]["json"] == {"contacts": [{"email": "a@example.com", "custom_fields": {"e5_T": "441"}}]}

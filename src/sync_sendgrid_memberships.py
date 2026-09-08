@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Reconcile authoritative Marvelous memberships to exact SendGrid lists.
 
-Members are keyed by their HeyMarvelous customer id, carried on the SendGrid
-contact as twy_marvelous_customer_id and resolved from marvy.db each night.
-When HeyMarvelous reports a known id under a new email address (its support
-changed the student's address), the contact is renamed everywhere it lives
-before the exact sync runs; see sendgrid_contact_rename. Run with --dry-run to
-read everything and write nothing.
+Every SendGrid contact HeyMarvelous knows carries the customer id as
+twy_marvelous_customer_id, resolved from marvy.db each night and stamped on
+existing contacts only (a customer with no contact is never added). When
+marvy.db then shows a known id under a new email address (HeyMarvelous support
+changed the student's address), the contact is renamed everywhere it lives,
+member or not, before the exact member sync runs; see sendgrid_contact_rename.
+Run with --dry-run to read everything and write nothing.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from sendgrid_contact_identity import (
     customer_ids_by_email,
     ensure_identity_field,
     identity_field_id,
+    plan_identity_stamps,
 )
 from sendgrid_contact_rename import apply_rename, plan_renames, read_ledger
 from sendgrid_contact_source import SOURCE_MEMBER_SYNC
@@ -170,17 +172,32 @@ def desired_customer_ids(
     return desired
 
 
-def listed_member_contacts(api, registry) -> list[dict]:
-    """Every contact on either member list, with the identity field, once each."""
-    seen: dict[str, dict] = {}
-    for name in (MEMBER_YOGA_LIFESTYLE, MEMBER_ARCHIVE):
-        try:
-            list_id = registry.list_id(name)
-        except KeyError:
-            continue
-        for row in api.list_contacts(list_id, fields=(IDENTITY_FIELD,)):
-            seen.setdefault(str(row.get("id") or row.get("email")), row)
-    return list(seen.values())
+def identity_pass(
+    api,
+    *,
+    ids: dict[str, str],
+    field_id: str,
+    dry_run: bool,
+) -> tuple[list[dict], dict]:
+    """Stamp the customer id on every existing contact HeyMarvelous knows.
+
+    Returns the full contact export (with the identity field) as it stands
+    after the stamps, for the rename planner, plus the counts. Never creates a
+    contact: knowing a person is not consent to email them.
+    """
+    listed = api.all_contacts(fields=(IDENTITY_FIELD,))
+    payloads, counts = plan_identity_stamps(listed, ids, field_id or "pending")
+    if payloads and field_id and not dry_run:
+        job_id = api.upsert_contacts([], payloads)
+        api.wait_contact_job(job_id, timeout_s=300)
+        stamped = {row["email"]: row["custom_fields"][field_id] for row in payloads}
+        for row in listed:
+            email = str(row.get("email") or "").strip().lower()
+            if email in stamped:
+                fields = dict(row.get("fields") or {})
+                fields[IDENTITY_FIELD] = stamped[email]
+                row["fields"] = fields
+    return listed, counts
 
 
 def rename_phase(
@@ -188,6 +205,7 @@ def rename_phase(
     registry,
     *,
     desired: dict[str, str],
+    listed: list[dict],
     ledger_path,
     enrollments_path,
     identity_field: str,
@@ -196,10 +214,11 @@ def rename_phase(
 ) -> dict:
     """Rename every contact whose customer id now carries a different address.
 
-    Runs before the exact sync, so the sync then finds the new address desired
-    and present and the old one gone. A dry run plans and logs, writes nothing.
+    desired maps each HeyMarvelous customer's current address to its id and
+    listed is the contact export after the identity pass. Runs before the
+    exact member sync, so that sync then finds a renamed member's new address
+    desired and present and the old one gone. A dry run plans and logs only.
     """
-    listed = listed_member_contacts(api, registry)
     plan = plan_renames(desired, listed, read_ledger(ledger_path))
     for customer_id, emails in plan.duplicates:
         log.warning(
@@ -296,10 +315,23 @@ def main(argv=None) -> int:
         )
         log.debug("unresolved member addresses: %s", ", ".join(unresolved))
 
+    listed, identity = identity_pass(
+        api, ids=ids, field_id=field_id, dry_run=args.dry_run
+    )
+    log.info(
+        "%sidentity: contacts=%d matched=%d already=%d stamped=%d restamped=%d",
+        "dry run: " if args.dry_run else "",
+        len(listed),
+        identity["matched"],
+        identity["already"],
+        identity["stamped"],
+        identity["restamped"],
+    )
     renames = rename_phase(
         api,
         registry,
-        desired=desired_customer_ids(memberships, ids),
+        desired=ids,
+        listed=listed,
         ledger_path=sendgrid_contact_renames_path(),
         enrollments_path=journey_enrollments_db_path(),
         identity_field=field_id,
@@ -311,7 +343,7 @@ def main(argv=None) -> int:
         for name, contacts in memberships.items():
             log.info("dry run: %s would sync %d member(s)", name, len(contacts))
         log.info(
-            "dry run: stamped=%d unresolved_ids=%d renames_planned=%d "
+            "dry run: members_stamped=%d unresolved_ids=%d renames_planned=%d "
             "duplicates=%d conflicts=%d",
             stamped,
             len(unresolved),
@@ -335,7 +367,7 @@ def main(argv=None) -> int:
             result["removed"],
         )
     log.info(
-        "stamped=%d unresolved_ids=%d renames=%d duplicates=%d conflicts=%d",
+        "members_stamped=%d unresolved_ids=%d renames=%d duplicates=%d conflicts=%d",
         stamped,
         len(unresolved),
         renames["renamed"],

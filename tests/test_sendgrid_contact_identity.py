@@ -9,6 +9,7 @@ from sendgrid_contact_identity import (
     customer_ids_by_email,
     ensure_identity_field,
     identity_field_id,
+    plan_identity_stamps,
 )
 
 
@@ -80,3 +81,21 @@ def test_customer_ids_open_the_database_read_only(tmp_path):
     customer_ids_by_email(db)
 
     assert db.read_bytes() == before
+
+
+def _row(email, current=""):
+    return {"email": email, "id": f"c_{email}", "fields": {IDENTITY_FIELD: current}}
+
+
+def test_stamps_go_only_on_existing_contacts_hm_knows():
+    listed = [_row("a@example.com"), _row("b@example.com", "7"), _row("c@example.com", "9"), _row("d@example.com")]
+    ids = {"a@example.com": "1", "b@example.com": "7", "c@example.com": "3", "never@example.com": "5"}
+
+    payloads, counts = plan_identity_stamps(listed, ids, "e5_T")
+
+    assert payloads == [
+        {"email": "a@example.com", "custom_fields": {"e5_T": "1"}},
+        {"email": "c@example.com", "custom_fields": {"e5_T": "3"}},
+    ]
+    assert counts == {"matched": 3, "already": 1, "stamped": 1, "restamped": 1}
+    assert all(p["email"] != "never@example.com" for p in payloads)

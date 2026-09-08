@@ -314,7 +314,20 @@ class SendGridAPI:
         """
         if not list_id:
             raise ValueError("SendGrid list ID is required")
-        started = self.start_contact_export([list_id])
+        return self._export_contacts([list_id], fields=fields, list_id=list_id)
+
+    def all_contacts(self, *, fields: tuple[str, ...] = ()) -> list[dict]:
+        """Every contact in the account, same shape as list_contacts."""
+        return self._export_contacts(None, fields=fields, list_id=None)
+
+    def _export_contacts(
+        self,
+        list_ids: list[str] | None,
+        *,
+        fields: tuple[str, ...],
+        list_id: str | None,
+    ) -> list[dict]:
+        started = self.start_contact_export(list_ids)
         export_id = str((started or {}).get("id") or "")
         if not export_id:
             raise SendGridAPIError("SendGrid contact export returned no ID")
@@ -327,7 +340,7 @@ class SendGridAPI:
             raise SendGridAPIError("SendGrid contact export returned invalid URLs")
 
         expected = ready.get("contact_count")
-        if expected is None and not urls:
+        if expected is None and not urls and list_id:
             list_payload = self.marketing_list(list_id)
             list_count = list_payload.get("contact_count")
             if (
@@ -403,11 +416,12 @@ class SendGridAPI:
         return count
 
     def upsert_contacts(self, list_ids: list[str], contacts: list[dict]) -> str:
-        payload = self._request(
-            "PUT",
-            "/marketing/contacts",
-            json={"list_ids": list_ids, "contacts": contacts},
-        )
+        # No list_ids means "touch the contacts, leave their lists alone", which
+        # is what a field-only stamp wants; SendGrid reads an absent key that way.
+        body: dict = {"contacts": contacts}
+        if list_ids:
+            body["list_ids"] = list_ids
+        payload = self._request("PUT", "/marketing/contacts", json=body)
         job_id = payload.get("job_id")
         if not job_id:
             raise SendGridAPIError("SendGrid contact upsert returned no job_id")

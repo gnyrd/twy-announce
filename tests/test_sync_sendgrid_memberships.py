@@ -148,16 +148,6 @@ def test_desired_customer_ids_span_both_lists():
     ) == {"a@example.com": "1", "c@example.com": "3"}
 
 
-class ListingAPI:
-    def __init__(self, rows):
-        self.rows = rows
-        self.requested = []
-
-    def list_contacts(self, list_id, *, fields=()):
-        self.requested.append((list_id, fields))
-        return list(self.rows.get(list_id, []))
-
-
 class Registry:
     suppression_group_id = 35187
 
@@ -174,8 +164,52 @@ def _listed(email, customer_id):
     return {"email": email, "id": f"c_{email}", "fields": {IDENTITY_FIELD: customer_id}}
 
 
+class AccountAPI:
+    """all_contacts plus the upsert the identity pass makes."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.upserts = []
+
+    def all_contacts(self, *, fields=()):
+        return [dict(r, fields=dict(r["fields"])) for r in self.rows]
+
+    def upsert_contacts(self, list_ids, contacts):
+        self.upserts.append((list(list_ids), [dict(c) for c in contacts]))
+        return "job-1"
+
+    def wait_contact_job(self, job_id, timeout_s=120):
+        return {"status": "completed"}
+
+
+def test_identity_pass_stamps_known_contacts_without_touching_lists(tmp_path):
+    api = AccountAPI([_listed("a@example.com", ""), _listed("m@example.com", "9"), _listed("x@example.com", "")])
+
+    listed, counts = membership_sync.identity_pass(
+        api, ids={"a@example.com": "441", "m@example.com": "9", "ghost@example.com": "5"},
+        field_id="e5_T", dry_run=False,
+    )
+
+    assert api.upserts == [([], [{"email": "a@example.com", "custom_fields": {"e5_T": "441"}}])]
+    assert counts == {"matched": 2, "already": 1, "stamped": 1, "restamped": 0}
+    assert {r["email"]: r["fields"][IDENTITY_FIELD] for r in listed} == {
+        "a@example.com": "441", "m@example.com": "9", "x@example.com": "",
+    }
+
+
+def test_identity_pass_dry_run_counts_and_writes_nothing():
+    api = AccountAPI([_listed("a@example.com", "")])
+
+    listed, counts = membership_sync.identity_pass(
+        api, ids={"a@example.com": "441"}, field_id="", dry_run=True,
+    )
+
+    assert api.upserts == []
+    assert counts["stamped"] == 1
+    assert listed[0]["fields"][IDENTITY_FIELD] == ""
+
+
 def test_rename_phase_dry_run_plans_and_writes_nothing(tmp_path, monkeypatch):
-    api = ListingAPI({"yl": [_listed("a@example.com", "441")]})
     registry = Registry({"Member: Yoga Lifestyle": "yl"})
 
     def must_not_apply(*args, **kwargs):
@@ -184,18 +218,17 @@ def test_rename_phase_dry_run_plans_and_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(membership_sync, "apply_rename", must_not_apply)
 
     result = membership_sync.rename_phase(
-        api, registry, desired={"b@example.com": "441"},
+        object(), registry, desired={"b@example.com": "441"},
+        listed=[_listed("a@example.com", "441")],
         ledger_path=tmp_path / "l.jsonl", enrollments_path=tmp_path / "j.db",
         identity_field="e5_T", field_ids={}, dry_run=True,
     )
 
     assert result == {"planned": 1, "renamed": 0, "duplicates": 0, "conflicts": 0}
-    assert api.requested == [("yl", (IDENTITY_FIELD,))]
     assert not (tmp_path / "j.db").exists()
 
 
 def test_rename_phase_applies_each_planned_rename_with_the_registry_group(tmp_path, monkeypatch):
-    api = ListingAPI({"yl": [_listed("a@example.com", "441")], "ar": []})
     registry = Registry({"Member: Yoga Lifestyle": "yl", "Member: Archive": "ar"})
     applied = []
 
@@ -206,7 +239,8 @@ def test_rename_phase_applies_each_planned_rename_with_the_registry_group(tmp_pa
     monkeypatch.setattr(membership_sync, "apply_rename", fake_apply)
 
     result = membership_sync.rename_phase(
-        api, registry, desired={"b@example.com": "441"},
+        object(), registry, desired={"b@example.com": "441"},
+        listed=[_listed("a@example.com", "441")],
         ledger_path=tmp_path / "l.jsonl", enrollments_path=tmp_path / "j.db",
         identity_field="e5_T", field_ids={"twy_source": "e3_T"}, dry_run=False,
     )
