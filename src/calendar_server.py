@@ -238,6 +238,14 @@ def _build_ics(class_type_filter=None, cal_name=None, cal_desc=None, summary_pre
             synced_at = None
             uid = f"twy-plan-{plan['id']}@{UID_HOST}"
 
+        # A cancelled class stays on the feed, marked, so a subscribed calendar
+        # strikes it through or hides it instead of losing it silently. The
+        # plan's own block is the source; HM's flag (event branch) agrees.
+        if plan.get("cancelled") or status == "CANCELLED":
+            status = "CANCELLED"
+            if not summary.startswith("CANCELLED: "):
+                summary = f"CANCELLED: {summary}"
+
         # Keep classes visible for 74h after start (HM recordings live ~3 days).
         if start_dt < now_utc - timedelta(hours=74):
             continue
