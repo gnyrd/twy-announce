@@ -545,6 +545,7 @@ def collect_zernio_recent_status(
     window_end = captured_at + timedelta(hours=lookahead_hours)
     rows: list[dict[str, Any]] = []
     api_errors: list[dict[str, Any]] = []
+    withdrawn: list[dict[str, Any]] = []
     for entry in history:
         post_id = entry.get("zernio_post_id")
         scheduled_for = entry.get("scheduled_for")
@@ -555,6 +556,19 @@ def collect_zernio_recent_status(
         except ValueError:
             continue
         if scheduled_at < window_start or scheduled_at > window_end:
+            continue
+        if entry.get("withdrawn_at"):
+            # The clips scheduler withdrew this post for a cancelled class and
+            # deleted it at Zernio, so the id 404s by design. Not an error.
+            withdrawn.append(
+                {
+                    "zernio_post_id": post_id,
+                    "scheduled_for": scheduled_for,
+                    "withdrawn_at": entry.get("withdrawn_at"),
+                    "post_type": entry.get("post_type"),
+                    "posted_for_class": entry.get("posted_for_class"),
+                }
+            )
             continue
         try:
             payload = fetch_post(post_id)
@@ -606,6 +620,8 @@ def collect_zernio_recent_status(
         "queried_count": len(rows),
         "api_error_count": len(api_errors),
         "api_errors": api_errors,
+        "withdrawn_count": len(withdrawn),
+        "withdrawn": withdrawn,
         "by_post_status": dict(Counter(row.get("post_status") or "unknown" for row in rows)),
         "by_platform_status": dict(Counter(row.get("platform_status") or "unknown" for row in rows)),
         "by_content_type": dict(Counter(row.get("content_type") or "unknown" for row in rows)),

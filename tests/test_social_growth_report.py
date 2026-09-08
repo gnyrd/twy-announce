@@ -618,6 +618,71 @@ def test_collect_zernio_recent_status_tallies_missing_fields_as_unknown(tmp_path
     json.dumps(status, sort_keys=True)
 
 
+def test_collect_zernio_recent_status_skips_withdrawn_posts_without_alerting(tmp_path):
+    # 2026-09-08: the clips scheduler had withdrawn three posts for cancelled
+    # classes (withdrawn_at stamped, post deleted at Zernio). Their ids 404
+    # by design, so they are listed as withdrawn, never fetched, never an
+    # api_error, and never a Slack warning.
+    history_path = tmp_path / "clips/state/ig_history.json"
+    write_json(
+        history_path,
+        [
+            {
+                "zernio_post_id": "gone1",
+                "post_type": "story",
+                "posted_for_class": "2026-07-28",
+                "class_name": "2026-07-15_breath",
+                "clip_name": "03.mp4",
+                "scheduled_for": "2026-07-28T06:00:00-06:00",
+                "withdrawn_at": "2026-07-27T19:27:31-06:00",
+            },
+            {
+                "zernio_post_id": "live1",
+                "post_type": "reel",
+                "posted_for_class": "2026-07-28",
+                "class_name": "2026-07-15_breath",
+                "clip_name": "02.mp4",
+                "scheduled_for": "2026-07-27T08:00:00-06:00",
+            },
+        ],
+    )
+    fetched = []
+
+    def fake_fetch(post_id):
+        fetched.append(post_id)
+        assert post_id != "gone1"
+        return {
+            "post": {
+                "status": "scheduled",
+                "content": "caption",
+                "platforms": [
+                    {
+                        "status": "pending",
+                        "publishAttempts": 0,
+                        "platformSpecificData": {"contentType": "reels"},
+                    }
+                ],
+            }
+        }
+
+    status = social_growth.collect_zernio_recent_status(
+        history_path=history_path,
+        captured_at=datetime(2026, 7, 27, 20, 0, tzinfo=timezone.utc),
+        fetch_post=fake_fetch,
+        lookback_hours=72,
+        lookahead_hours=72,
+    )
+
+    assert fetched == ["live1"]
+    assert status["queried_count"] == 1
+    assert status["api_error_count"] == 0
+    assert status["withdrawn_count"] == 1
+    assert status["withdrawn"][0]["zernio_post_id"] == "gone1"
+    assert status["withdrawn"][0]["withdrawn_at"] == "2026-07-27T19:27:31-06:00"
+    events = social_growth.warning_events({"zernio": status}, token_warning_hours=48)
+    assert not [event for event in events if event["key"].startswith("zernio_api_error:")]
+
+
 def test_zernio_post_row_checks_full_reel_caption_before_storing_excerpt():
     long_caption = (
         "Open the body without forcing the shape. " * 12
