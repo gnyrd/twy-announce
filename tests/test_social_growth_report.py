@@ -558,6 +558,66 @@ def test_collect_zernio_recent_status_uses_nested_platform_status(tmp_path):
     assert status["analytics"]["status"] == "not_configured"
 
 
+def test_collect_zernio_recent_status_tallies_missing_fields_as_unknown(tmp_path):
+    # 2026-09-08: a Zernio post came back without a content type, so the
+    # tally dict held a None key beside strings and the sort_keys JSON write
+    # of the snapshot raised TypeError. Missing values count as "unknown".
+    history_path = tmp_path / "clips/state/ig_history.json"
+    write_json(
+        history_path,
+        [
+            {
+                "zernio_post_id": "bare1",
+                "post_type": "story",
+                "posted_for_class": "2026-07-28",
+                "class_name": "2026-07-15_breath",
+                "clip_name": "03.mp4",
+                "scheduled_for": "2026-07-28T06:00:00-06:00",
+            },
+            {
+                "zernio_post_id": "typed1",
+                "post_type": "reel",
+                "posted_for_class": "2026-07-28",
+                "class_name": "2026-07-15_breath",
+                "clip_name": "02.mp4",
+                "scheduled_for": "2026-07-27T08:00:00-06:00",
+            },
+        ],
+    )
+
+    def fake_fetch(post_id):
+        payloads = {
+            "bare1": {"post": {"content": "story", "platforms": [{}]}},
+            "typed1": {
+                "post": {
+                    "status": "scheduled",
+                    "content": "caption",
+                    "platforms": [
+                        {
+                            "status": "pending",
+                            "publishAttempts": 0,
+                            "platformSpecificData": {"contentType": "reels"},
+                        }
+                    ],
+                }
+            },
+        }
+        return payloads[post_id]
+
+    status = social_growth.collect_zernio_recent_status(
+        history_path=history_path,
+        captured_at=datetime(2026, 7, 27, 20, 0, tzinfo=timezone.utc),
+        fetch_post=fake_fetch,
+        lookback_hours=72,
+        lookahead_hours=72,
+    )
+
+    assert status["by_post_status"] == {"unknown": 1, "scheduled": 1}
+    assert status["by_platform_status"] == {"unknown": 1, "pending": 1}
+    assert status["by_content_type"] == {"unknown": 1, "reels": 1}
+    json.dumps(status, sort_keys=True)
+
+
 def test_zernio_post_row_checks_full_reel_caption_before_storing_excerpt():
     long_caption = (
         "Open the body without forcing the shape. " * 12
