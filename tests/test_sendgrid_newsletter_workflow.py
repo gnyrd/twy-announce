@@ -1068,6 +1068,70 @@ def test_apply_provider_report_recovers_after_workflow_failure(
     assert entry["review_path"].endswith(".review.json")
 
 
+def test_sent_recording_review_resolves_the_token_template(
+    monkeypatch,
+    tmp_path,
+):
+    # 2026-09-13: the recording's generated snapshot is the raw token
+    # template, and the sent review rejected it as provider content, so
+    # the draft stayed scheduled with an error after the mail had gone.
+    _write_recording_record(tmp_path, monkeypatch)
+    period = tmp_path / "data" / "newsletters" / "2026-08"
+    period.mkdir(parents=True)
+    template = _template_section()
+    (period / "recording.md").write_text(
+        f"# {template['subject']}\n\n{template['body']}\n",
+        encoding="utf-8",
+    )
+    (period / ".metadata.json").write_text(json.dumps({
+        "version": 1,
+        "drafts": {
+            "recording": {
+                "state": "draft",
+                "preheader": template["preheader"],
+            },
+        },
+    }))
+    class_date = date(2026, 8, 8)
+    lock_due_sections(
+        year=2026,
+        month=8,
+        class_date=class_date,
+        now=datetime(2026, 8, 9, 0, 0, tzinfo=timezone.utc),
+    )
+    metadata = json.loads((period / ".metadata.json").read_text())
+    entry = metadata["drafts"]["recording"]
+    original = json.loads(
+        (period / entry["original_snapshot"]).read_text()
+    )
+    assert "{CLASS_TITLE}" in original["content"]["subject"]
+    assert "{RECORDING_CTA}" in original["content"]["body"]
+
+    apply_provider_report(
+        year=2026,
+        month=8,
+        report={
+            "Class Recording": {
+                "id": "send1",
+                "status": "triggered",
+                "provider_status": "triggered",
+                "send_at": "2026-08-09T23:17:00+00:00",
+            },
+        },
+        now=datetime(2026, 8, 9, 23, 30, tzinfo=timezone.utc),
+    )
+
+    metadata = json.loads((period / ".metadata.json").read_text())
+    entry = metadata["drafts"]["recording"]
+    assert entry["state"] == "sent"
+    assert "error" not in entry
+    review = json.loads(Path(entry["review_path"]).read_text())
+    assert review["audience_key"] == "recording"
+    assert review["generated"]["subject"] == "Your Open to Grace recording"
+    assert review["generated"] == review["sent"]
+    assert review["candidates"] == []
+
+
 def test_every_workflow_section_is_an_allowed_review_audience():
     from newsletter_editorial_review import ALLOWED_AUDIENCES
     from sendgrid_newsletter_workflow import SECTION_PURPOSES

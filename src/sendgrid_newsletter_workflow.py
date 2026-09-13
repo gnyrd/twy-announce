@@ -74,13 +74,24 @@ def _period_dir(year: int, month: int) -> Path:
     return newsletters_dir() / f"{year:04d}-{month:02d}"
 
 
-def _snapshot_content(snapshot: dict) -> dict:
+def _snapshot_section(snapshot: dict) -> dict:
+    """The subject, preheader and body a snapshot carries, as stored."""
     content = snapshot.get("content") or {}
-    section = {
+    return {
         "subject": str(content.get("subject") or ""),
         "preheader": str(content.get("preheader") or ""),
         "body": str(content.get("body") or ""),
     }
+
+
+def _snapshot_content(snapshot: dict) -> dict:
+    """A snapshot's section, checked as provider-bound content.
+
+    Only for snapshots whose content ships (locked, sent, approved). A
+    generated snapshot is the section as written and may carry tokens
+    that lock-time resolution fills, so it goes through _snapshot_section.
+    """
+    section = _snapshot_section(snapshot)
     _validate_sections_before_provider({"snapshot": section})
     return section
 
@@ -163,8 +174,18 @@ def _create_sent_review(
     original_path = str(entry.get("original_snapshot") or "")
     if not original_path:
         return None
-    original = _snapshot_content(
-        _read_snapshot(year, month, original_path)
+    # The generated snapshot is the section before lock-time token
+    # resolution (the recording template carries {CLASS_TITLE} and
+    # {RECORDING_CTA} until the month's record fills them). Resolve it the
+    # way the lock did so the review compares like with like, and skip the
+    # provider validator: nothing here ships, and rejecting the template
+    # after the send left the 2026-09 recording stuck in scheduled with an
+    # error on every tick (2026-09-13).
+    original = resolve_section_tokens(
+        key,
+        _snapshot_section(_read_snapshot(year, month, original_path)),
+        year=year,
+        month=month,
     )
     record = build_review_record(
         mailing_name=mailing_name(
