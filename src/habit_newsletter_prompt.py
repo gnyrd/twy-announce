@@ -354,7 +354,7 @@ Arc (the shape Tiff's best lifestyle emails follow): open from a moment of ordin
 
 OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the class registration page.
-- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) after the body, before the sign-off. Substitutes to a styled Register button followed by two fixed lines (the recording is included for everyone registered, and a link to share with a friend), so do not write a recording note or a bring-a-friend line yourself.
 
 Hard limit: 300 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body that flows, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, sign-off. Tiff's lifestyle openers tend to ground the theme in something lived or felt rather than abstract -- direct declarative shape, not a rhetorical question and not a long abstract contrast. The reference exemplars below show this. The API will reject any body that begins with a `#` markdown header (no H1, no umbrella title above the body). No bullets except for event details.
@@ -399,7 +399,7 @@ Write this as Tiff - warm, accessible, no yoga jargon. This person is on the fen
 
 OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button followed by two fixed lines (the recording is included for everyone registered, and a link to share with a friend), so do not write a recording note or a bring-a-friend line yourself.
 - {{CALENDAR_CTA}}   - place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button. This invites them to subscribe to the Habits-only calendar feed so they never miss a class.
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
@@ -591,7 +591,7 @@ Write this as Tiff - short, warm, accessible, no yoga jargon. Use one specific c
 
 OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) where the Register CTA belongs. Substitutes to a styled Register button followed by two fixed lines (the recording is included for everyone registered, and a link to share with a friend), so do not write a recording note or a bring-a-friend line yourself.
 - {{CALENDAR_CTA}}   - place on its own paragraph (nothing else on that line), after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button.
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
@@ -670,7 +670,7 @@ Write this as Tiff - short, soft, one breath. No yoga jargon. No new pitch. No "
 
 OUTPUT TOKENS - use these LITERAL strings in your output. They are substituted at send time:
 - {{CLASS_TITLE}}    - write this token wherever you reference the Yoga Habit class title. Do NOT write the literal title text. Substitutes to a linked title pointing at the habit.tiffanywoodyoga.com landing page.
-- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) at the end. Substitutes to a styled Register button.
+- {{REGISTER_CTA}}   - place on its own paragraph (nothing else on that line) at the end. Substitutes to a styled Register button followed by two fixed lines (the recording is included for everyone registered, and a link to share with a friend), so do not write a recording note or a bring-a-friend line yourself.
 - {{CALENDAR_CTA}}   - place on its own paragraph after {{REGISTER_CTA}}. Substitutes to a styled "Subscribe to the Habits calendar" button (gentle alternative if they cannot make it this time).
 
 Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
