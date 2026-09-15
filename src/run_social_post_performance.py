@@ -23,6 +23,7 @@ from twy_paths import (
     load_env,
     social_post_performance_path,
     twy_root,
+    youtube_post_performance_path,
 )
 
 from social_post_performance import materialize_post_performance
@@ -35,14 +36,26 @@ DEFAULT_BASE_URL = "https://zernio.com/api/v1"
 # normal reply, not an error, and every Instagram story returns it.
 PENDING_STATUSES = {202, 402, 424}
 
-# Each platform has its own publish ledger and its own Zernio account id. The
-# analytics endpoint and the durable store shape are identical, which is why
-# one collector serves both by swapping these three things.
-HISTORY_FILES = {"instagram": "ig_history.json", "facebook": "fb_history.json"}
+# Each platform has its own publish ledger, its own Zernio account id and its
+# own monthly store. The durable store shape is identical, which is why one
+# collector serves all three by swapping these things. YouTube differs in one
+# place only: its numbers come from the Data API, see youtube_fetcher.
+HISTORY_FILES = {
+    "instagram": "ig_history.json",
+    "facebook": "fb_history.json",
+    "youtube": "yt_shorts_history.json",
+}
 ACCOUNT_ENV = {
     "instagram": "ZERNIO_INSTAGRAM_ACCOUNT_ID",
     "facebook": "ZERNIO_FACEBOOK_ACCOUNT_ID",
+    "youtube": "ZERNIO_YOUTUBE_ACCOUNT_ID",
 }
+PERFORMANCE_PATHS = {
+    "instagram": social_post_performance_path,
+    "facebook": facebook_post_performance_path,
+    "youtube": youtube_post_performance_path,
+}
+YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 
 
 def history_path(platform: str = "instagram") -> Path:
@@ -91,6 +104,78 @@ def analytics_from_payload(payload: dict) -> dict | None:
         if isinstance(candidate, dict):
             return candidate
     return None
+
+
+def youtube_video_id(payload: dict) -> str | None:
+    """The YouTube video id Zernio recorded for a post, once it has published."""
+    for entry in payload.get("platformAnalytics") or []:
+        if isinstance(entry, dict) and entry.get("platform") == "youtube" and entry.get("platformPostId"):
+            return str(entry["platformPostId"])
+    return None
+
+
+def youtube_fetcher():
+    """Measure a Short through the YouTube Data API, with Zernio only naming
+    the video. Zernio's /analytics answered 202 "being synced" for the first
+    Short seven hours after it published (2026-09-15), while the Data API
+    answers for any public video at once with the channel's own key. The
+    payload comes back in the Zernio shape so collect() needs no branch."""
+    zernio = analytics_fetcher(ACCOUNT_ENV["youtube"])
+    api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+    if not api_key:
+        raise SystemExit("YOUTUBE_API_KEY is not configured")
+
+    def fetch(post_id: str) -> tuple[int, dict]:
+        status, payload = zernio(post_id)
+        if status >= 400 and status not in PENDING_STATUSES:
+            return status, payload
+        video_id = youtube_video_id(payload)
+        if not video_id:
+            return 202, payload   # not published yet, or Zernio has not named the video
+        response = requests.get(
+            YOUTUBE_VIDEOS_URL,
+            params={"part": "statistics", "id": video_id, "key": api_key},
+            timeout=30,
+        )
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code >= 400:
+            return response.status_code, data
+        items = data.get("items") or []
+        if not items:
+            return 404, {"error": "video " + video_id + " is not on YouTube"}
+        stats = items[0].get("statistics") or {}
+        analytics = {
+            key: int(stats[field])
+            for key, field in (("views", "viewCount"), ("likes", "likeCount"), ("comments", "commentCount"))
+            if str(stats.get(field, "")).isdigit()
+        }
+        analytics["lastUpdated"] = datetime.now(timezone.utc).isoformat()
+        return 200, {
+            "analytics": analytics,
+            "platformPostId": video_id,
+            "platformPostUrl": "https://www.youtube.com/shorts/" + video_id,
+            "syncStatus": "youtube-data-api",
+        }
+
+    return fetch
+
+
+def fetcher_for(platform: str):
+    return youtube_fetcher() if platform == "youtube" else analytics_fetcher(ACCOUNT_ENV[platform])
+
+
+def with_class_type(rows: list[dict]) -> list[dict]:
+    """The Shorts ledger carries class_name only; the store keys by class_type
+    like the other two platforms, so derive it (2026-07-23_expansion -> expansion)."""
+    out = []
+    for row in rows:
+        if not row.get("class_type") and "_" in str(row.get("class_name") or ""):
+            row = {**row, "class_type": str(row["class_name"]).split("_", 1)[1]}
+        out.append(row)
+    return out
 
 
 def select_rows(history: list[dict], *, backfill: bool, since_days: int, now: datetime) -> list[dict]:
@@ -149,7 +234,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--platform",
-        choices=("instagram", "facebook"),
+        choices=("instagram", "facebook", "youtube"),
         default="instagram",
         help="which publish history and Zernio account to collect",
     )
@@ -166,19 +251,16 @@ def main() -> int:
         return 1
 
     rows = select_rows(history, backfill=args.backfill, since_days=args.since_days, now=now)
+    if platform == "youtube":
+        rows = with_class_type(rows)
     log.info("%s %s posts selected of %s in history", len(rows), platform, len(history))
-    collected, tally = collect(rows, analytics_fetcher(ACCOUNT_ENV[platform]))
+    collected, tally = collect(rows, fetcher_for(platform))
 
     if args.dry_run:
         log.info("dry run (%s): %s", platform, json.dumps(tally))
         return 0
 
-    path_for = (
-        facebook_post_performance_path
-        if platform == "facebook"
-        else social_post_performance_path
-    )
-    written = materialize_post_performance(collected, now, path_for=path_for)
+    written = materialize_post_performance(collected, now, path_for=PERFORMANCE_PATHS[platform])
     log.info(
         "measured=%(measured)s pending=%(pending)s errors=%(errors)s" % tally
         + " months=%s" % len(written)
