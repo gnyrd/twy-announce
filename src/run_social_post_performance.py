@@ -56,6 +56,16 @@ PERFORMANCE_PATHS = {
     "youtube": youtube_post_performance_path,
 }
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+# YouTube Analytics API traffic source types, folded into four buckets the
+# report can read. Everything else is "other".
+TRAFFIC_BUCKETS = {
+    "SHORTS": "trafficShortsFeedPct",
+    "YT_SEARCH": "trafficSearchPct",
+    "YT_CHANNEL": "trafficChannelPct",
+    "SUBSCRIBER": "trafficChannelPct",
+    "NOTIFICATION": "trafficChannelPct",
+    "EXT_URL": "trafficExternalPct",
+}
 
 
 def history_path(platform: str = "instagram") -> Path:
@@ -114,6 +124,81 @@ def youtube_video_id(payload: dict) -> str | None:
     return None
 
 
+def youtube_analytics_client():
+    """The YouTube Analytics API for the channel, or None when no token is
+    configured. The token (YOUTUBE_ANALYTICS_OAUTH_TOKEN_FILE, minted for the
+    Tiffany Wood Yoga brand account with the yt-analytics.readonly scope)
+    refreshes itself and is written back like the Search Console one."""
+    token_file = os.getenv("YOUTUBE_ANALYTICS_OAUTH_TOKEN_FILE", "").strip()
+    if not token_file:
+        return None
+    if not Path(token_file).exists():
+        raise SystemExit(f"YOUTUBE_ANALYTICS_OAUTH_TOKEN_FILE does not exist: {token_file}")
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    creds = Credentials.from_authorized_user_file(token_file)
+    if not creds.valid:
+        creds.refresh(Request())
+        Path(token_file).write_text(creds.to_json())
+    return build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
+
+
+def analytics_query(client, video_id: str, start: str, end: str, **params) -> list:
+    """Rows of one reports.query for one video, [] when YouTube has none yet."""
+    response = client.reports().query(
+        ids="channel==MINE", startDate=start, endDate=end, filters=f"video=={video_id}", **params
+    ).execute()
+    return response.get("rows") or []
+
+
+def youtube_analytics_metrics(client, video_id: str, published_at: str | None) -> dict:
+    """What Studio's Reach and Engagement tabs show, flattened for the store.
+
+    Two queries: the totals (engaged views, watch time, average view duration
+    and percentage, likes, comments, shares, subscribers gained and lost) and
+    the traffic split by source, folded into Shorts feed / search / channel
+    (channel pages, subscriptions, notifications) / external / other, as a
+    percentage of views. "Stayed to watch" is engaged views over views.
+    YouTube's analytics lag a day or two behind the counters, so a key is
+    written only when YouTube returned it: the store keeps counts at their
+    maximum and rates at their latest, and an empty answer must not zero a
+    rate that was real yesterday.
+    """
+    start = (published_at or "")[:10] or (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
+    end = datetime.now(timezone.utc).date().isoformat()
+    out: dict = {}
+    totals = analytics_query(
+        client, video_id, start, end,
+        metrics="views,engagedViews,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,likes,comments,shares,subscribersGained,subscribersLost",
+    )
+    if totals and totals[0]:
+        row = totals[0]
+        keys = ("views", "engagedViews", "watchMinutes", "avgViewDurationSec", "avgViewPct", "likes", "comments", "shares", "subscribersGained", "subscribersLost")
+        got = {key: value for key, value in zip(keys, row) if value is not None}
+        # views, likes and comments stay the Data API's live counters; the
+        # analytics figures lag two days and would drag them backwards.
+        for key in ("engagedViews", "watchMinutes", "avgViewDurationSec", "shares", "subscribersGained", "subscribersLost"):
+            if key in got:
+                out[key] = int(got[key])
+        if "avgViewPct" in got:
+            out["avgViewPct"] = round(float(got["avgViewPct"]), 1)
+        views = int(got.get("views") or 0)
+        if views and "engagedViews" in got:
+            out["stayedPct"] = round(int(got["engagedViews"]) / views * 100, 1)
+    sources = analytics_query(client, video_id, start, end, dimensions="insightTrafficSourceType", metrics="views", sort="-views")
+    total = sum(int(r[1] or 0) for r in sources)
+    if total:
+        buckets: dict = {}
+        for source, views in sources:
+            key = TRAFFIC_BUCKETS.get(str(source), "trafficOtherPct")
+            buckets[key] = buckets.get(key, 0) + int(views or 0)
+        for key, views in buckets.items():
+            out[key] = round(views / total * 100, 1)
+    return out
+
+
 def youtube_fetcher():
     """Measure a Short through the YouTube Data API, with Zernio only naming
     the video. Zernio's /analytics answered 202 "being synced" for the first
@@ -124,6 +209,7 @@ def youtube_fetcher():
     api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
     if not api_key:
         raise SystemExit("YOUTUBE_API_KEY is not configured")
+    analytics_client = youtube_analytics_client()
 
     def fetch(post_id: str) -> tuple[int, dict]:
         status, payload = zernio(post_id)
@@ -159,6 +245,11 @@ def youtube_fetcher():
             analytics["engagementRate"] = round(
                 (analytics.get("likes", 0) + analytics.get("comments", 0)) / analytics["views"] * 100, 2
             )
+        if analytics_client is not None:
+            try:
+                analytics.update(youtube_analytics_metrics(analytics_client, video_id, payload.get("publishedAt")))
+            except Exception as exc:  # the counters above still stand; the analytics come next tick
+                log.warning("youtube analytics failed for %s: %s", video_id, exc)
         analytics["lastUpdated"] = datetime.now(timezone.utc).isoformat()
         return 200, {
             "analytics": analytics,

@@ -54,6 +54,9 @@ def _youtube_world(monkeypatch, zernio_status=202, video_id="1dX4KpUe2kE", data_
     monkeypatch.setenv("ZERNIO_API_KEY", "k")
     monkeypatch.setenv("ZERNIO_YOUTUBE_ACCOUNT_ID", "yt-acct")
     monkeypatch.setenv("YOUTUBE_API_KEY", "yt-key")
+    # no analytics token in these worlds: the counters stand alone unless a
+    # test patches the client in
+    monkeypatch.setattr(collector, "youtube_analytics_client", lambda: None)
     calls = []
 
     class Resp:
@@ -126,4 +129,62 @@ def test_youtube_needs_the_data_api_key(monkeypatch):
 
     with pytest.raises(SystemExit):
         collector.youtube_fetcher()
+
+
+class _FakeAnalytics:
+    """reports().query(...).execute() with canned rows per metric set."""
+
+    def __init__(self, totals, sources):
+        self.totals, self.sources, self.calls = totals, sources, []
+
+    def reports(self):
+        return self
+
+    def query(self, **params):
+        self.calls.append(params)
+        rows = self.sources if params.get("dimensions") == "insightTrafficSourceType" else self.totals
+        return type("R", (), {"execute": lambda _self: {"rows": rows}})()
+
+
+def test_studio_analytics_are_flattened_into_the_store():
+    fake = _FakeAnalytics(
+        totals=[[1314, 135, 54, 13, 50.0, 8, 0, 2, 1, 0]],
+        sources=[["SHORTS", 1285], ["NO_LINK_OTHER", 13], ["YT_SEARCH", 11], ["YT_CHANNEL", 4], ["SUBSCRIBER", 1]],
+    )
+    out = collector.youtube_analytics_metrics(fake, "1dX4KpUe2kE", "2026-09-15T16:00:00Z")
+    assert out["engagedViews"] == 135 and out["stayedPct"] == 10.3
+    assert "views" not in out and "likes" not in out   # the Data API's live counters keep those
+    assert out["avgViewDurationSec"] == 13 and out["avgViewPct"] == 50.0 and out["watchMinutes"] == 54
+    assert out["shares"] == 2 and out["subscribersGained"] == 1 and out["subscribersLost"] == 0
+    assert out["trafficShortsFeedPct"] == 97.8 and out["trafficSearchPct"] == 0.8
+    assert out["trafficChannelPct"] == 0.4 and out["trafficOtherPct"] == 1.0
+    # both queries scoped to this video from its publish day
+    assert all(c["filters"] == "video==1dX4KpUe2kE" and c["startDate"] == "2026-09-15" for c in fake.calls)
+
+
+def test_analytics_youtube_has_not_produced_yet_write_nothing():
+    fake = _FakeAnalytics(totals=[], sources=[])
+    assert collector.youtube_analytics_metrics(fake, "vid", None) == {}
+
+
+def test_the_fetcher_carries_analytics_beside_the_counters_and_survives_their_failure(monkeypatch):
+    _youtube_world(monkeypatch, stats={"viewCount": "693", "likeCount": "8", "commentCount": "0"})
+    fake = _FakeAnalytics(totals=[[693, 70, 30, 13, 50.0, 8, 0, 0, 0, 0]], sources=[["SHORTS", 693]])
+    monkeypatch.setattr(collector, "youtube_analytics_client", lambda: fake)
+    _status, payload = collector.youtube_fetcher()("post1")
+    assert payload["analytics"]["views"] == 693 and payload["analytics"]["stayedPct"] == 10.1
+    assert payload["analytics"]["trafficShortsFeedPct"] == 100.0
+
+    class Broken:
+        def reports(self):
+            raise RuntimeError("analytics down")
+
+    monkeypatch.setattr(collector, "youtube_analytics_client", lambda: Broken())
+    status, payload = collector.youtube_fetcher()("post1")
+    assert status == 200 and payload["analytics"]["views"] == 693 and "stayedPct" not in payload["analytics"]
+
+
+def test_without_a_token_the_counters_stand_alone(monkeypatch):
+    monkeypatch.delenv("YOUTUBE_ANALYTICS_OAUTH_TOKEN_FILE", raising=False)
+    assert collector.youtube_analytics_client() is None
 
