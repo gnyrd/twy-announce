@@ -808,6 +808,33 @@ def test_weekly_review_reads_the_weeks_shorts_from_the_youtube_store(tmp_path):
     assert "*YouTube Shorts:* 2 published | 871 views | 8 likes | top <https://www.youtube.com/shorts/1dX4KpUe2kE|2026-09-15> 871 views" in slack
 
 
+def test_studio_numbers_join_the_shorts_table_once_youtube_reports_them(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    write_snapshot(snapshot_dir, "2026-09-09", {"instagram_followers": 2319, "youtube_subscribers": 1080})
+    write_snapshot(snapshot_dir, "2026-09-15", {"instagram_followers": 2319, "youtube_subscribers": 1081})
+    store = tmp_path / "social_posts_yt"
+    _seed_youtube_store(store, "2026-09", {
+        "yt1": {"zernio_post_id": "yt1", "scheduled_for": "2026-09-15T10:00:00-06:00", "post_type": "yt_short", "class_name": "2026-07-23_expansion", "clip_name": "01",
+                "platform_post_url": "https://www.youtube.com/shorts/1dX4KpUe2kE", "published": True, "has_metrics": True,
+                "current": {"views": 1300, "likes": 8, "comments": 0, "engagementRate": 0.62, "stayedPct": 9.8, "avgViewDurationSec": 13,
+                            "watchMinutes": 281, "shares": 2, "subscribersGained": 1, "subscribersLost": 0, "trafficShortsFeedPct": 97.8}, "milestones": {}},
+        "yt2": {"zernio_post_id": "yt2", "scheduled_for": "2026-09-12T10:00:00-06:00", "post_type": "yt_short", "class_name": "2026-08-05_breath", "clip_name": "01",
+                "platform_post_url": None, "published": True, "has_metrics": True,
+                "current": {"views": 40, "likes": 1, "comments": 0, "engagementRate": 2.5}, "milestones": {}},
+    })
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 9, 15))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 9, 15), youtube_store=store)
+    top = report["youtube_shorts"]["posts"][0]
+    assert top["metrics"]["stayedPct"] == 9.8 and top["metrics"]["watchMinutes"] == 281
+    markdown = weekly.render_markdown(report)
+    assert "| Target | Class | Views | Stayed | Avg view | Watch min | Likes | Comments | Shares | Subs | Shorts feed | Engagement |" in markdown
+    assert "| [2026-09-15](https://www.youtube.com/shorts/1dX4KpUe2kE) | 2026-07-23_expansion | 1,300 | 9.8% | 13 s | 281 | 8 | 0 | 2 | 1 | 97.8% | 0.62% |" in markdown
+    # the fresh Short has counters and no Studio numbers yet: blanks, not zeros
+    assert "| 2026-09-12 | 2026-08-05_breath | 40 |  |  |  | 1 | 0 |  |  |  | 2.50% |" in markdown
+    assert "arrive about two days after a Short publishes" in markdown
+    assert "1,300 views, 9.8% stayed" in weekly.render_slack(report)
+
+
 def test_a_week_without_shorts_or_without_a_store_says_so(tmp_path):
     snapshot_dir = tmp_path / "social_growth"
     write_snapshot(snapshot_dir, "2026-07-21", {"instagram_followers": 2300})

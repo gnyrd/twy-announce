@@ -523,6 +523,16 @@ def _quote_format_arms(posts: list[dict[str, Any]], formats: tuple[str, str] = Q
         }
     return {"arms": arms, "posts": sum(arm["posts"] for arm in arms.values())}
 
+YT_STUDIO_KEYS = ("stayedPct", "avgViewDurationSec", "watchMinutes", "shares", "subscribersGained", "subscribersLost", "trafficShortsFeedPct")
+
+
+def _studio_number(value: Any) -> str:
+    """Studio's percentages carry one decimal (9.8%), its counts none."""
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:,.1f}"
+    return f"{value:,.0f}"
+
+
 def _youtube_shorts(*, week_start: date, week_end: date, store: Path | None = None) -> dict[str, Any]:
     """The week's Shorts, read from the per-Short store the performance
     collector keeps (data/social_posts_yt/YYYY-MM/.performance.json). YouTube
@@ -564,9 +574,11 @@ def _youtube_shorts(*, week_start: date, week_end: date, store: Path | None = No
                     "class_name": entry.get("class_name"),
                     "clip_name": entry.get("clip_name"),
                     "platform_post_url": entry.get("platform_post_url"),
+                    # Studio's own numbers ride along once YouTube has
+                    # reported them (about two days after publishing).
                     "metrics": {
                         key: metrics.get(key)
-                        for key in ("views", "likes", "comments", "engagementRate")
+                        for key in ("views", "likes", "comments", "engagementRate") + YT_STUDIO_KEYS
                         if metrics.get(key) is not None
                     },
                 }
@@ -1178,16 +1190,42 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{_format_number(totals.get('views', 0))} views, {_format_number(totals.get('likes', 0))} likes, "
             f"{_format_number(totals.get('comments', 0))} comments. YouTube reports no reach; engagement is likes plus comments per hundred views.",
             "",
-            "| Target | Class | Views | Likes | Comments | Engagement |",
-            "| --- | --- | ---: | ---: | ---: | ---: |",
         ]
-        for post in shorts.get("posts") or []:
+        posts = shorts.get("posts") or []
+        studio = any("stayedPct" in (post.get("metrics") or {}) for post in posts)
+        if studio:
+            lines += [
+                "Studio columns (stayed to watch, average view, watch minutes, shares, subscribers gained, share of views from the Shorts feed) arrive about two days after a Short publishes; a blank is a Short YouTube has not reported yet.",
+                "",
+                "| Target | Class | Views | Stayed | Avg view | Watch min | Likes | Comments | Shares | Subs | Shorts feed | Engagement |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        else:
+            lines += [
+                "| Target | Class | Views | Likes | Comments | Engagement |",
+                "| --- | --- | ---: | ---: | ---: | ---: |",
+            ]
+        for post in posts:
             post_metrics = post.get("metrics") or {}
-            lines.append(
-                f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
-                f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
-                f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
-            )
+
+            def cell(key, suffix=""):
+                value = post_metrics.get(key)
+                return "" if value is None else _studio_number(value) + suffix
+
+            if studio:
+                lines.append(
+                    f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
+                    f"{cell('stayedPct', '%')} | {cell('avgViewDurationSec', ' s')} | {cell('watchMinutes')} | "
+                    f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
+                    f"{cell('shares')} | {cell('subscribersGained')} | {cell('trafficShortsFeedPct', '%')} | "
+                    f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
+                )
+            else:
+                lines.append(
+                    f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
+                    f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
+                    f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
+                )
         if shorts["published"] > shorts["measured"]:
             lines.append(f"| {shorts['published'] - shorts['measured']} published Short(s) not measured yet |  |  |  |  |  |")
 
@@ -1349,6 +1387,9 @@ def render_slack(report: dict[str, Any]) -> str:
             if url:
                 label = f"<{url}|{label}>"
             line += f" | top {label} {_format_number(_metric(top_short.get('metrics') or {}, 'views'))} views"
+            stayed = (top_short.get("metrics") or {}).get("stayedPct")
+            if stayed is not None:
+                line += f", {_studio_number(stayed)}% stayed"
         lines.append(line)
     cross = report.get("meta_cross_check") or {}
     if cross.get("status") == "ok":
