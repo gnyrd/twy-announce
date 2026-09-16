@@ -29,6 +29,8 @@ _HARD_RULES = """RULES (mandatory, no exceptions). Read first, follow without ex
 
 4. No em-dashes, no en-dashes, and no semicolons anywhere in your output, in the subject or the body. They are banned from TWY copy, even when the reference exemplars below use them. Replace each with a period and a new sentence, a comma, parentheses, or a reworded phrase. A plain hyphen joining words is fine. The long em-dash and medium en-dash characters and the semicolon are not.
 
+5. Never presume the gender of the readers or the members. Not "these women", "ladies", or "the girls". Say "members of our community", "people who practice with me", or "students". An offer with a deadline says when joining ends, never a span that reads like the paid month ending on that date: "Your first month is $49 if you join before September 26", not "$49 through September 26". (JP, 2026-09-16, on a sent campaign email.)
+
 These rules apply to ALL output. The submission API will reject violations of rule 1 and you will be asked to resubmit."""
 
 _SUBJECT_JOBS = {
