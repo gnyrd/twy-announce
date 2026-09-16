@@ -801,10 +801,11 @@ def test_weekly_review_reads_the_weeks_shorts_from_the_youtube_store(tmp_path):
     markdown = weekly.render_markdown(report)
     assert "- YouTube subscribers: 1,080 -> 1,081 (+1)" in markdown
     assert "## YouTube Shorts" in markdown and "2 Short(s) published, 1 measured" in markdown
-    assert "| 871 | 8 | 0 | 0.92% |" in markdown and "1 published Short(s) not measured yet" in markdown
+    assert "| [2026-09-15](https://www.youtube.com/shorts/1dX4KpUe2kE) | 2026-07-23_expansion | 871 | 8 | 0 | 0.92% |" in markdown
+    assert "1 published Short(s) not measured yet" in markdown
     slack = weekly.render_slack(report)
     assert "*YouTube subscribers:* 1,080 -> 1,081 (+1)" in slack
-    assert "*YouTube Shorts:* 2 published | 871 views | 8 likes | top <https://www.youtube.com/shorts/1dX4KpUe2kE|" in slack
+    assert "*YouTube Shorts:* 2 published | 871 views | 8 likes | top <https://www.youtube.com/shorts/1dX4KpUe2kE|2026-09-15> 871 views" in slack
 
 
 def test_a_week_without_shorts_or_without_a_store_says_so(tmp_path):

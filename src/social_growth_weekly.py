@@ -556,6 +556,11 @@ def _youtube_shorts(*, week_start: date, week_end: date, store: Path | None = No
                 {
                     "zernio_post_id": entry.get("zernio_post_id"),
                     "scheduled_for": entry.get("scheduled_for"),
+                    # the table's Target column, a link where YouTube gave one
+                    "posted_for_class": (
+                        f"[{scheduled.isoformat()}]({entry['platform_post_url']})"
+                        if entry.get("platform_post_url") else scheduled.isoformat()
+                    ),
                     "class_name": entry.get("class_name"),
                     "clip_name": entry.get("clip_name"),
                     "platform_post_url": entry.get("platform_post_url"),
@@ -1339,7 +1344,7 @@ def render_slack(report: dict[str, Any]) -> str:
             f"{_format_number(totals.get('views', 0))} views | {_format_number(totals.get('likes', 0))} likes"
         )
         if top_short:
-            label = _post_label(top_short)
+            label = str(top_short.get("scheduled_for") or "")[:10]
             url = str(top_short.get("platform_post_url") or "").strip()
             if url:
                 label = f"<{url}|{label}>"
