@@ -152,6 +152,13 @@ def youtube_fetcher():
             for key, field in (("views", "viewCount"), ("likes", "likeCount"), ("comments", "commentCount"))
             if str(stats.get(field, "")).isdigit()
         }
+        # YouTube reports no reach, so the rate the other two platforms carry
+        # as engagementRate is likes plus comments per hundred views here.
+        # Stated on the stats page and in the weekly review wherever it shows.
+        if analytics.get("views"):
+            analytics["engagementRate"] = round(
+                (analytics.get("likes", 0) + analytics.get("comments", 0)) / analytics["views"] * 100, 2
+            )
         analytics["lastUpdated"] = datetime.now(timezone.utc).isoformat()
         return 200, {
             "analytics": analytics,

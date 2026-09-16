@@ -769,3 +769,51 @@ def test_card_looks_are_grouped_across_platforms_and_unrecorded_posts_are_counte
     top = out["designs"][0]
     assert top["background"] == "slate" and top["treatment"] == "italic_serif" and top["posts"] == 2 and top["median_reach"] == 200
     assert out["designs"][1]["design"] == "terra:bold_serif:cream:cream"
+
+
+def _seed_youtube_store(root, period, posts):
+    month = root / period
+    month.mkdir(parents=True, exist_ok=True)
+    (month / ".performance.json").write_text(json.dumps({"version": 1, "period": period, "posts": posts}))
+
+
+def test_weekly_review_reads_the_weeks_shorts_from_the_youtube_store(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    write_snapshot(snapshot_dir, "2026-09-09", {"instagram_followers": 2319, "youtube_subscribers": 1080})
+    write_snapshot(snapshot_dir, "2026-09-15", {"instagram_followers": 2319, "youtube_subscribers": 1081, "email_subscribers": 958})
+    store = tmp_path / "social_posts_yt"
+    _seed_youtube_store(store, "2026-09", {
+        "yt1": {"zernio_post_id": "yt1", "scheduled_for": "2026-09-15T10:00:00-06:00", "post_type": "yt_short", "class_name": "2026-07-23_expansion", "clip_name": "01_wisdom_score10_23s",
+                "platform_post_url": "https://www.youtube.com/shorts/1dX4KpUe2kE", "published": True, "has_metrics": True,
+                "current": {"views": 871, "likes": 8, "comments": 0, "engagementRate": 0.92, "lastUpdated": "x"}, "milestones": {}},
+        "yt2": {"zernio_post_id": "yt2", "scheduled_for": "2026-09-12T10:00:00-06:00", "post_type": "yt_short", "class_name": "2026-08-05_breath", "clip_name": "01_wisdom_score10_17s",
+                "platform_post_url": None, "published": True, "has_metrics": False, "current": None, "milestones": {}},
+        "yt3": {"zernio_post_id": "yt3", "scheduled_for": "2026-09-19T10:00:00-06:00", "post_type": "yt_short", "class_name": "2026-08-11_flow", "clip_name": "03_wisdom_score8_27s",
+                "platform_post_url": None, "published": False, "has_metrics": False, "current": None, "milestones": {}},
+    })
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 9, 15))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 9, 15), youtube_store=store)
+    shorts = report["youtube_shorts"]
+    # yt3 is next week and unpublished; yt2 published but unmeasured counts as published only
+    assert shorts["published"] == 2 and shorts["measured"] == 1
+    assert shorts["posts"][0]["metrics"] == {"views": 871, "likes": 8, "comments": 0, "engagementRate": 0.92}
+    assert shorts["totals"] == {"views": 871, "likes": 8, "comments": 0}
+    markdown = weekly.render_markdown(report)
+    assert "- YouTube subscribers: 1,080 -> 1,081 (+1)" in markdown
+    assert "## YouTube Shorts" in markdown and "2 Short(s) published, 1 measured" in markdown
+    assert "| 871 | 8 | 0 | 0.92% |" in markdown and "1 published Short(s) not measured yet" in markdown
+    slack = weekly.render_slack(report)
+    assert "*YouTube subscribers:* 1,080 -> 1,081 (+1)" in slack
+    assert "*YouTube Shorts:* 2 published | 871 views | 8 likes | top <https://www.youtube.com/shorts/1dX4KpUe2kE|" in slack
+
+
+def test_a_week_without_shorts_or_without_a_store_says_so(tmp_path):
+    snapshot_dir = tmp_path / "social_growth"
+    write_snapshot(snapshot_dir, "2026-07-21", {"instagram_followers": 2300})
+    write_snapshot(snapshot_dir, "2026-07-27", {"instagram_followers": 2303})
+    snapshots = weekly.load_daily_snapshots(snapshot_dir, week_end=date(2026, 7, 27))
+    report = weekly.build_weekly_review(snapshots, week_end=date(2026, 7, 27), youtube_store=tmp_path / "missing")
+    assert report["youtube_shorts"] == {"published": 0, "measured": 0, "posts": [], "totals": {"views": 0, "likes": 0, "comments": 0}}
+    assert "No Shorts published this period." in weekly.render_markdown(report)
+    assert "*YouTube Shorts:*" not in weekly.render_slack(report)
+

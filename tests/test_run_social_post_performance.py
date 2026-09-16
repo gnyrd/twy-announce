@@ -82,6 +82,7 @@ def test_youtube_is_measured_through_the_data_api_while_zernio_is_still_syncing(
     status, payload = collector.youtube_fetcher()("post1")
     assert status == 200
     assert payload["analytics"]["views"] == 693 and payload["analytics"]["likes"] == 8 and payload["analytics"]["comments"] == 0
+    assert payload["analytics"]["engagementRate"] == 1.15   # (8 + 0) / 693 * 100, likes plus comments per hundred views
     assert payload["analytics"]["lastUpdated"]
     assert payload["platformPostUrl"] == "https://www.youtube.com/shorts/1dX4KpUe2kE"
     assert payload["syncStatus"] == "youtube-data-api"
@@ -109,6 +110,8 @@ def test_a_data_api_refusal_counts_as_an_error_not_a_measurement(monkeypatch):
     assert tally == {"measured": 0, "pending": 0, "errors": 1}
     _youtube_world(monkeypatch, stats=None)   # the id Zernio gave is not on YouTube
     assert collector.youtube_fetcher()("post1")[0] == 404
+    _youtube_world(monkeypatch, stats={"viewCount": "0", "likeCount": "0", "commentCount": "0"})
+    assert "engagementRate" not in collector.youtube_fetcher()("post1")[1]["analytics"]   # no views, no rate
 
 
 def test_the_shorts_ledger_gains_a_class_type_for_the_store():

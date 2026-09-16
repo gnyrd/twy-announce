@@ -18,7 +18,7 @@ from typing import Any
 import requests
 from snapshot_list_membership import membership_delta
 from twy_paths import data_root as default_data_root
-from twy_paths import email_membership_dir, load_env
+from twy_paths import email_membership_dir, load_env, youtube_posts_dir
 
 
 DEFAULT_DAYS = 7
@@ -523,6 +523,62 @@ def _quote_format_arms(posts: list[dict[str, Any]], formats: tuple[str, str] = Q
         }
     return {"arms": arms, "posts": sum(arm["posts"] for arm in arms.values())}
 
+def _youtube_shorts(*, week_start: date, week_end: date, store: Path | None = None) -> dict[str, Any]:
+    """The week's Shorts, read from the per-Short store the performance
+    collector keeps (data/social_posts_yt/YYYY-MM/.performance.json). YouTube
+    gives views, likes and comments; there is no reach, and the engagement
+    figure is likes plus comments per hundred views, computed by the collector.
+    A missing store is a week with nothing to say, never an error."""
+    root = store if store is not None else youtube_posts_dir()
+    months: list[str] = []
+    cursor = date(week_start.year, week_start.month, 1)
+    while cursor <= week_end:
+        months.append(cursor.strftime("%Y-%m"))
+        cursor = date(cursor.year + (cursor.month == 12), cursor.month % 12 + 1, 1)
+    rows: list[dict[str, Any]] = []
+    published = 0
+    for month in months:
+        path = Path(root) / month / ".performance.json"
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        posts = document.get("posts") if isinstance(document, dict) else None
+        for entry in (posts.values() if isinstance(posts, dict) else []):
+            scheduled = _post_date(entry)
+            if scheduled is None or scheduled < week_start or scheduled > week_end or not entry.get("published"):
+                continue
+            published += 1
+            metrics = entry.get("current") if entry.get("has_metrics") else None
+            if not isinstance(metrics, dict):
+                continue
+            rows.append(
+                {
+                    "zernio_post_id": entry.get("zernio_post_id"),
+                    "scheduled_for": entry.get("scheduled_for"),
+                    "class_name": entry.get("class_name"),
+                    "clip_name": entry.get("clip_name"),
+                    "platform_post_url": entry.get("platform_post_url"),
+                    "metrics": {
+                        key: metrics.get(key)
+                        for key in ("views", "likes", "comments", "engagementRate")
+                        if metrics.get(key) is not None
+                    },
+                }
+            )
+    rows.sort(key=lambda row: (_metric(row["metrics"], "views"), str(row.get("scheduled_for") or "")), reverse=True)
+    return {
+        "published": published,
+        "measured": len(rows),
+        "posts": rows,
+        "totals": {
+            "views": int(sum(_metric(row["metrics"], "views") for row in rows)),
+            "likes": int(sum(_metric(row["metrics"], "likes") for row in rows)),
+            "comments": int(sum(_metric(row["metrics"], "comments") for row in rows)),
+        },
+    }
+
+
 def _post_performance(posts: list[dict[str, Any]]) -> dict[str, Any]:
     aggregate = _aggregate_posts(posts)
     return {
@@ -924,7 +980,7 @@ def _meta_cross_check(posts: list[dict[str, Any]], meta_media: list[dict[str, An
     }
 
 
-def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None, youtube_store: Path | None = None) -> dict[str, Any]:
     week_start = week_end - timedelta(days=days - 1)
     history = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
     snapshots = [
@@ -959,6 +1015,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
             "upcoming_variants": _unique_summary_values(snapshots, "upcoming_campaign_variants"),
         },
         "post_performance": _post_performance(posts),
+        "youtube_shorts": _youtube_shorts(week_start=week_start, week_end=week_end, store=youtube_store),
         "campaign_performance": _campaign_performance(posts),
         "acquisition": _acquisition(week_start=week_start, week_end=week_end),
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
@@ -1044,6 +1101,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Audience",
         "",
         f"- Instagram followers: {_format_delta(metrics['instagram_followers'])}",
+        f"- YouTube subscribers: {_format_delta(metrics.get('youtube_subscribers') or {})}",
         f"- Email subscribers: {_format_delta(metrics['email_subscribers'])}",
         f"- Next Habits registrations: {_format_delta(metrics['next_habit_registrations'])}",
         "",
@@ -1103,6 +1161,30 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     if not performance["posts"]:
         lines.append("| No mature post analytics in this period |  |  |  |  |  |  |  |  |")
+
+    shorts = report.get("youtube_shorts") or {}
+    lines.extend(["", "## YouTube Shorts", ""])
+    if not shorts.get("published"):
+        lines.append("No Shorts published this period.")
+    else:
+        totals = shorts.get("totals") or {}
+        lines += [
+            f"{shorts['published']} Short(s) published, {shorts['measured']} measured, read from YouTube: "
+            f"{_format_number(totals.get('views', 0))} views, {_format_number(totals.get('likes', 0))} likes, "
+            f"{_format_number(totals.get('comments', 0))} comments. YouTube reports no reach; engagement is likes plus comments per hundred views.",
+            "",
+            "| Target | Class | Views | Likes | Comments | Engagement |",
+            "| --- | --- | ---: | ---: | ---: | ---: |",
+        ]
+        for post in shorts.get("posts") or []:
+            post_metrics = post.get("metrics") or {}
+            lines.append(
+                f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
+                f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
+                f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
+            )
+        if shorts["published"] > shorts["measured"]:
+            lines.append(f"| {shorts['published'] - shorts['measured']} published Short(s) not measured yet |  |  |  |  |  |")
 
     lines.extend(["", "## Acquisition", ""])
     acquisition = report.get("acquisition") or {}
@@ -1206,6 +1288,7 @@ def render_slack(report: dict[str, Any]) -> str:
         f"{report['week_start']} to {report['week_end']} | {report['snapshot_count']} daily snapshots",
         "",
         f"*IG followers:* {_format_delta(metrics['instagram_followers'])}",
+        f"*YouTube subscribers:* {_format_delta(metrics.get('youtube_subscribers') or {})}",
         f"*Email subscribers:* {_format_delta(metrics['email_subscribers'])}",
         f"*Habits registrations:* {_format_delta(metrics['next_habit_registrations'])}",
         (
@@ -1247,6 +1330,21 @@ def render_slack(report: dict[str, Any]) -> str:
             f"{_metric(top_metrics, 'engagementRate'):.2f}% engagement | "
             f"{_metric(top_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s average watch"
         )
+    shorts = report.get("youtube_shorts") or {}
+    if shorts.get("published"):
+        totals = shorts.get("totals") or {}
+        top_short = (shorts.get("posts") or [None])[0]
+        line = (
+            f"*YouTube Shorts:* {shorts['published']} published | "
+            f"{_format_number(totals.get('views', 0))} views | {_format_number(totals.get('likes', 0))} likes"
+        )
+        if top_short:
+            label = _post_label(top_short)
+            url = str(top_short.get("platform_post_url") or "").strip()
+            if url:
+                label = f"<{url}|{label}>"
+            line += f" | top {label} {_format_number(_metric(top_short.get('metrics') or {}, 'views'))} views"
+        lines.append(line)
     cross = report.get("meta_cross_check") or {}
     if cross.get("status") == "ok":
         lines.append(
