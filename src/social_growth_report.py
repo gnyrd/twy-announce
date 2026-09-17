@@ -19,6 +19,7 @@ from typing import Any
 import requests
 from twy_paths import data_root as default_data_root
 from twy_paths import fb_history_path
+from social_ledgers import merge_history
 from twy_paths import ig_publish_retry_path as default_retry_ledger_path
 from twy_paths import load_env
 from twy_paths import twy_root as default_twy_root
@@ -529,7 +530,11 @@ def collect_zernio_recent_status(
     lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
     retry_ledger_path: Path | None = None,
+    platform: str | None = None,
 ) -> dict[str, Any]:
+    """platform names the ledger's platform so the inventory placements of the
+    publishers that serve it (Facebook and YouTube since 2026-09-17) are read
+    beside the ledger rows."""
     if fetch_post is None:
         return {
             "status": "not_configured",
@@ -541,6 +546,8 @@ def collect_zernio_recent_status(
             "history_path": str(history_path),
         }
     history = read_json(history_path)
+    if platform:
+        history = merge_history(history, platform)
     window_start = captured_at - timedelta(hours=lookback_hours)
     window_end = captured_at + timedelta(hours=lookahead_hours)
     rows: list[dict[str, Any]] = []
@@ -557,14 +564,15 @@ def collect_zernio_recent_status(
             continue
         if scheduled_at < window_start or scheduled_at > window_end:
             continue
-        if entry.get("withdrawn_at"):
-            # The clips scheduler withdrew this post for a cancelled class and
-            # deleted it at Zernio, so the id 404s by design. Not an error.
+        if entry.get("withdrawn_at") or entry.get("cancelled"):
+            # The clips scheduler withdrew this post for a cancelled class, or
+            # the Facebook path cancelled it (a replaced post, the 2026-09-17
+            # switch), and deleted it at Zernio, so the id 404s by design.
             withdrawn.append(
                 {
                     "zernio_post_id": post_id,
                     "scheduled_for": scheduled_for,
-                    "withdrawn_at": entry.get("withdrawn_at"),
+                    "withdrawn_at": entry.get("withdrawn_at") or entry.get("cancel_reason") or "cancelled",
                     "post_type": entry.get("post_type"),
                     "posted_for_class": entry.get("posted_for_class"),
                 }
@@ -1140,6 +1148,7 @@ def collect_snapshot(
             fetch_analytics=zernio_fetch_analytics_facebook,
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
+            platform="facebook",
         ),
         "websites": websites,
         "landing_page": {"plausible": habit_plausible},
