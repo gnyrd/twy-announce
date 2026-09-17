@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import requests
 from twy_paths import (
+    clips_inventory_path,
     facebook_post_performance_path,
     load_env,
     social_post_performance_path,
@@ -78,6 +79,65 @@ def read_history(path: Path) -> list[dict]:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return []
     return [row for row in payload if isinstance(row, dict)]
+
+
+# Publishers that write only the social inventory (clips src/inventory), not a
+# platform ledger. Their posts are read from the inventory's placements so the
+# collector sees them the way it saw ledger rows. YouTube switched 2026-09-17.
+INVENTORY_PUBLISHERS = {"youtube": ("yt_short",)}
+NOT_LIVE = {"withdrawn", "cancelled"}
+
+
+def inventory_rows(publishers: tuple[str, ...], path: Path | None = None) -> tuple[list[dict], set[str]]:
+    """Placements by the named publishers, shaped like ledger rows, and the ids
+    of the ones that never reached the platform (withdrawn or cancelled), so a
+    ledger row for such a post is dropped too. A draft has no slot."""
+    path = path or clips_inventory_path()
+    try:
+        inv = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return [], set()
+    rows, not_live = [], set()
+    for item in (inv.get("items") or {}).values():
+        for p in item.get("placements") or []:
+            if p.get("publisher") not in publishers:
+                continue
+            if p.get("status") in NOT_LIVE:
+                not_live.add(str(p.get("zernio_post_id")))
+                continue
+            if p.get("is_draft"):
+                continue
+            rows.append({
+                "zernio_post_id": p.get("zernio_post_id"),
+                "scheduled_for": p.get("scheduled_for"),
+                "class_name": item.get("class_name"),
+                "clip_name": item.get("clip_name"),
+                "class_type": item.get("class_type"),
+                "post_type": p.get("post_type"),
+                "kind": item.get("kind"),
+                "title": (p.get("source") or {}).get("title"),
+                "publisher": p.get("publisher"),
+            })
+    return rows, not_live
+
+
+def platform_history(platform: str) -> list[dict]:
+    """The ledger rows plus, for a platform a publisher now serves, the
+    inventory placements the ledger never sees, one row per post id. A ledger
+    row the inventory marks withdrawn or cancelled is dropped: the post is gone
+    at Zernio and only answers 404."""
+    history = read_history(history_path(platform))
+    publishers = INVENTORY_PUBLISHERS.get(platform)
+    if not publishers:
+        return history
+    rows, not_live = inventory_rows(publishers)
+    history = [row for row in history if str(row.get("zernio_post_id")) not in not_live]
+    seen = {str(row.get("zernio_post_id")) for row in history if row.get("zernio_post_id")}
+    for row in rows:
+        if str(row.get("zernio_post_id")) not in seen:
+            history.append(row)
+            seen.add(str(row.get("zernio_post_id")))
+    return history
 
 
 def analytics_fetcher(account_env: str = "ZERNIO_INSTAGRAM_ACCOUNT_ID"):
@@ -343,7 +403,7 @@ def main() -> int:
 
     now = datetime.now(timezone.utc)
     platform = args.platform
-    history = read_history(history_path(platform))
+    history = platform_history(platform)
     if not history:
         log.error("no publish history at %s", history_path(platform))
         return 1

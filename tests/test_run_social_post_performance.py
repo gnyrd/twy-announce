@@ -188,3 +188,38 @@ def test_without_a_token_the_counters_stand_alone(monkeypatch):
     monkeypatch.delenv("YOUTUBE_ANALYTICS_OAUTH_TOKEN_FILE", raising=False)
     assert collector.youtube_analytics_client() is None
 
+
+
+def test_youtube_history_adds_inventory_placements_once(tmp_path, monkeypatch):
+    """Since 2026-09-17 the yt_short publisher writes only the inventory, so the
+    collector reads its placements beside the old ledger rows."""
+    import json
+    ledger = tmp_path / "yt_shorts_history.json"
+    ledger.write_text(json.dumps([
+        {"post_type": "yt_short", "class_name": "2026-08-11_flow", "clip_name": "03_wisdom_score8_27s",
+         "scheduled_for": "2026-09-15T10:00:00-06:00", "zernio_post_id": "old1"},
+        {"post_type": "yt_short", "class_name": "2026-08-11_flow", "clip_name": "03_wisdom_score8_27s",
+         "scheduled_for": "2026-09-19T10:00:00-06:00", "zernio_post_id": "gone"},   # withdrawn at the switch
+    ]))
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"version": 1, "items": {
+        "clip:2026-08-11_flow/03_wisdom_score8_27s": {
+            "kind": "clip", "class_name": "2026-08-11_flow", "clip_name": "03_wisdom_score8_27s", "class_type": "flow",
+            "placements": [
+                {"publisher": "yt_short", "zernio_post_id": "old1", "scheduled_for": "2026-09-15T10:00:00-06:00", "status": "published", "post_type": "yt_short", "source": {}},
+                {"publisher": "yt_short", "zernio_post_id": "new1", "scheduled_for": "2026-09-21T08:00:00-06:00", "status": "scheduled", "post_type": "class", "source": {"title": "A title"}},
+                {"publisher": "yt_short", "zernio_post_id": "gone", "scheduled_for": "2026-09-19T10:00:00-06:00", "status": "withdrawn", "post_type": "yt_short", "source": {}},
+                {"publisher": "ig_reel", "zernio_post_id": "ig1", "scheduled_for": "2026-09-10T08:00:00-06:00", "status": "published", "post_type": "reel", "source": {}},
+            ]},
+        "quote:2026-06-22_strength/05_teaching_score8_9s": {
+            "kind": "quote", "class_name": "2026-06-22_strength", "clip_name": "05_teaching_score8_9s", "class_type": "strength",
+            "placements": [
+                {"publisher": "yt_short", "zernio_post_id": "q1", "scheduled_for": "2026-09-18T07:00:00-06:00", "status": "scheduled", "post_type": "quote", "source": {"title": "Q"}},
+            ]},
+    }}))
+    monkeypatch.setattr(collector, "history_path", lambda platform="instagram": ledger)
+    monkeypatch.setattr(collector, "clips_inventory_path", lambda: inventory)
+    rows = collector.platform_history("youtube")
+    assert [r["zernio_post_id"] for r in rows] == ["old1", "new1", "q1"]
+    assert rows[1]["class_type"] == "flow" and rows[1]["title"] == "A title" and rows[2]["kind"] == "quote"
+    assert collector.platform_history("instagram") == collector.read_history(ledger)
