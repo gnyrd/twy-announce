@@ -18,6 +18,7 @@ from twy_paths import clips_inventory_path
 INVENTORY_PUBLISHERS = {
     "youtube": ("yt_short",),
     "facebook": ("fb_reel", "fb_quote_reel", "fb_photo"),
+    "instagram": ("ig_reel", "ig_story", "ig_reel_week", "ig_quote"),
 }
 NOT_LIVE = {"withdrawn", "cancelled"}
 

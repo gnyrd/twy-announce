@@ -34,4 +34,35 @@ def test_merge_adds_facebook_publisher_placements_and_drops_withdrawn_ledger_row
     merged = social_ledgers.merge_history(ledger, "facebook", inventory)
     assert [r["zernio_post_id"] for r in merged] == ["link1", "new1", "card1"]
     assert merged[2]["quote_text"] == "Words." and merged[2]["publisher"] == "fb_photo" and merged[2]["kind"] == "quote"
-    assert social_ledgers.merge_history(ledger, "instagram", inventory) == ledger
+    assert social_ledgers.merge_history(ledger, "instagram", inventory) == ledger   # no Instagram placements here
+
+
+def test_merge_adds_instagram_publisher_placements_beside_the_frozen_ledger(tmp_path):
+    """Since the 2026-09-17 switch ig_history.json no longer grows: a new
+    Instagram post exists only as a placement, the 14 old-tick posts exist as
+    both, and a withdrawn placement drops its ledger row."""
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"version": 1, "items": {
+        "quote:2026-06-25_expansion/01_t": {"kind": "quote", "class_name": "2026-06-25_expansion", "clip_name": "01_t", "class_type": "expansion",
+            "placements": [
+                {"publisher": "ig_quote", "zernio_post_id": "igq1", "scheduled_for": "2026-09-18T07:00:00-06:00", "status": "published",
+                 "post_type": "quote", "quote_text": "Words.", "campaign": None, "source": {"title": "TWY IG Quote"}},
+            ]},
+        "clip:2026-08-04_flow/06_w": {"kind": "clip", "class_name": "2026-08-04_flow", "clip_name": "06_w", "class_type": "flow",
+            "placements": [
+                {"publisher": "ig_reel", "zernio_post_id": "reel1", "scheduled_for": "2026-09-20T17:30:00-06:00", "status": "scheduled",
+                 "post_type": "reel", "source": {}},
+                {"publisher": "ig_story", "zernio_post_id": "storygone", "scheduled_for": "2026-09-19T06:00:00-06:00", "status": "withdrawn",
+                 "post_type": "story", "source": {}},
+                {"publisher": "fb_reel", "zernio_post_id": "fb1", "scheduled_for": "2026-09-21T08:00:00-06:00", "status": "scheduled",
+                 "post_type": "class", "source": {}},
+            ]},
+    }}))
+    ledger = [
+        {"post_type": "reel", "zernio_post_id": "reel1", "scheduled_for": "2026-09-20T17:30:00-06:00"},   # old-tick post, adopted: not doubled
+        {"post_type": "story", "zernio_post_id": "storygone", "scheduled_for": "2026-09-19T06:00:00-06:00"},
+    ]
+    merged = social_ledgers.merge_history(ledger, "instagram", inventory)
+    assert [r["zernio_post_id"] for r in merged] == ["reel1", "igq1"]
+    assert merged[1]["publisher"] == "ig_quote" and merged[1]["post_type"] == "quote" and merged[1]["kind"] == "quote"
+    assert "fb1" not in {r["zernio_post_id"] for r in merged}

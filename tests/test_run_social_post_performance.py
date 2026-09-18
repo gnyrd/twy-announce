@@ -222,4 +222,6 @@ def test_youtube_history_adds_inventory_placements_once(tmp_path, monkeypatch):
     rows = collector.platform_history("youtube")
     assert [r["zernio_post_id"] for r in rows] == ["old1", "new1", "q1"]
     assert rows[1]["class_type"] == "flow" and rows[1]["title"] == "A title" and rows[2]["kind"] == "quote"
-    assert collector.platform_history("instagram") == collector.read_history(ledger)
+    # Instagram reads the inventory too (since the 2026-09-17 switch): the
+    # ig_reel placement joins the ledger rows, the yt_short ones do not.
+    assert [r["zernio_post_id"] for r in collector.platform_history("instagram")] == ["old1", "gone", "ig1"]
