@@ -18,7 +18,7 @@ from typing import Any
 import requests
 from snapshot_list_membership import membership_delta
 from twy_paths import data_root as default_data_root
-from twy_paths import email_membership_dir, load_env, youtube_posts_dir
+from twy_paths import clips_state_dir, email_membership_dir, load_env, youtube_posts_dir
 
 
 DEFAULT_DAYS = 7
@@ -1001,7 +1001,69 @@ def _meta_cross_check(posts: list[dict[str, Any]], meta_media: list[dict[str, An
     }
 
 
-def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None, youtube_store: Path | None = None) -> dict[str, Any]:
+def fetch_comment_automation_stats(ids: dict[str, str]) -> dict[str, dict]:
+    """Live counters for the comment automations, straight from Zernio,
+    keyed by platform. Fails open to an empty dict: the review then reads
+    the counters the clips job last wrote into its state file."""
+    api_key = os.getenv("ZERNIO_API_KEY", "").strip()
+    if not api_key or not ids:
+        return {}
+    base_url = os.getenv("ZERNIO_BASE_URL", "https://zernio.com/api/v1").rstrip("/")
+    out: dict[str, dict] = {}
+    for platform, automation_id in ids.items():
+        try:
+            response = requests.get(f"{base_url}/comment-automations/{automation_id}",
+                                    headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+            payload = response.json()
+        except Exception:
+            continue
+        automation = payload.get("automation") or payload
+        if isinstance(automation, dict) and isinstance(automation.get("stats"), dict):
+            out[platform] = {"stats": automation["stats"], "is_active": automation.get("isActive", True)}
+    return out
+
+
+def comment_automation_ids(state_path: Path | None = None) -> dict[str, str]:
+    path = state_path or (clips_state_dir() / "comment_automations.json")
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {platform: str(row["id"]) for platform, row in (data.get("automations") or {}).items() if row.get("id")}
+
+
+def _comment_to_dm(state_path: Path | None = None, live: dict[str, dict] | None = None) -> dict[str, Any]:
+    """The comment to DM automations' counters (build 6 of 2026-09-18): the
+    ids from clips/state/comment_automations.json, the counters live from
+    Zernio when reachable, else the ones the clips job last wrote there.
+    Read only; absent file means the automations do not exist yet."""
+    path = state_path or (clips_state_dir() / "comment_automations.json")
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {"status": "absent", "platforms": {}}
+    platforms: dict[str, Any] = {}
+    for platform, row in (data.get("automations") or {}).items():
+        fresh = (live or {}).get(platform) or {}
+        stats = fresh.get("stats") or row.get("stats") or {}
+        if fresh:
+            row = dict(row, is_active=fresh.get("is_active", row.get("is_active", True)), stats_at="live")
+        # Zernio's live counters (read 2026-09-18): triggered, dmsSent,
+        # dmsFailed, uniqueContacts, linkClicks, delivered, read. Its docs
+        # name totalTriggered / totalSent / totalFailed; both spellings read.
+        platforms[platform] = {
+            "active": bool(row.get("is_active", True)),
+            "triggered": int(stats.get("triggered") or stats.get("totalTriggered") or 0),
+            "sent": int(stats.get("dmsSent") or stats.get("totalSent") or 0),
+            "failed": int(stats.get("dmsFailed") or stats.get("totalFailed") or 0),
+            "contacts": int(stats.get("uniqueContacts") or 0),
+            "clicks": int(stats.get("linkClicks") or 0),
+            "stats_at": row.get("stats_at"),
+        }
+    return {"status": "ok" if platforms else "absent", "platforms": platforms}
+
+
+def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None, youtube_store: Path | None = None, comment_to_dm_state: Path | None = None, comment_to_dm_live: dict[str, dict] | None = None) -> dict[str, Any]:
     week_start = week_end - timedelta(days=days - 1)
     history = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
     snapshots = [
@@ -1042,6 +1104,7 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
+    report["comment_to_dm"] = _comment_to_dm(comment_to_dm_state, live=comment_to_dm_live)
     format_window_start = week_end - timedelta(weeks=QUOTE_FORMAT_LOOKBACK_WEEKS)
     report["quote_formats"] = _quote_format_arms(_post_rows(snapshots, week_start=format_window_start, week_end=week_end))
     facebook_quote_rows = [
@@ -1284,6 +1347,17 @@ def render_markdown(report: dict[str, Any]) -> str:
         if designs["designs"] and max(item["posts"] for item in designs["designs"]) < 4:
             lines.append("")
             lines.append("Too early to rank looks: no look has 4 posts yet.")
+    dm = report.get("comment_to_dm") or {}
+    lines.extend(["", "## Comment to DM (the free class link by message)", ""])
+    if dm.get("status") != "ok":
+        lines.append("No comment automation on record yet. Once one exists, a comment carrying CLASS on any post gets the Habit link by direct message, counted here.")
+    else:
+        lines.append("Lifetime counters from Zernio, per platform: comments that matched CLASS, messages sent, messages that failed (Meta allows one private reply per comment within seven days).")
+        lines.append("")
+        lines.append("| Platform | Active | Matched | Sent | Failed | People | Link clicks |")
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
+        for platform, row in sorted(dm["platforms"].items()):
+            lines.append(f"| {platform.title()} | {'yes' if row['active'] else 'no'} | {row['triggered']} | {row['sent']} | {row['failed']} | {row['contacts']} | {row['clicks']} |")
     lines.extend(["", "## Meta cross-check (Instagram)", ""])
     if cross.get("status") == "ok":
         lines.append(
@@ -1491,7 +1565,8 @@ def main() -> int:
     data_dir = default_data_root()
     snapshots = load_daily_snapshots(data_dir / "social_growth", week_end=week_end, days=args.days)
     report = build_weekly_review(
-        snapshots, week_end=week_end, days=args.days, meta_media=fetch_meta_media()
+        snapshots, week_end=week_end, days=args.days, meta_media=fetch_meta_media(),
+        comment_to_dm_live=fetch_comment_automation_stats(comment_automation_ids()),
     )
     if args.dry_run:
         print(json.dumps(report, indent=2, sort_keys=True))
