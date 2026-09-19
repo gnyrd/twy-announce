@@ -139,6 +139,26 @@ def _adapt_newsletter_template_for_sendgrid(
     return re.sub(r"\*\|[^|]+\|\*", "", html)
 
 
+_CONTRIBUTION_BLOCK = re.compile(
+    r"<!--\s*contribution:(?P<feature>[a-z0-9_]+)\s*-->.*?<!--\s*/contribution:(?P=feature)\s*-->",
+    re.DOTALL,
+)
+
+
+def apply_contribution(template: str) -> str:
+    """Drop every block the template marks as contribution past the
+    Instagram scope whose feature the tracked setting has turned off
+    (twy_platform.contribution). The markers wrap the follow line and the
+    Facebook icon of 2026-09-18; a block whose feature continues is kept
+    with its markers, which are comments and render as nothing."""
+    from twy_platform.contribution import continued
+
+    def keep_or_drop(match: re.Match) -> str:
+        return match.group(0) if continued(match.group("feature")) else ""
+
+    return _CONTRIBUTION_BLOCK.sub(keep_or_drop, template)
+
+
 def _wrap_with_newsletter_template(
     body_html: str,
     *,
@@ -147,6 +167,7 @@ def _wrap_with_newsletter_template(
     template = _load_template_html()
     if not template:
         return body_html
+    template = apply_contribution(template)
     template = _adapt_newsletter_template_for_sendgrid(
         template,
         unsubscribe_footer=unsubscribe_footer,

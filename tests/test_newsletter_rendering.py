@@ -152,3 +152,24 @@ def test_a_body_without_images_is_returned_untouched():
     body = "Plain words, no pictures.\n\nA second paragraph."
 
     assert "<img" not in render_newsletter(body).html
+
+
+def test_marked_contribution_blocks_leave_the_template_when_the_feature_is_off(tmp_path, monkeypatch):
+    from newsletter_rendering import apply_contribution
+    from twy_platform import contribution
+    template = ("<tr><td>keep</td></tr>\n<!-- contribution:email_follow_ask -->\n<tr><td>Follow along</td></tr>\n"
+                "<!-- /contribution:email_follow_ask -->\n<td>icons</td>\n<!-- contribution:email_follow_ask -->\n"
+                "<td>facebook</td>\n<!-- /contribution:email_follow_ask -->\n<tr><td>footer</td></tr>")
+    path = tmp_path / "contribution.toml"
+    monkeypatch.setenv("TWY_CONTRIBUTION_CONFIG", str(path))
+    contribution._cache.update(path=None, mtime=None, data=None)
+    assert apply_contribution(template) == template            # no file: continued, markers stay (they are comments)
+    path.write_text("continued = false\n")
+    contribution._cache.update(path=None, mtime=None, data=None)
+    off = apply_contribution(template)
+    assert "Follow along" not in off and "facebook" not in off and "keep" in off and "icons" in off and "footer" in off
+    path.write_text("continued = true\n[features]\nemail_follow_ask = false\n")
+    contribution._cache.update(path=None, mtime=None, data=None)
+    assert "Follow along" not in apply_contribution(template)
+    monkeypatch.delenv("TWY_CONTRIBUTION_CONFIG")
+    contribution._cache.update(path=None, mtime=None, data=None)
