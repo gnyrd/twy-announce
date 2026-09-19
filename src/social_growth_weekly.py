@@ -22,6 +22,20 @@ from twy_paths import clips_state_dir, email_membership_dir, load_env, youtube_p
 
 
 DEFAULT_DAYS = 7
+EVERY_PLATFORM = ("instagram", "facebook", "youtube")
+
+
+def live_platforms() -> tuple[str, ...]:
+    """The platforms the review covers: what ops/contribution.toml lists
+    (Instagram alone once the contribution ends)."""
+    from twy_platform.contribution import platforms
+    return platforms()
+
+
+def report_platforms(report: dict[str, Any]) -> set[str]:
+    """A review written before the switch existed covers every platform."""
+    return set(report.get("platforms") or EVERY_PLATFORM)
+
 MIN_POST_AGE_HOURS = 24
 MIN_WEBSITE_VISITORS_FOR_RECOMMENDATION = 10
 SLACK_STATE_FILE = ".weekly_slack_state.json"
@@ -1063,7 +1077,14 @@ def _comment_to_dm(state_path: Path | None = None, live: dict[str, dict] | None 
     return {"status": "ok" if platforms else "absent", "platforms": platforms}
 
 
-def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None, youtube_store: Path | None = None, comment_to_dm_state: Path | None = None, comment_to_dm_live: dict[str, dict] | None = None) -> dict[str, Any]:
+def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days: int = DEFAULT_DAYS, meta_media: list[dict[str, Any]] | None = None, youtube_store: Path | None = None, comment_to_dm_state: Path | None = None, comment_to_dm_live: dict[str, dict] | None = None, platforms: tuple[str, ...] | None = None) -> dict[str, Any]:
+    """platforms: the platforms the review covers, the live list from the
+    contribution switch by default. A platform not listed gets no metric, no
+    section and no arm: the Facebook and YouTube parts of the review are
+    contribution and go with it, the Instagram half is untouched."""
+    platforms = tuple(platforms) if platforms is not None else live_platforms()
+    facebook_on = "facebook" in platforms
+    youtube_on = "youtube" in platforms
     week_start = week_end - timedelta(days=days - 1)
     history = sorted(snapshots, key=lambda item: item.get("date") or item.get("captured_at") or "")
     snapshots = [
@@ -1080,11 +1101,12 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
         "snapshot_count": len(snapshots),
         "first_snapshot_date": snapshots[0].get("date") if snapshots else None,
         "last_snapshot_date": snapshots[-1].get("date") if snapshots else None,
+        "platforms": list(platforms),
         "metrics": {
             "instagram_followers": _delta(snapshots, "instagram_followers"),
-            "facebook_followers": _delta(snapshots, "facebook_followers"),
+            **({"facebook_followers": _delta(snapshots, "facebook_followers")} if facebook_on else {}),
             "email_subscribers": _delta(snapshots, "email_subscribers"),
-            "youtube_subscribers": _delta(snapshots, "youtube_subscribers"),
+            **({"youtube_subscribers": _delta(snapshots, "youtube_subscribers")} if youtube_on else {}),
             "next_habit_registrations": _delta(snapshots, "next_habit_registrations"),
             "landing_page": {
                 "visitors": _sum(snapshots, "landing_day_visitors"),
@@ -1098,21 +1120,31 @@ def build_weekly_review(snapshots: list[dict[str, Any]], *, week_end: date, days
             "upcoming_variants": _unique_summary_values(snapshots, "upcoming_campaign_variants"),
         },
         "post_performance": _post_performance(posts),
-        "youtube_shorts": _youtube_shorts(week_start=week_start, week_end=week_end, store=youtube_store),
+        "youtube_shorts": (
+            _youtube_shorts(week_start=week_start, week_end=week_end, store=youtube_store)
+            if youtube_on else {"published": 0, "measured": 0, "posts": [], "totals": {}}
+        ),
         "campaign_performance": _campaign_performance(posts),
         "acquisition": _acquisition(week_start=week_start, week_end=week_end),
         "website_performance": _website_performance(history, trend_snapshots=snapshots),
     }
     report["meta_cross_check"] = _meta_cross_check(posts, meta_media)
     report["comment_to_dm"] = _comment_to_dm(comment_to_dm_state, live=comment_to_dm_live)
+    # An automation on a platform the switch has off is deactivated by the
+    # clips job; the review stops naming it at the same time.
+    report["comment_to_dm"]["platforms"] = {
+        name: row for name, row in (report["comment_to_dm"].get("platforms") or {}).items() if name in platforms
+    }
+    if not report["comment_to_dm"]["platforms"]:
+        report["comment_to_dm"]["status"] = "absent"
     format_window_start = week_end - timedelta(weeks=QUOTE_FORMAT_LOOKBACK_WEEKS)
     report["quote_formats"] = _quote_format_arms(_post_rows(snapshots, week_start=format_window_start, week_end=week_end))
     facebook_quote_rows = [
         row
         for row in _post_rows(snapshots, week_start=format_window_start, week_end=week_end, section="zernio_facebook")
         if row.get("is_quote")
-    ]
-    report["facebook_quote_formats"] = _quote_format_arms(facebook_quote_rows, FB_QUOTE_FORMATS)
+    ] if facebook_on else []
+    report["facebook_quote_formats"] = _quote_format_arms(facebook_quote_rows, FB_QUOTE_FORMATS) if facebook_on else {}
     instagram_quote_rows = [
         row
         for row in _post_rows(snapshots, week_start=format_window_start, week_end=week_end)
@@ -1176,6 +1208,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     metrics = report["metrics"]
     funnel = metrics["landing_page"]
     performance = report["post_performance"]
+    platforms = report_platforms(report)
     lines = [
         "# TWY Audience Growth Review",
         "",
@@ -1185,7 +1218,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Audience",
         "",
         f"- Instagram followers: {_format_delta(metrics['instagram_followers'])}",
-        f"- YouTube subscribers: {_format_delta(metrics.get('youtube_subscribers') or {})}",
+        *([f"- YouTube subscribers: {_format_delta(metrics.get('youtube_subscribers') or {})}"] if "youtube" in platforms else []),
         f"- Email subscribers: {_format_delta(metrics['email_subscribers'])}",
         f"- Next Habits registrations: {_format_delta(metrics['next_habit_registrations'])}",
         "",
@@ -1247,55 +1280,55 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.append("| No mature post analytics in this period |  |  |  |  |  |  |  |  |")
 
     shorts = report.get("youtube_shorts") or {}
-    lines.extend(["", "## YouTube Shorts", ""])
-    if not shorts.get("published"):
-        lines.append("No Shorts published this period.")
-    else:
-        totals = shorts.get("totals") or {}
-        lines += [
-            f"{shorts['published']} Short(s) published, {shorts['measured']} measured, read from YouTube: "
-            f"{_format_number(totals.get('views', 0))} views, {_format_number(totals.get('likes', 0))} likes, "
-            f"{_format_number(totals.get('comments', 0))} comments. YouTube reports no reach; engagement is likes plus comments per hundred views.",
-            "",
-        ]
-        posts = shorts.get("posts") or []
-        studio = any("stayedPct" in (post.get("metrics") or {}) for post in posts)
-        if studio:
-            lines += [
-                "Studio columns (stayed to watch, average view, watch minutes, shares, subscribers gained, share of views from the Shorts feed) arrive about two days after a Short publishes; a blank is a Short YouTube has not reported yet.",
-                "",
-                "| Target | Class | Views | Stayed | Avg view | Watch min | Likes | Comments | Shares | Subs | Shorts feed | Engagement |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-            ]
+    if "youtube" in platforms:
+        lines.extend(["", "## YouTube Shorts", ""])
+        if not shorts.get("published"):
+            lines.append("No Shorts published this period.")
         else:
+            totals = shorts.get("totals") or {}
             lines += [
-                "| Target | Class | Views | Likes | Comments | Engagement |",
-                "| --- | --- | ---: | ---: | ---: | ---: |",
+                f"{shorts['published']} Short(s) published, {shorts['measured']} measured, read from YouTube: "
+                f"{_format_number(totals.get('views', 0))} views, {_format_number(totals.get('likes', 0))} likes, "
+                f"{_format_number(totals.get('comments', 0))} comments. YouTube reports no reach; engagement is likes plus comments per hundred views.",
+                "",
             ]
-        for post in posts:
-            post_metrics = post.get("metrics") or {}
-
-            def cell(key, suffix=""):
-                value = post_metrics.get(key)
-                return "" if value is None else _studio_number(value) + suffix
-
+            posts = shorts.get("posts") or []
+            studio = any("stayedPct" in (post.get("metrics") or {}) for post in posts)
             if studio:
-                lines.append(
-                    f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
-                    f"{cell('stayedPct', '%')} | {cell('avgViewDurationSec', ' s')} | {cell('watchMinutes')} | "
-                    f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
-                    f"{cell('shares')} | {cell('subscribersGained')} | {cell('trafficShortsFeedPct', '%')} | "
-                    f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
-                )
+                lines += [
+                    "Studio columns (stayed to watch, average view, watch minutes, shares, subscribers gained, share of views from the Shorts feed) arrive about two days after a Short publishes; a blank is a Short YouTube has not reported yet.",
+                    "",
+                    "| Target | Class | Views | Stayed | Avg view | Watch min | Likes | Comments | Shares | Subs | Shorts feed | Engagement |",
+                    "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                ]
             else:
-                lines.append(
-                    f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
-                    f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
-                    f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
-                )
-        if shorts["published"] > shorts["measured"]:
-            lines.append(f"| {shorts['published'] - shorts['measured']} published Short(s) not measured yet |  |  |  |  |  |")
+                lines += [
+                    "| Target | Class | Views | Likes | Comments | Engagement |",
+                    "| --- | --- | ---: | ---: | ---: | ---: |",
+                ]
+            for post in posts:
+                post_metrics = post.get("metrics") or {}
 
+                def cell(key, suffix=""):
+                    value = post_metrics.get(key)
+                    return "" if value is None else _studio_number(value) + suffix
+
+                if studio:
+                    lines.append(
+                        f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
+                        f"{cell('stayedPct', '%')} | {cell('avgViewDurationSec', ' s')} | {cell('watchMinutes')} | "
+                        f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
+                        f"{cell('shares')} | {cell('subscribersGained')} | {cell('trafficShortsFeedPct', '%')} | "
+                        f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
+                    )
+                else:
+                    lines.append(
+                        f"| {_post_label(post)} | {post.get('class_name') or ''} | {_format_number(_metric(post_metrics, 'views'))} | "
+                        f"{_format_number(_metric(post_metrics, 'likes'))} | {_format_number(_metric(post_metrics, 'comments'))} | "
+                        f"{_metric(post_metrics, 'engagementRate'):.2f}% |"
+                    )
+            if shorts["published"] > shorts["measured"]:
+                lines.append(f"| {shorts['published'] - shorts['measured']} published Short(s) not measured yet |  |  |  |  |  |")
     lines.extend(["", "## Acquisition", ""])
     acquisition = report.get("acquisition") or {}
     if not acquisition.get("available"):
@@ -1323,18 +1356,21 @@ def render_markdown(report: dict[str, Any]) -> str:
         formats=QUOTE_FORMATS,
         empty="No quote posts in the analytics window yet. Quotes alternate format by slot from the first slot after 2026-09-07; each quote posts once.",
     ))
-    lines.extend(_format_arms_lines(
-        report.get("facebook_quote_formats") or {},
-        title="## Quote format test: Reels vs photo posts (Facebook)",
-        formats=FB_QUOTE_FORMATS,
-        empty="No Facebook quote posts in the analytics window yet. Four quote slots a week from 2026-09-07, format by slot; each quote posts once.",
-    ))
+    if "facebook" in platforms:
+        lines.extend(_format_arms_lines(
+            report.get("facebook_quote_formats") or {},
+            title="## Quote format test: Reels vs photo posts (Facebook)",
+            formats=FB_QUOTE_FORMATS,
+            empty="No Facebook quote posts in the analytics window yet. Four quote slots a week from 2026-09-07, format by slot; each quote posts once.",
+        ))
     designs = report.get("quote_card_designs") or {}
-    lines.extend(["", "## Quote card looks (both platforms)", ""])
+    looks_scope = "both platforms" if "facebook" in platforms else "Instagram"
+    lines.extend(["", f"## Quote card looks ({looks_scope})", ""])
     if not designs.get("posts"):
         lines.append("No quote posts with a recorded card look yet. Every quote path records its look (background, type treatment, accent) from 2026-09-07.")
     else:
-        lines.append(f"Quote posts by the card look they used, last {QUOTE_FORMAT_LOOKBACK_WEEKS} weeks, Instagram and Facebook together. Reels and photo posts mixed; read alongside the format tables.")
+        together = "Instagram and Facebook together" if "facebook" in platforms else "Instagram"
+        lines.append(f"Quote posts by the card look they used, last {QUOTE_FORMAT_LOOKBACK_WEEKS} weeks, {together}. Reels and photo posts mixed; read alongside the format tables.")
         lines.append("")
         lines.append("| Background | Treatment | Accent | Posts | Median reach | Likes | Saves | Shares |")
         lines.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |")
@@ -1351,9 +1387,9 @@ def render_markdown(report: dict[str, Any]) -> str:
     from twy_platform.contribution import labs_mark
     lines.extend(["", "## Comment to DM (the free class link by message)" + labs_mark("comment_to_dm"), ""])
     if dm.get("status") != "ok":
-        lines.append("No comment automation on record yet. Once one exists, a comment carrying CLASS on any post gets the Habit link by direct message, counted here.")
+        lines.append("No comment automation on record yet. Once one exists, a comment carrying the keyword on any post gets the Habit link by direct message, counted here.")
     else:
-        lines.append("Lifetime counters from Zernio, per platform: comments that matched CLASS, messages sent, messages that failed (Meta allows one private reply per comment within seven days).")
+        lines.append("Lifetime counters from Zernio, per platform: comments that matched the keyword, messages sent, messages that failed (Meta allows one private reply per comment within seven days).")
         lines.append("")
         lines.append("| Platform | Active | Matched | Sent | Failed | People | Link clicks |")
         lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
@@ -1408,12 +1444,13 @@ def render_slack(report: dict[str, Any]) -> str:
     funnel = metrics["landing_page"]
     performance = report["post_performance"]
     top = performance["top_by_reach"]
+    platforms = report_platforms(report)
     lines = [
         "*TWY audience growth review*",
         f"{report['week_start']} to {report['week_end']} | {report['snapshot_count']} daily snapshots",
         "",
         f"*IG followers:* {_format_delta(metrics['instagram_followers'])}",
-        f"*YouTube subscribers:* {_format_delta(metrics.get('youtube_subscribers') or {})}",
+        *([f"*YouTube subscribers:* {_format_delta(metrics.get('youtube_subscribers') or {})}"] if "youtube" in platforms else []),
         f"*Email subscribers:* {_format_delta(metrics['email_subscribers'])}",
         f"*Habits registrations:* {_format_delta(metrics['next_habit_registrations'])}",
         (
@@ -1438,7 +1475,7 @@ def render_slack(report: dict[str, Any]) -> str:
         )
     fb_formats = report.get("facebook_quote_formats") or {}
     fb_arms = fb_formats.get("arms") or {}
-    if fb_formats.get("posts") and fb_arms.get("fb_photo", {}).get("posts"):
+    if "facebook" in platforms and fb_formats.get("posts") and fb_arms.get("fb_photo", {}).get("posts"):
         reel, photo = fb_arms["fb_reel"], fb_arms["fb_photo"]
         lines.append(
             f"*FB quote formats:* Reel {reel['posts']} post(s), median reach {_format_number(reel['median_reach'] or 0)} | "
@@ -1456,7 +1493,7 @@ def render_slack(report: dict[str, Any]) -> str:
             f"{_metric(top_metrics, 'igReelsAvgWatchTime') / 1000:.2f}s average watch"
         )
     shorts = report.get("youtube_shorts") or {}
-    if shorts.get("published"):
+    if "youtube" in platforms and shorts.get("published"):
         totals = shorts.get("totals") or {}
         top_short = (shorts.get("posts") or [None])[0]
         line = (

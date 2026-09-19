@@ -1098,7 +1098,15 @@ def collect_snapshot(
     zernio_account_health: Callable[[], dict[str, Any] | None] | None,
     zernio_lookback_hours: int = DEFAULT_ZERNIO_LOOKBACK_HOURS,
     zernio_lookahead_hours: int = DEFAULT_ZERNIO_LOOKAHEAD_HOURS,
+    platforms: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    """platforms: the platforms the snapshot covers, the live list from the
+    contribution switch by default. A platform not listed has no section in
+    the snapshot (its collectors are off too), so the weekly review built on
+    these snapshots has nothing to say about it."""
+    if platforms is None:
+        from twy_platform.contribution import platforms as live_platforms
+        platforms = live_platforms()
     try:
         account_health = zernio_account_health() if zernio_account_health else None
     except Exception as exc:
@@ -1112,15 +1120,11 @@ def collect_snapshot(
             "followers": latest_instagram_followers(twy_root),
             "zernio_account": account_health,
         },
-        "facebook": {
-            "followers": latest_facebook_followers(twy_root),
-        },
+        **({"facebook": {"followers": latest_facebook_followers(twy_root)}} if "facebook" in platforms else {}),
         "email": {
             "subscribers": latest_email_subscribers(twy_root),
         },
-        "youtube": {
-            "subscribers": latest_youtube_subscribers(twy_root),
-        },
+        **({"youtube": {"subscribers": latest_youtube_subscribers(twy_root)}} if "youtube" in platforms else {}),
         "habit": {
             "next_event": next_habit_event(data_root, captured_at),
         },
@@ -1140,8 +1144,9 @@ def collect_snapshot(
         ),
         # The Facebook Page ledger through the same reader: status plus Zernio
         # analytics per post, so the weekly review can compare Facebook quote
-        # formats the way it compares Instagram's (2026-09-07).
-        "zernio_facebook": collect_zernio_recent_status(
+        # formats the way it compares Instagram's (2026-09-07). Not read at
+        # all while Facebook is off: the Page may be disconnected by then.
+        **({"zernio_facebook": collect_zernio_recent_status(
             history_path=fb_history_path(),
             captured_at=captured_at,
             fetch_post=zernio_fetch_post,
@@ -1149,13 +1154,14 @@ def collect_snapshot(
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
             platform="facebook",
-        ),
+        )} if "facebook" in platforms else {}),
         "websites": websites,
         "landing_page": {"plausible": habit_plausible},
         "external_benchmarks": {
             "socialblade": collect_socialblade_status(),
         },
     }
+    snapshot["platforms"] = list(platforms)
     snapshot["summary"] = summarize_snapshot(snapshot)
     return snapshot
 
