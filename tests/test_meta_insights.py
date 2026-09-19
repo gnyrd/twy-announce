@@ -108,3 +108,23 @@ def test_summary_shape_and_fb_note(monkeypatch):
     assert summary["instagram"]["account"]["username"] == "tiffanywoodyoga"
     assert summary["instagram"]["reach_daily"] == [{"date": "2026-08-15", "reach": 30}]
     assert "deprecated" in summary["facebook"]["note"]
+
+
+def test_feed_media_also_carry_follows_and_profile_visits(monkeypatch):
+    calls = []
+
+    def fake(url, params=None, timeout=None):
+        calls.append((url, dict(params or {})))
+        if url.endswith("/media"):
+            return FakeResp({"data": [{"id": "P1", "permalink": "https://www.instagram.com/p/abc/", "media_type": "CAROUSEL_ALBUM"},
+                                          {"id": "R1", "permalink": "https://www.instagram.com/reel/def/", "media_type": "VIDEO"}]})
+        if url.endswith("/insights") and params.get("metric") == MEDIA_METRICS:
+            return FakeResp({"data": [{"name": "reach", "values": [{"value": 30}]}]})
+        if url.endswith("P1/insights") and params.get("metric") == meta_insights.FEED_ONLY_METRICS:
+            return FakeResp({"data": [{"name": "follows", "values": [{"value": 2}]}, {"name": "profile_visits", "values": [{"value": 7}]}]})
+        raise AssertionError("unexpected " + url + " " + str(params))
+    monkeypatch.setattr(meta_insights.requests, "get", fake)
+    media = MetaInsights("t").ig_recent_media(limit=2)
+    assert media[0]["insights"] == {"reach": 30, "follows": 2, "profile_visits": 7}
+    assert media[1]["insights"] == {"reach": 30}
+    assert not any(u.endswith("R1/insights") and p.get("metric") == meta_insights.FEED_ONLY_METRICS for u, p in calls)

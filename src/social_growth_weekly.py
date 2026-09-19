@@ -981,6 +981,10 @@ def _meta_cross_check(posts: list[dict[str, Any]], meta_media: list[dict[str, An
                     "comments": int(mi.get("comments") or 0),
                     "saved": int(mi.get("saved") or 0),
                     "shares": int(mi.get("shares") or 0),
+                    # feed posts only (photos and the quote carousels of build
+                    # 4); Meta refuses both for a Reel, so None means unmeasured
+                    "follows": int(mi["follows"]) if mi.get("follows") is not None else None,
+                    "profile_visits": int(mi["profile_visits"]) if mi.get("profile_visits") is not None else None,
                 },
                 "reach_delta": zr - mr,
                 "reach_agrees": abs(zr - mr) <= max(5, round(0.10 * mr)),
@@ -1292,21 +1296,24 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.extend(
                 [
                     "",
-                    "| Target | Zernio reach | Meta reach | Delta | Likes Z/M |",
-                    "| --- | ---: | ---: | ---: | ---: |",
+                    "| Target | Zernio reach | Meta reach | Delta | Likes Z/M | Follows | Profile visits |",
+                    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
                 ]
             )
             for row in matched:
                 flag = "" if row["reach_agrees"] else " !"
+                meta = row["meta"]
                 lines.append(
                     "| "
                     + " | ".join(
                         [
                             row["label"],
                             _format_number(row["zernio"]["reach"]),
-                            _format_number(row["meta"]["reach"]),
+                            _format_number(meta["reach"]),
                             f"{row['reach_delta']:+d}{flag}",
-                            f"{row['zernio']['likes']}/{row['meta']['likes']}",
+                            f"{row['zernio']['likes']}/{meta['likes']}",
+                            "n/a" if meta.get("follows") is None else _format_number(meta["follows"]),
+                            "n/a" if meta.get("profile_visits") is None else _format_number(meta["profile_visits"]),
                         ]
                     )
                     + " |"

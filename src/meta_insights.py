@@ -24,6 +24,11 @@ import requests
 from twy_platform.meta import GRAPH, PAGE_ID, IG_USER_ID
 
 MEDIA_METRICS = "reach,likes,comments,saved,shares,total_interactions"
+# Feed media (a photo or a carousel, permalink /p/) also answer follows and
+# profile_visits; Reels refuse them with error 100 (probed live 2026-09-18).
+# They are the one per-post measure of a follow, so the quote carousels of
+# build 4 are judged on them.
+FEED_ONLY_METRICS = "follows,profile_visits"
 FB_POST_METRICS = "post_clicks,post_reactions_by_type_total"
 
 
@@ -44,6 +49,12 @@ def load_token():
     if not token:
         raise SystemExit("META_PAGE_ACCESS_TOKEN is not configured")
     return token
+
+
+def is_feed_permalink(permalink):
+    """A feed post (photo or carousel) lives at instagram.com/p/, a Reel at
+    instagram.com/reel/."""
+    return "/p/" in str(permalink or "")
 
 
 class MetaInsights:
@@ -103,19 +114,26 @@ class MetaInsights:
                     "media_type": row.get("media_type"),
                     "timestamp": row.get("timestamp"),
                     "permalink": row.get("permalink"),
-                    "insights": self._media_insights(row.get("id")),
+                    "insights": self._media_insights(row.get("id"), permalink=row.get("permalink")),
                 }
             )
         return out
 
-    def _media_insights(self, media_id):
+    def _media_insights(self, media_id, permalink=None):
         # The full metric set is only valid for some media types. Fall back to
         # reach, which every media type supports, rather than losing the row.
         try:
             result = self._get(f"{media_id}/insights", metric=MEDIA_METRICS)
         except MetaError:
             result = self._get(f"{media_id}/insights", metric="reach")
-        return {entry["name"]: self._first_value(entry) for entry in result.get("data", [])}
+        values = {entry["name"]: self._first_value(entry) for entry in result.get("data", [])}
+        if is_feed_permalink(permalink):
+            try:
+                extra = self._get(f"{media_id}/insights", metric=FEED_ONLY_METRICS)
+            except MetaError:
+                extra = {}
+            values.update({entry["name"]: self._first_value(entry) for entry in extra.get("data", [])})
+        return values
 
     def fb_recent_posts(self, limit=10):
         """Recent Facebook posts with post_clicks and reactions. No reach in v26."""
