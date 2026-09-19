@@ -1348,7 +1348,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append("")
             lines.append("Too early to rank looks: no look has 4 posts yet.")
     dm = report.get("comment_to_dm") or {}
-    lines.extend(["", "## Comment to DM (the free class link by message)", ""])
+    from twy_platform.contribution import labs_mark
+    lines.extend(["", "## Comment to DM (the free class link by message)" + labs_mark("comment_to_dm"), ""])
     if dm.get("status") != "ok":
         lines.append("No comment automation on record yet. Once one exists, a comment carrying CLASS on any post gets the Habit link by direct message, counted here.")
     else:
@@ -1370,7 +1371,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.extend(
                 [
                     "",
-                    "| Target | Zernio reach | Meta reach | Delta | Likes Z/M | Follows | Profile visits |",
+                    "| Target | Zernio reach | Meta reach | Delta | Likes Z/M | Follows" + labs_mark("instagram_quote_carousel") + " | Profile visits |",
                     "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
                 ]
             )
