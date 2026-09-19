@@ -1534,6 +1534,21 @@ def deterministic_client_msg_id(week_end: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"twy-social-growth-weekly:{week_end}"))
 
 
+def slack_reports_on() -> bool:
+    """False while ops/contribution.toml has the reports to Slack off
+    (slack_reports, JP 2026-09-19): the review is still written for the
+    Stats site, the direct message is not sent."""
+    from twy_platform.contribution import continued
+    return continued("slack_reports")
+
+
+def stats_link() -> str:
+    """The line under the review pointing at the Stats site, only while the
+    site is on (stats_site, JP 2026-09-19)."""
+    from twy_platform.contribution import continued
+    return "\n\nhttps://stats.tiffanywoodyoga.com/" if continued("stats_site") else ""
+
+
 def post_slack_dm_once(
     report: dict[str, Any],
     *,
@@ -1560,7 +1575,7 @@ def post_slack_dm_once(
         },
         json={
             "channel": user_id,
-            "text": render_slack(report) + "\n\nhttps://stats.tiffanywoodyoga.com/",
+            "text": render_slack(report) + stats_link(),
             "client_msg_id": deterministic_client_msg_id(report["week_end"]),
         },
         timeout=15,
@@ -1615,7 +1630,9 @@ def main() -> int:
     print(f"Saved readable weekly social growth review to {markdown_path}")
     if report["status"] == "insufficient_data":
         print("Weekly social growth review has insufficient data.")
-    if args.slack:
+    if args.slack and not slack_reports_on():
+        print("Slack reports are off in ops/contribution.toml: review saved, not sent.")
+    elif args.slack:
         token = os.getenv("TWY_REPORTER_BOT_TOKEN") or os.getenv("SLACK_BOT_TOKEN")
         user_id = os.getenv("SLACK_USER_JP")
         if not token or not user_id:

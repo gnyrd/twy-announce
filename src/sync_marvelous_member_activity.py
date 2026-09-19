@@ -422,8 +422,14 @@ def bootstrap_state(
 
 
 def post_activity(message: str, *, channel: str) -> bool:
+    """The movement post. Off (slack_reports in ops/contribution.toml, JP
+    2026-09-19) it is not sent and counts as delivered, so the state still
+    advances and nothing replays when the reports come back."""
+    from twy_platform.contribution import continued
     from twy_platform.slack import slack
 
+    if not continued("slack_reports"):
+        return True
     return bool(slack(message, channel=channel))
 
 
