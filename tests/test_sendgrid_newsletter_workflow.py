@@ -896,6 +896,84 @@ def test_resolve_section_tokens_resolves_the_template(
     _validate_sections_before_provider({"recording": resolved})
 
 
+def _write_coupon_db(tmp_path, *, ends="2026-08-22"):
+    import sqlite3
+    from twy_paths import marvy_db_path
+
+    path = marvy_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE coupons (code TEXT, discount_type TEXT, "
+        "discount_amount REAL, redeem_end TEXT);"
+        "CREATE TABLE products (id INTEGER, price REAL);"
+    )
+    conn.execute(
+        "INSERT INTO coupons VALUES (?, ?, ?, ?)",
+        ("HABIT_AUG2026", "fixed_amount", 50.0, ends),
+    )
+    conn.execute("INSERT INTO products VALUES (?, ?)", (52025, 99.0))
+    conn.commit()
+    conn.close()
+
+
+def _gate(tmp_path, monkeypatch, text):
+    from twy_platform import contribution
+
+    path = tmp_path / "contribution.toml"
+    path.write_text(text)
+    monkeypatch.setenv("TWY_CONTRIBUTION_CONFIG", str(path))
+    contribution._cache.update(path=None, mtime=None, data=None)
+
+
+def test_resolver_fills_the_offer_from_the_month_coupon(
+    tmp_path, monkeypatch
+):
+    _write_recording_record(tmp_path, monkeypatch)
+    _write_coupon_db(tmp_path)
+    _gate(tmp_path, monkeypatch, "continued = true\n")
+    from datetime import date as _date
+    from twy_platform import habit_offer
+
+    # The lock runs on the real clock; pin it to the day after the class.
+    monkeypatch.setattr(
+        workflow_module,
+        "offer_line",
+        lambda year, month: habit_offer.offer_line(
+            year, month, today=_date(2026, 8, 9)
+        ),
+    )
+    resolved = resolve_section_tokens(
+        "recording", _template_section(), year=2026, month=8
+    )
+    assert "{OFFER}" not in resolved["body"]
+    assert (
+        "built class by class. You can [claim your first month for $49]"
+        "(https://studio.tiffanywoodyoga.com/buy/product/52025"
+        "?coupon=HABIT_AUG2026) before August 22."
+    ) in resolved["body"]
+    _validate_sections_before_provider({"recording": resolved})
+
+
+def test_resolver_leaves_the_email_unchanged_when_the_offer_is_off(
+    tmp_path, monkeypatch
+):
+    _write_recording_record(tmp_path, monkeypatch)
+    _write_coupon_db(tmp_path)
+    _gate(
+        tmp_path,
+        monkeypatch,
+        "continued = true\n[features]\nhabit_recording_offer = false\n",
+    )
+    resolved = resolve_section_tokens(
+        "recording", _template_section(), year=2026, month=8
+    )
+    assert "{OFFER}" not in resolved["body"]
+    assert "built class by class.\n" in resolved["body"] + "\n"
+    assert "claim your first month" not in resolved["body"]
+    _validate_sections_before_provider({"recording": resolved})
+
+
 def test_resolver_without_a_record_fails_the_lock_validation(
     tmp_path, monkeypatch
 ):

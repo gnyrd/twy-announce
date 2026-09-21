@@ -37,6 +37,7 @@ from twy_paths import (
 )
 from twy_platform.text import find_prohibited
 from twy_platform import locked_create, locked_write
+from twy_platform.habit_offer import offer_line
 
 
 MATERIALIZATION_WINDOW = timedelta(hours=24)
@@ -812,7 +813,8 @@ def resolve_section_tokens(
     resolver: it fills what the month's recording record can answer and
     leaves anything else in place for the pre-provider validator to
     reject, so a missing recording fails the lock loudly instead of
-    mailing a token.
+    mailing a token. {OFFER} is the exception: it resolves to the month's
+    membership offer sentence or to nothing (2026-09-20).
     """
     record = _recording_record(year, month)
     title = str(record.get("class_title") or "")
@@ -840,6 +842,12 @@ def resolve_section_tokens(
             f"[Watch {title or 'the class'}]({recording_url})",
         )
         body = body.replace("{RECORDING_URL}", recording_url)
+    if "{OFFER}" in body:
+        # The month's first-month coupon sentence, or nothing at all when
+        # the habit_recording_offer gate is off or the coupon is closed
+        # (twy_platform.habit_offer). Resolved to "" on purpose: this token
+        # never holds a lock, the email is complete without it.
+        body = body.replace("{OFFER}", offer_line(year, month))
     resolved = dict(section)
     resolved["subject"] = subject
     resolved["preheader"] = preheader
