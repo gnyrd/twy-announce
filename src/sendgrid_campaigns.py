@@ -20,7 +20,7 @@ from twy_platform import locked_write
 
 
 EXPECTED_ACCOUNT_EMAIL = "admin@tiffanywoodyoga.com"
-EXPECTED_SENDER_EMAIL = "hello@tiffanywoodyoga.com"
+EXPECTED_SENDER_EMAIL = "tiffany@tiffanywoodyoga.com"
 UNSUBSCRIBE_GROUP_NAME = "Email: Unsubscribed"
 PROVIDER_INJECTED_HTML_TOKENS = ("%sg_open_track%",)
 

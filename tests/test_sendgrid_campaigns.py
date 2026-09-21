@@ -155,7 +155,7 @@ def _registry(path):
         "account_email": "admin@tiffanywoodyoga.com",
         "sender": {
             "id": 9423402,
-            "email": "hello@tiffanywoodyoga.com",
+            "email": "tiffany@tiffanywoodyoga.com",
             "reply_to": "tiffany@tiffanywoodyoga.com",
         },
         "suppression_group": {
@@ -185,7 +185,7 @@ def _registry(path):
 
 def test_registry_reply_to_is_the_senders_reply_to_not_its_from(tmp_path):
     registry = _registry(tmp_path / "registry.json")
-    assert registry.sender_email == "hello@tiffanywoodyoga.com"
+    assert registry.sender_email == "tiffany@tiffanywoodyoga.com"
     assert registry.reply_to_email == "tiffany@tiffanywoodyoga.com"
 
 
@@ -193,18 +193,18 @@ def test_registry_without_a_reply_to_falls_back_to_the_sender_address(tmp_path):
     path = tmp_path / "registry.json"
     path.write_text(json.dumps({
         "account_email": "admin@tiffanywoodyoga.com",
-        "sender": {"id": 9423402, "email": "hello@tiffanywoodyoga.com"},
+        "sender": {"id": 9423402, "email": "tiffany@tiffanywoodyoga.com"},
         "suppression_group": {"id": 35187, "name": "Email: Unsubscribed"},
         "lists": {},
     }))
-    assert SendGridRegistry.load(path).reply_to_email == "hello@tiffanywoodyoga.com"
+    assert SendGridRegistry.load(path).reply_to_email == "tiffany@tiffanywoodyoga.com"
 
 
 def test_registry_rejects_old_provider_names(tmp_path):
     path = tmp_path / "registry.json"
     path.write_text(json.dumps({
         "account_email": "admin@tiffanywoodyoga.com",
-        "sender": {"id": 1, "email": "hello@tiffanywoodyoga.com"},
+        "sender": {"id": 1, "email": "tiffany@tiffanywoodyoga.com"},
         "suppression_group": {"id": 2, "name": "TWY Newsletters"},
         "lists": {},
     }))

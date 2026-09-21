@@ -98,7 +98,7 @@ class FakeAPI:
 
 
 class FakeRegistry:
-    sender_email = "hello@tiffanywoodyoga.com"
+    sender_email = "tiffany@tiffanywoodyoga.com"
     reply_to_email = "tiffany@tiffanywoodyoga.com"
     suppression_group_id = 42
 
@@ -233,7 +233,7 @@ def test_the_payload_carries_the_recipient_subject_and_suppression_group():
     # The email leaves from the verified sender; a reply goes to Tiff herself
     # (her answer on the 2026-09-07 call), which is a different address.
     assert payload["from"] == {
-        "email": "hello@tiffanywoodyoga.com",
+        "email": "tiffany@tiffanywoodyoga.com",
         "name": "Tiffany Wood Yoga",
     }
     assert payload["reply_to"] == {
