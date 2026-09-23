@@ -482,15 +482,89 @@ def test_start_date_must_be_in_the_campaign_month(tmp_path):
         launcher.launch(date(2026, 10, 1))
 
 
-def test_refuses_a_start_date_in_the_past(tmp_path):
-    # now is 2026-08-18; a September campaign started 2026-09-12 is future,
-    # but a campaign month in the past has every send in the past.
+# --- a past email is skipped, never fatal (2026-09-23) ---------------------
+#
+# Until this change _validate_start raised when ANY email's send time had
+# passed. The launch is idempotent and the tick re-runs it every day, so one
+# sent email made every later run of that month fail, and took the unsent ones
+# down with it: a missed run on email one's day meant email two was never
+# scheduled either, though its own send was still days away.
+
+
+def test_a_past_email_is_skipped_and_nothing_is_created_for_it(tmp_path):
+    # now is 2026-08-18, so an August campaign has every send behind us.
+    api = FakeAPI()
+    launcher = _launcher(tmp_path, api=api, journey=_campaign(
+        campaign_month="2026_08",
+        label="Campaign: Transitions: 2026_08",
+    ))
+
+    report = launcher.launch(date(2026, 8, 1))
+
+    assert all(row["skipped"] for row in report["sends"])
+    assert all(row["past_due"] for row in report["sends"])
+    # Nothing sends late: no Single Send is created for a moment already gone.
+    assert api.created_single_sends == []
+
+
+def test_a_past_email_does_not_stop_the_one_still_ahead(tmp_path):
+    """The whole point. Email one has gone, email two is days away, and the
+    daily tick must still schedule email two."""
+    api = FakeAPI()
+    journey = _campaign(emails=[
+        {"subject": "Already gone", "preheader": "", "body": "A",
+         "interval_days": 0},
+        {"subject": "Still ahead", "preheader": "", "body": "B",
+         "interval_days": 14},
+    ])
+    launcher = CampaignLauncher(
+        api=api, registry=FakeRegistry(), journey=journey,
+        state_path=tmp_path / "campaign.json",
+        # Between the two: 2026-09-12 has gone, 2026-09-26 has not.
+        now_fn=lambda: datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc),
+    )
+
+    report = launcher.launch(date(2026, 9, 12))
+
+    assert report["sends"][0]["past_due"] is True
+    assert report["sends"][1]["skipped"] is False
+    assert [c["name"] for c in api.created_single_sends] == [
+        "2026_09: Transitions: Email 2"]
+
+
+def test_re_running_after_the_first_email_sent_does_not_raise(tmp_path):
+    """The daily tick case: launch on time, then run again the next day. The
+    second run must be a quiet no-op, not a failure that pages JP."""
+    api = FakeAPI()
+    journey = _campaign(emails=[
+        {"subject": "One", "preheader": "", "body": "A", "interval_days": 0},
+        {"subject": "Two", "preheader": "", "body": "B", "interval_days": 14},
+    ])
+    on_time = CampaignLauncher(
+        api=api, registry=FakeRegistry(), journey=journey,
+        state_path=tmp_path / "campaign.json", now_fn=lambda: NOW)
+    on_time.launch(date(2026, 9, 12))
+    created = len(api.created_single_sends)
+    assert created == 2
+
+    later = CampaignLauncher(
+        api=api, registry=FakeRegistry(), journey=journey,
+        state_path=tmp_path / "campaign.json",
+        now_fn=lambda: datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc))
+    report = later.launch(date(2026, 9, 12))
+
+    assert all(row["skipped"] for row in report["sends"])
+    assert len(api.created_single_sends) == created, "a re-run created a send"
+
+
+def test_a_start_date_outside_the_campaign_month_is_still_refused(tmp_path):
+    """The month check survives; only the past-send refusal went."""
     launcher = _launcher(tmp_path, journey=_campaign(
         campaign_month="2026_08",
         label="Campaign: Transitions: 2026_08",
     ))
-    with pytest.raises(CampaignLaunchError, match="in the past"):
-        launcher.launch(date(2026, 8, 1))
+    with pytest.raises(CampaignLaunchError, match="not in the campaign month"):
+        launcher.launch(date(2026, 9, 1))
 
 
 def test_relaunch_on_a_new_date_is_refused_until_unscheduled(tmp_path):

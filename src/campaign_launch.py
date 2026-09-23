@@ -345,18 +345,29 @@ class CampaignLauncher:
         return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _validate_start(self, start_date) -> None:
+        """Refuse a start date outside the campaign month, and nothing else.
+
+        Until 2026-09-23 this also raised when ANY email's send time had passed,
+        which made the daily tick fail every day after a campaign's first email
+        went out: the launch is idempotent and re-runs all month, so one sent
+        email poisoned every later run. Worse, it took the unsent ones with it.
+        A missed run on the day of email one meant email two was never scheduled
+        either, though its own send was still days away.
+
+        A past email is now skipped where it is provisioned, one email at a
+        time, so the rest of the campaign still goes out. Nothing sends late:
+        _past_due is the guard, and it refuses to create a Single Send for a
+        moment that has already gone.
+        """
         if (start_date.year, start_date.month) != (self._year, self._month):
             raise CampaignLaunchError(
                 f"start date {start_date.isoformat()} is not in the campaign "
                 f"month {self.journey['campaign_month']}"
             )
-        now = self.now_fn().astimezone(timezone.utc)
-        for index, when in self._schedule(start_date).items():
-            if when <= now:
-                raise CampaignLaunchError(
-                    "refusing to schedule a campaign email in the past: "
-                    f"email {index + 1} at {self._format(when)}"
-                )
+
+    def _past_due(self, when: datetime) -> bool:
+        """Whether this send moment has already gone."""
+        return when <= self.now_fn().astimezone(timezone.utc)
 
     # ---- audience -------------------------------------------------------
     def _email_segment_id(self, email: dict) -> str:
@@ -830,6 +841,21 @@ class CampaignLauncher:
             if entry and self._already_scheduled(entry, send_at):
                 results.append({**entry, "skipped": True})
                 parent_send_id = str(entry.get("id") or "")
+            elif self._past_due(schedule[index]):
+                # Its moment has gone and nothing was ever created for it, so
+                # there is nothing to rescue: a Single Send booked now would
+                # arrive late. Skipped alone, never fatal, so the emails still
+                # ahead of us in the same campaign are provisioned normally.
+                results.append({
+                    "index": index,
+                    "name": campaign_single_send_name(
+                        self._year, self._month, self._name, index
+                    ),
+                    "send_at": send_at,
+                    "past_due": True,
+                    "skipped": True,
+                })
+                continue
             else:
                 segment_id = self._resolve_audience(index, email, state)
                 if segment_id is None:
