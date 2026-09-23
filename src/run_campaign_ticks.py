@@ -13,13 +13,15 @@ the live SendGrid launcher and the gate context resolved from the class plans.
 """
 import calendar
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 import requests
 
 from twy_paths import journeys_dir, load_env, campaign_launch_state_path
-from twy_platform.journeys import list_journeys
+from twy_platform import contribution
+from twy_platform.journeys import CLASS_HABIT, campaign_class_type, list_journeys
+from twy_platform.urls import build_register_url
 
 from campaign_ticker import is_due, launch_due_campaigns
 from habit_newsletter_prompt import CLASSES_API, get_habit_class_date
@@ -34,8 +36,8 @@ log = logging.getLogger("campaign_ticks")
 MOUNTAIN = ZoneInfo("America/Denver")
 
 
-def real_habit_class_date(year: int, month: int):
-    """The month's Habit class date from an AUTHORED plan, or None.
+def real_class_plan(year: int, month: int, class_type: str = CLASS_HABIT):
+    """The month's AUTHORED plan of this class type, or None.
 
     get_habit_class_date falls back to the second Saturday so a schedule always
     resolves; the class_exists gate needs the stricter fact of whether a plan
@@ -45,8 +47,13 @@ def real_habit_class_date(year: int, month: int):
     classes API now stamps every plan with authored (content-based, computed
     by plan_authored in the classes app); a missing stamp counts as authored
     so an older API keeps the pre-stamp behavior. On an API error this returns
-    None, which HOLDS the class-gated invitations rather than sending against
+    None, which HOLDS the class-gated messages rather than sending against
     an unconfirmed class.
+
+    The whole plan comes back, not just its date, because a written-here email
+    may name the class: the class tokens need its title, its start time and its
+    HeyMarvelous event page as well. class_type defaults to Habit, which is what
+    every campaign written before 2026-09-22 resolves against.
     """
     last_day = calendar.monthrange(year, month)[1]
     try:
@@ -58,11 +65,35 @@ def real_habit_class_date(year: int, month: int):
         )
         if resp.ok:
             for plan in resp.json():
-                if plan.get("class_type") == "Habit" and plan.get("authored", True):
-                    return date.fromisoformat(plan["date"])
+                if plan.get("class_type") == class_type and plan.get("authored", True):
+                    return plan
     except requests.RequestException as exc:
         log.warning("classes API unreachable resolving class_exists: %s", exc)
     return None
+
+
+def _plan_date(plan):
+    """The plan's own date, or None if it carries an unreadable one."""
+    if not plan:
+        return None
+    try:
+        return date.fromisoformat(plan["date"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _plan_time(plan):
+    """The plan's start time as a time, or None.
+
+    A plan stores `time` as HH:MM. A plan with no readable time holds any email
+    asking for {CLASS_TIME} rather than guessing an hour at a member.
+    """
+    if not plan:
+        return None
+    try:
+        return time.fromisoformat(str(plan.get("time") or ""))
+    except (TypeError, ValueError):
+        return None
 
 
 def _build_launcher_factory():
@@ -94,22 +125,25 @@ def _build_launcher_factory():
     today = datetime.now(MOUNTAIN).date()
 
     def launch_one(pinned, year, month):
+        class_type = campaign_class_type(pinned)
+        is_habit = class_type == CLASS_HABIT
         try:
-            real = real_habit_class_date(year, month)
+            plan = real_class_plan(year, month, class_type)
         except Exception as exc:  # noqa: BLE001 - fail-soft is the point
-            # real_habit_class_date already swallows a plain classes-API
+            # real_class_plan already swallows a plain classes-API
             # network failure and returns None; this catches anything else it
             # might raise (a malformed response). Either way, a classes-API
             # hiccup must hold the recording seed, never abort this journey's
             # whole launch for the tick: read_local_sections and the launcher
             # still run below, exactly as if no class were confirmed yet.
             log.warning(
-                "%04d_%02d: could not resolve the real habit class date, "
+                "%04d_%02d: could not resolve the real %s class date, "
                 "recording draft seed skipped this tick: %s",
-                year, month, exc,
+                year, month, class_type, exc,
             )
-            real = None
-        if real is not None:
+            plan = None
+        real = _plan_date(plan)
+        if is_habit and real is not None:
             # Seeds the month's recording draft from the canonical template the
             # same way run_sendgrid_mailings.py does, guarded by the same fact
             # (a confirmed Habit class this month). Idempotent, so a daily tick
@@ -121,9 +155,21 @@ def _build_launcher_factory():
             # The Class Recording email holds until the edited recording is
             # actually attached to its free product at the provider. The resolver
             # fails closed, so a provider hiccup holds the email rather than
-            # promising a recording that is not there.
-            recording_ready=recording_ready(year, month),
-            class_date=real or get_habit_class_date(year, month),
+            # promising a recording that is not there. Habit only: it asks
+            # HeyMarvelous about the Habit recording product, and no other class
+            # has one.
+            recording_ready=recording_ready(year, month) if is_habit else False,
+            # The Habit fallback keeps a Habit campaign's anchored dates
+            # resolvable on a tick where the plan is not authored yet, which is
+            # the behavior it has always had. Another class has no such fallback:
+            # no authored plan means no date, and the class_exists gate holds
+            # every message anyway.
+            class_date=(
+                real or get_habit_class_date(year, month) if is_habit else real
+            ),
+            class_title=str((plan or {}).get("title") or ""),
+            class_time=_plan_time(plan),
+            class_url=build_register_url((plan or {}).get("marvelous_event_id")) or "",
             now=today,
         )
         # Shares the newsletter workflow's own SendGrid state file for the
@@ -141,7 +187,7 @@ def _build_launcher_factory():
         # token in place when the fact it needs is not there yet (no recording
         # record), and the launcher's own fail-closed guard holds that email
         # until it is.
-        raw_sections = read_local_sections(year, month)
+        raw_sections = read_local_sections(year, month) if is_habit else {}
         sections = {
             key: resolve_section_tokens(key, section, year=year, month=month)
             for key, section in raw_sections.items()
@@ -157,7 +203,7 @@ def _build_launcher_factory():
             sections=sections,
             # Approval is per month: a section-sourced email holds until this
             # period's draft of its section is approved (JP 2026-08-24).
-            section_approvals=section_approvals(year, month),
+            section_approvals=section_approvals(year, month) if is_habit else {},
             # The handle for building the dynamic audiences (follow-ups'
             # interested-non-members, gentle reminder's openers-not-registered).
             campaigns=campaigns,
@@ -167,10 +213,40 @@ def _build_launcher_factory():
     return launch_one
 
 
+INTEGRATION_REMINDER = "integration_reminder"
+
+
+def _contribution_allows(journey) -> bool:
+    """Whether the contribution switch lets this campaign run at all.
+
+    A campaign that follows a class other than Yoga Habit exists only because of
+    the unbilled contribution, so it is gated on `integration_reminder`. Off, the
+    tick leaves it alone entirely: no state written, no Single Send created, no
+    send scheduled, which is exactly how this box behaved before the feature. A
+    Habit campaign is inside the original engagement and is never gated here.
+    An unrecognized class_type answers False rather than raising, because one bad
+    campaign must not take the whole tick down.
+    """
+    try:
+        if campaign_class_type(journey) == CLASS_HABIT:
+            return True
+    except ValueError as exc:
+        log.warning("campaign %s: %s", journey.get("journey_id"), exc)
+        return False
+    return contribution.continued(INTEGRATION_REMINDER)
+
+
 def main():
     today = datetime.now(MOUNTAIN).date()
     year, month = today.year, today.month
     journeys = list_journeys(journeys_dir())
+    held = [j for j in journeys if is_due(j) and not _contribution_allows(j)]
+    for journey in held:
+        log.info(
+            "campaign tick %04d_%02d: %s held, %s is off",
+            year, month, journey.get("journey_id"), INTEGRATION_REMINDER,
+        )
+    journeys = [j for j in journeys if _contribution_allows(j)]
     if not any(is_due(j) for j in journeys):
         # The common case, and it needs no SendGrid handles at all: with nothing
         # On and fully approved there is nothing to launch.

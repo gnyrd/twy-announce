@@ -99,6 +99,13 @@ class GateContext:
     recording_ready: bool = False
     class_date: date | None = None
     now: date | None = None
+    # The rest of this period's class plan, for the class tokens a written-here
+    # email may carry. Absent on every context built before the Integration
+    # reminder, and absent is not an error: it only holds an email that actually
+    # asks for one of these, which no Habit email does.
+    class_title: str = ""
+    class_time: time | None = None
+    class_url: str = ""
 
 
 def gate_passes(gate, ctx: GateContext) -> bool:
@@ -118,6 +125,56 @@ def gate_passes(gate, ctx: GateContext) -> bool:
     if gate == GATE_CLASS_HAPPENED:
         return ctx.class_date is not None and ctx.now is not None and ctx.now >= ctx.class_date
     raise CampaignLaunchError(f"unknown campaign gate: {gate}")
+
+
+# The class tokens a written-here campaign email may carry. They resolve from
+# this period's class plan at send time, so the Integration reminder names the
+# class Tiff actually authored rather than repeating a month in typed copy.
+# CLASS_TITLE and CLASS_URL are the plan's own title and its HeyMarvelous event
+# page; CLASS_DATE and CLASS_TIME are the class date and start time in the words
+# a member reads. The section-sourced emails keep the newsletter workflow's own
+# wider vocabulary ({OFFER}, {RECORDING_CTA}, {REGISTER_CTA}), which is resolved
+# before the copy reaches this module and is untouched here.
+CLASS_TOKENS = ("{CLASS_TITLE}", "{CLASS_DATE}", "{CLASS_TIME}", "{CLASS_URL}")
+
+
+def _class_date_words(day: date) -> str:
+    """The class date as a member reads it: `Saturday, September 26`."""
+    return f"{day.strftime('%A')}, {day.strftime('%B')} {day.day}"
+
+
+def _class_time_words(moment: time) -> str:
+    """The class start time as a member reads it: `9:00 AM`."""
+    hour = moment.hour % 12 or 12
+    meridiem = "AM" if moment.hour < 12 else "PM"
+    return f"{hour}:{moment.minute:02d} {meridiem}"
+
+
+def resolve_class_tokens(text: str, ctx: GateContext):
+    """`text` with its class tokens filled from the period's class, or None.
+
+    None means a token in this copy has no fact behind it yet, which holds the
+    email exactly the way an unresolved draft token does. Never a partial fill:
+    a member reading a literal {CLASS_TITLE} is the failure this guards, so one
+    missing fact holds the whole email rather than sending the rest of it.
+    """
+    if not any(token in text for token in CLASS_TOKENS):
+        return text
+    if ctx is None:
+        return None
+    values = {
+        "{CLASS_TITLE}": str(ctx.class_title or ""),
+        "{CLASS_URL}": str(ctx.class_url or ""),
+        "{CLASS_DATE}": _class_date_words(ctx.class_date) if ctx.class_date else "",
+        "{CLASS_TIME}": (
+            _class_time_words(ctx.class_time) if ctx.class_time else ""
+        ),
+    }
+    for token, value in values.items():
+        if token in text and not value:
+            return None
+        text = text.replace(token, value)
+    return text
 
 
 class CampaignLauncher:
@@ -202,7 +259,10 @@ class CampaignLauncher:
         return local.astimezone(timezone.utc)
 
     def _class_date(self) -> date:
-        """The Habit class date for this period, from the campaign context.
+        """This campaign's class date for this period, from the campaign context.
+
+        Which class that is comes from the campaign's class_type, resolved by
+        whoever built the context; the launcher only reads the date it was given.
 
         A class-anchored email cannot resolve its date without it, so a missing
         one is refused rather than guessed.
@@ -531,11 +591,19 @@ class CampaignLauncher:
             if _UNRESOLVED_TOKEN.search(combined):
                 return None
             return content
-        return {
-            "subject": str(email.get("subject") or ""),
-            "preheader": str(email.get("preheader") or ""),
-            "body": str(email.get("body") or ""),
-        }
+        # Copy typed into the campaign itself. Its class tokens resolve from
+        # this period's class, so a reminder written once names the class Tiff
+        # authored this month. A token with no fact behind it holds the email
+        # the same way an unresolved draft token does above.
+        content = {}
+        for field in ("subject", "preheader", "body"):
+            resolved = resolve_class_tokens(
+                str(email.get(field) or ""), self.gate_context
+            )
+            if resolved is None:
+                return None
+            content[field] = resolved
+        return content
 
     def _email_payload(self, index: int, content: dict, segment_id: str) -> dict:
         subject = content["subject"]
@@ -744,9 +812,10 @@ class CampaignLauncher:
                 continue
             content = self._email_content(email)
             if content is None:
-                # A draft-sourced email whose section has no draft this period.
-                # It holds like a gated one, nothing is created, and a later run
-                # provisions it once the draft is ready.
+                # A draft-sourced email whose section has no draft this period,
+                # or a written-here one whose class tokens have no class behind
+                # them yet. It holds like a gated one, nothing is created, and a
+                # later run provisions it once the fact it needs is there.
                 results.append({
                     "index": index,
                     "name": campaign_single_send_name(

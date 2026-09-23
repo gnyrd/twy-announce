@@ -1,9 +1,14 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 
-from campaign_launch import CampaignLauncher, CampaignLaunchError, GateContext
+from campaign_launch import (
+    CampaignLauncher,
+    CampaignLaunchError,
+    GateContext,
+    resolve_class_tokens,
+)
 from sendgrid_mailings import INTERNAL_SEND_COPY
 
 
@@ -583,3 +588,108 @@ def test_state_records_scheduled_sends(tmp_path):
     assert set(state["sends"]) == {"0", "1"}
     assert state["sends"]["0"]["status"] == "scheduled"
     assert state["segment"]["id"] == SEGMENT_ID
+
+
+# --- class tokens in written-here copy (2026-09-22) ------------------------
+#
+# The Integration reminder is typed once into the campaign and names the class
+# Tiff authored that month. These pin the two halves of that: the words a member
+# reads, and the hold that keeps a literal {CLASS_TITLE} out of an inbox.
+
+
+def _integration_context():
+    return GateContext(
+        class_exists=True,
+        class_date=date(2026, 9, 26),
+        class_title="Trust the Transition",
+        class_time=time(9, 0),
+        class_url="https://studio.tiffanywoodyoga.com/event/details/1036259",
+        now=date(2026, 9, 24),
+    )
+
+
+def test_class_tokens_resolve_to_the_words_a_member_reads():
+    body = (
+        "Tomorrow, {CLASS_DATE}, at {CLASS_TIME} Mountain time, is this "
+        "month's Integration class: {CLASS_TITLE}. {CLASS_URL}"
+    )
+    assert resolve_class_tokens(body, _integration_context()) == (
+        "Tomorrow, Saturday, September 26, at 9:00 AM Mountain time, is this "
+        "month's Integration class: Trust the Transition. "
+        "https://studio.tiffanywoodyoga.com/event/details/1036259"
+    )
+
+
+def test_copy_with_no_class_token_is_returned_untouched():
+    """Every campaign written before this field existed goes through this path,
+    so text with no token must come back byte for byte, context or not."""
+    assert resolve_class_tokens("Come to class.", None) == "Come to class."
+    assert resolve_class_tokens("Come to class.", GateContext()) == "Come to class."
+
+
+def test_a_token_with_no_fact_behind_it_holds_the_whole_email():
+    """A member reading a literal {CLASS_TITLE} is the failure this guards. One
+    missing fact holds the email rather than sending the rest of it."""
+    assert resolve_class_tokens("Join {CLASS_TITLE}", GateContext()) is None
+    assert resolve_class_tokens("At {CLASS_TIME}", GateContext()) is None
+    assert resolve_class_tokens("On {CLASS_DATE}", GateContext()) is None
+    assert resolve_class_tokens("Go to {CLASS_URL}", GateContext()) is None
+    # A plan published to HeyMarvelous late has a title but no event page yet.
+    partial = GateContext(class_title="Trust the Transition")
+    assert resolve_class_tokens("{CLASS_TITLE} at {CLASS_URL}", partial) is None
+
+
+def test_a_class_token_with_no_context_at_all_holds():
+    assert resolve_class_tokens("Join {CLASS_TITLE}", None) is None
+
+
+def test_launch_sends_an_email_whose_class_tokens_resolve(tmp_path):
+    api = FakeAPI()
+    journey = _campaign(emails=[{
+        "subject": "Tomorrow morning: {CLASS_TITLE}",
+        "preheader": "Integration class, Saturday at {CLASS_TIME} Mountain",
+        "body": "Tomorrow, {CLASS_DATE}, at {CLASS_TIME} Mountain time.",
+        "interval_days": 0,
+    }])
+    launcher = CampaignLauncher(
+        api=api,
+        registry=FakeRegistry(),
+        journey=journey,
+        state_path=tmp_path / "campaign.json",
+        gate_context=_integration_context(),
+        now_fn=lambda: NOW,
+    )
+
+    report = launcher.launch(date(2026, 9, 25))
+
+    assert report["sends"][0]["skipped"] is False
+    sent = api.created_single_sends[0]
+    assert sent["name"] == "2026_09: Transitions: Email 1"
+    assert "Tomorrow morning: Trust the Transition" in json.dumps(sent)
+    assert "{CLASS_TITLE}" not in json.dumps(sent)
+
+
+def test_launch_holds_an_email_whose_class_has_no_plan_yet(tmp_path):
+    """No authored Integration plan means no title, no time and no page, so the
+    email holds and nothing is created at the provider."""
+    api = FakeAPI()
+    journey = _campaign(emails=[{
+        "subject": "Tomorrow morning: {CLASS_TITLE}",
+        "preheader": "",
+        "body": "See you then.",
+        "interval_days": 0,
+    }])
+    launcher = CampaignLauncher(
+        api=api,
+        registry=FakeRegistry(),
+        journey=journey,
+        state_path=tmp_path / "campaign.json",
+        gate_context=GateContext(now=date(2026, 9, 24)),
+        now_fn=lambda: NOW,
+    )
+
+    report = launcher.launch(date(2026, 9, 25))
+
+    assert report["sends"][0]["skipped"] is True
+    assert report["sends"][0]["content_pending"] is True
+    assert api.created_single_sends == []

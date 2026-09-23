@@ -16,7 +16,7 @@ at tmp_path.
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, time
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -110,7 +110,7 @@ def _spy_launcher(monkeypatch):
 def _no_live_class_date(monkeypatch):
     """Both class-date resolvers stubbed to None so a test that does not care
     about the class-date gate never makes a live classes-API request."""
-    monkeypatch.setattr(runner, "real_habit_class_date", lambda year, month: None)
+    monkeypatch.setattr(runner, "real_class_plan", lambda y, m, c="Habit": None)
     monkeypatch.setattr(runner, "get_habit_class_date", lambda year, month: None)
 
 
@@ -204,7 +204,9 @@ def test_factory_seeds_the_recording_draft_when_the_month_has_a_class_date(
     monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
     _patch_provider(monkeypatch)
     monkeypatch.setattr(
-        runner, "real_habit_class_date", lambda year, month: date(YEAR, MONTH, 10)
+        runner,
+        "real_class_plan",
+        lambda y, m, c="Habit": {"class_type": c, "date": f"{YEAR:04d}-{MONTH:02d}-10"},
     )
     monkeypatch.setattr(runner, "get_habit_class_date", lambda year, month: None)
     calls = []
@@ -245,10 +247,10 @@ def test_factory_does_not_seed_the_recording_draft_with_no_class_date(
 def test_factory_is_fail_soft_when_class_date_resolution_raises(
     monkeypatch, tmp_path
 ):
-    """A classes-API hiccup resolving this month's real Habit class date must
+    """A classes-API hiccup resolving this month's real Habit class plan must
     hold the recording seed, never take down the whole journey's launch this
     tick: read_local_sections still runs and the launcher still builds and
-    sends whatever it can. real_habit_class_date already swallows
+    sends whatever it can. real_class_plan already swallows
     requests.RequestException internally (API unreachable); this covers the
     residual case where it raises something else entirely (a malformed
     response), which the network-only guard does not catch."""
@@ -256,10 +258,10 @@ def test_factory_is_fail_soft_when_class_date_resolution_raises(
     monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
     _patch_provider(monkeypatch)
 
-    def _raises(year, month):
+    def _raises(year, month, class_type="Habit"):
         raise RuntimeError("classes API is on fire")
 
-    monkeypatch.setattr(runner, "real_habit_class_date", _raises)
+    monkeypatch.setattr(runner, "real_class_plan", _raises)
     monkeypatch.setattr(runner, "get_habit_class_date", lambda year, month: None)
     calls = []
     monkeypatch.setattr(
@@ -296,32 +298,112 @@ def _plans_response(monkeypatch, plans):
     )
 
 
-def test_real_habit_class_date_accepts_authored_plan(monkeypatch):
+def test_real_class_plan_accepts_authored_plan(monkeypatch):
     _plans_response(monkeypatch, [
         {"class_type": "Habit", "date": "2026-09-12", "authored": True},
     ])
-    assert runner.real_habit_class_date(2026, 9) == date(2026, 9, 12)
+    plan = runner.real_class_plan(2026, 9)
+    assert runner._plan_date(plan) == date(2026, 9, 12)
 
 
-def test_real_habit_class_date_refuses_placeholder(monkeypatch):
+def test_real_class_plan_refuses_placeholder(monkeypatch):
     # The Sept 2026 placeholder shape: a published Habit plan the classes API
     # stamps authored: False. class_exists must hold, not invite.
     _plans_response(monkeypatch, [
         {"class_type": "Habit", "date": "2026-09-12", "authored": False},
     ])
-    assert runner.real_habit_class_date(2026, 9) is None
+    assert runner.real_class_plan(2026, 9) is None
 
 
-def test_real_habit_class_date_missing_stamp_keeps_old_behavior(monkeypatch):
+def test_real_class_plan_missing_stamp_keeps_old_behavior(monkeypatch):
     _plans_response(monkeypatch, [
         {"class_type": "Habit", "date": "2026-09-12"},
     ])
-    assert runner.real_habit_class_date(2026, 9) == date(2026, 9, 12)
+    plan = runner.real_class_plan(2026, 9)
+    assert runner._plan_date(plan) == date(2026, 9, 12)
 
 
-def test_real_habit_class_date_api_error_holds(monkeypatch):
+def test_real_class_plan_api_error_holds(monkeypatch):
     def boom(*a, **k):
         raise runner.requests.RequestException("down")
 
     monkeypatch.setattr(runner.requests, "get", boom)
-    assert runner.real_habit_class_date(2026, 9) is None
+    assert runner.real_class_plan(2026, 9) is None
+
+
+# --- a campaign follows its own class (2026-09-22) -------------------------
+
+
+def test_real_class_plan_picks_the_named_class_not_the_habit_one(monkeypatch):
+    """The Integration reminder must never anchor to the Habit class that shares
+    its month. Both plans are authored, so only class_type tells them apart."""
+    _plans_response(monkeypatch, [
+        {"class_type": "Habit", "date": "2026-09-12", "authored": True},
+        {"class_type": "Integration", "date": "2026-09-26", "authored": True,
+         "title": "Trust the Transition", "time": "09:00",
+         "marvelous_event_id": 1036259},
+    ])
+    plan = runner.real_class_plan(2026, 9, "Integration")
+    assert runner._plan_date(plan) == date(2026, 9, 26)
+    assert plan["title"] == "Trust the Transition"
+
+
+def test_real_class_plan_holds_when_the_named_class_has_no_plan(monkeypatch):
+    """A month with a Habit class and no Integration plan sends no Integration
+    reminder: the class_exists gate holds on the absence of THIS class."""
+    _plans_response(monkeypatch, [
+        {"class_type": "Habit", "date": "2026-09-12", "authored": True},
+    ])
+    assert runner.real_class_plan(2026, 9, "Integration") is None
+
+
+def test_real_class_plan_refuses_an_unauthored_plan_of_the_named_class(monkeypatch):
+    _plans_response(monkeypatch, [
+        {"class_type": "Integration", "date": "2026-09-26", "authored": False},
+    ])
+    assert runner.real_class_plan(2026, 9, "Integration") is None
+
+
+def test_plan_time_reads_the_plans_own_start_time():
+    assert runner._plan_time({"time": "09:00"}) == time(9, 0)
+    assert runner._plan_time({"time": ""}) is None
+    assert runner._plan_time({}) is None
+    assert runner._plan_time(None) is None
+
+
+def test_contribution_allows_a_habit_campaign_with_the_gate_off(monkeypatch):
+    """A Habit campaign is inside the original engagement, so the Integration
+    gate must never hold it."""
+    monkeypatch.setattr(
+        runner.contribution, "continued", lambda feature=None: False
+    )
+    assert runner._contribution_allows({"type": "campaign"}) is True
+
+
+def test_contribution_holds_a_non_habit_campaign_with_the_gate_off(monkeypatch):
+    monkeypatch.setattr(
+        runner.contribution, "continued", lambda feature=None: False
+    )
+    assert runner._contribution_allows(
+        {"type": "campaign", "class_type": "Integration"}
+    ) is False
+
+
+def test_contribution_allows_a_non_habit_campaign_with_the_gate_on(monkeypatch):
+    monkeypatch.setattr(
+        runner.contribution, "continued", lambda feature=None: True
+    )
+    assert runner._contribution_allows(
+        {"type": "campaign", "class_type": "Integration"}
+    ) is True
+
+
+def test_contribution_holds_a_campaign_with_an_unknown_class(monkeypatch):
+    """An unrecognized class answers False rather than raising, so one bad
+    campaign cannot take the whole tick down."""
+    monkeypatch.setattr(
+        runner.contribution, "continued", lambda feature=None: True
+    )
+    assert runner._contribution_allows(
+        {"type": "campaign", "class_type": "Nonsense"}
+    ) is False
