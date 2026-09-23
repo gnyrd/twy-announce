@@ -1133,6 +1133,10 @@ def collect_snapshot(
             history_path=twy_root / "clips/state/ig_history.json",
             captured_at=captured_at,
         ),
+        # platform="instagram" since 2026-09-23: the Instagram publishers have
+        # recorded to the inventory rather than ig_history.json since the
+        # 2026-09-17 switch, so without the merge every row in the window was a
+        # withdrawn pre-switch post and the analytics read no_published_posts.
         "zernio": collect_zernio_recent_status(
             history_path=twy_root / "clips/state/ig_history.json",
             captured_at=captured_at,
@@ -1141,6 +1145,7 @@ def collect_snapshot(
             lookback_hours=zernio_lookback_hours,
             lookahead_hours=zernio_lookahead_hours,
             retry_ledger_path=default_retry_ledger_path(),
+            platform="instagram",
         ),
         # The Facebook Page ledger through the same reader: status plus Zernio
         # analytics per post, so the weekly review can compare Facebook quote

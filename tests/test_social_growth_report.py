@@ -683,6 +683,42 @@ def test_collect_zernio_recent_status_skips_withdrawn_posts_without_alerting(tmp
     assert not [event for event in events if event["key"].startswith("zernio_api_error:")]
 
 
+def test_collect_snapshot_asks_the_instagram_collector_for_its_inventory(tmp_path, monkeypatch):
+    """2026-09-23: the snapshot read no_published_posts for Instagram every day
+    after the 2026-09-17 publisher switch. The publishers record to the clips
+    inventory, not ig_history.json, so every ledger row left in the window was
+    a withdrawn pre-switch post and there was nothing to query. The Facebook
+    call already passed its platform; the Instagram one did not. This pins the
+    call site, because the collector itself was never the broken part."""
+    monkeypatch.delenv("PLAUSIBLE_API_KEY", raising=False)
+    monkeypatch.delenv("PLAUSIBLE_SITE_ID", raising=False)
+    monkeypatch.delenv("PLAUSIBLE_SITE_IDS", raising=False)
+    calls = []
+
+    def record(**kwargs):
+        calls.append(kwargs)
+        return {"status": "ok", "queried_count": 0}
+
+    monkeypatch.setattr(social_growth, "collect_zernio_recent_status", record)
+    create_marvy_db(tmp_path / "data" / "marvy.db")
+
+    social_growth.collect_snapshot(
+        captured_at=datetime(2026, 9, 23, 13, 20, tzinfo=timezone.utc),
+        twy_root=tmp_path,
+        data_root=tmp_path / "data",
+        zernio_fetch_post=lambda post_id: {},
+        zernio_account_health=None,
+    )
+
+    instagram = [
+        call
+        for call in calls
+        if str(call.get("history_path", "")).endswith("clips/state/ig_history.json")
+    ]
+    assert instagram, "the snapshot never asked for the Instagram ledger"
+    assert instagram[0]["platform"] == "instagram"
+
+
 def test_zernio_post_row_checks_full_reel_caption_before_storing_excerpt():
     long_caption = (
         "Open the body without forcing the shape. " * 12
