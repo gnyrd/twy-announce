@@ -18,24 +18,45 @@ from __future__ import annotations
 from datetime import date
 
 from twy_platform.journeys import (
+    APPROVAL_MONTHLY,
     RECURRENCE_MONTHLY,
     TYPE_CAMPAIGN,
+    campaign_approval_scope,
     journey_type,
 )
 
 
-def all_emails_approved(journey: dict) -> bool:
+def all_emails_approved(journey: dict, period: str | None = None) -> bool:
     """Whether every email in the campaign is approved. An empty campaign is not.
 
     The launch gate clears only when the complete set is approved, so the tick
     holds a campaign with even one unapproved email, exactly like the manual
     launch does.
+
+    On a campaign whose approval scope is monthly, a stamp counts only for the
+    period it was given for. Tiff edits the copy for this month's class and
+    ticks again, and last month's approval cannot send this month's mail. The
+    period is required for that check: without one, a monthly campaign reads as
+    unapproved rather than approved, because arming a live send on a missing
+    argument is the wrong way to be wrong.
     """
     emails = journey.get("emails") or []
-    return bool(emails) and all(email.get("approved_at") for email in emails)
+    if not emails:
+        return False
+    if not all(email.get("approved_at") for email in emails):
+        return False
+    try:
+        monthly = campaign_approval_scope(journey) == APPROVAL_MONTHLY
+    except ValueError:
+        return False
+    if not monthly:
+        return True
+    if not period:
+        return False
+    return all(email.get("approved_for") == period for email in emails)
 
 
-def is_due(journey: dict) -> bool:
+def is_due(journey: dict, period: str | None = None) -> bool:
     """A campaign the monthly tick may launch: a campaign, On, monthly, fully approved.
 
     Anything else, a product journey, a one-time campaign, an Off or partly
@@ -50,7 +71,7 @@ def is_due(journey: dict) -> bool:
     return (
         bool(journey.get("active"))
         and journey.get("recurrence") == RECURRENCE_MONTHLY
-        and all_emails_approved(journey)
+        and all_emails_approved(journey, period)
     )
 
 
@@ -92,10 +113,11 @@ def launch_due_campaigns(journeys, year, month, *, launch_one, log=None) -> list
     same rule every TWY batch job follows, so a single bad campaign cannot take
     the whole tick down.
     """
+    period = f"{year:04d}_{month:02d}"
     results = []
     for journey in journeys:
         jid = journey.get("journey_id")
-        if not is_due(journey) or before_first_period(journey, year, month):
+        if not is_due(journey, period) or before_first_period(journey, year, month):
             continue
         pinned = period_journey(journey, year, month)
         try:

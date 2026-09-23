@@ -240,14 +240,18 @@ def main():
     today = datetime.now(MOUNTAIN).date()
     year, month = today.year, today.month
     journeys = list_journeys(journeys_dir())
-    held = [j for j in journeys if is_due(j) and not _contribution_allows(j)]
+    held = [
+        j for j in journeys
+        if is_due(j, f"{year:04d}_{month:02d}") and not _contribution_allows(j)
+    ]
     for journey in held:
         log.info(
             "campaign tick %04d_%02d: %s held, %s is off",
             year, month, journey.get("journey_id"), INTEGRATION_REMINDER,
         )
     journeys = [j for j in journeys if _contribution_allows(j)]
-    if not any(is_due(j) for j in journeys):
+    period = f"{year:04d}_{month:02d}"
+    if not any(is_due(j, period) for j in journeys):
         # The common case, and it needs no SendGrid handles at all: with nothing
         # On and fully approved there is nothing to launch.
         log.info("campaign tick %04d_%02d: nothing due", year, month)
