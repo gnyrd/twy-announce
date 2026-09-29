@@ -89,7 +89,7 @@ def _registry(path):
         "account_email": "admin@tiffanywoodyoga.com",
         "sender": {
             "id": 9423402,
-            "email": "tiffany@tiffanywoodyoga.com",
+            "email": "hello@tiffanywoodyoga.com",
         },
         "suppression_group": {
             "id": 35187,

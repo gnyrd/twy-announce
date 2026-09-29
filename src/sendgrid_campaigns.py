@@ -20,7 +20,10 @@ from twy_platform import locked_write
 
 
 EXPECTED_ACCOUNT_EMAIL = "admin@tiffanywoodyoga.com"
-EXPECTED_SENDER_EMAIL = "tiffany@tiffanywoodyoga.com"
+# The From address of every TWY Single Send (sender "TWY: Hello", id 9889851).
+# Was tiffany@ (sender "TWY", 9423402) until JP set hello@ for both providers
+# on 2026-09-29; the reply-to stays tiffany@.
+EXPECTED_SENDER_EMAIL = "hello@tiffanywoodyoga.com"
 UNSUBSCRIBE_GROUP_NAME = "Email: Unsubscribed"
 PROVIDER_INJECTED_HTML_TOKENS = ("%sg_open_track%",)
 
