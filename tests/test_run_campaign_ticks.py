@@ -407,3 +407,89 @@ def test_contribution_holds_a_campaign_with_an_unknown_class(monkeypatch):
     assert runner._contribution_allows(
         {"type": "campaign", "class_type": "Nonsense"}
     ) is False
+
+
+# --- the recording draft is seeded ahead of any launch (2026-09-29) ----------
+
+
+def _habit_class_every_month(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "real_class_plan",
+        lambda y, m, c="Habit": {"class_type": c, "date": f"{y:04d}-{m:02d}-10"},
+    )
+
+
+def test_the_recording_draft_is_seeded_for_this_month_and_next(monkeypatch):
+    _habit_class_every_month(monkeypatch)
+    calls = []
+
+    seeded = runner.seed_recording_drafts(
+        date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)) or True
+    )
+
+    assert calls == [(2026, 9), (2026, 10)]
+    assert seeded == [(2026, 9), (2026, 10)]
+
+
+def test_december_seeds_january_of_the_next_year(monkeypatch):
+    _habit_class_every_month(monkeypatch)
+    calls = []
+
+    runner.seed_recording_drafts(date(2026, 12, 2), seed=lambda y, m: calls.append((y, m)))
+
+    assert calls == [(2026, 12), (2027, 1)]
+
+
+def test_a_month_without_a_confirmed_habit_class_is_not_seeded(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "real_class_plan",
+        lambda y, m, c="Habit": None if m == 10 else {"date": f"{y:04d}-{m:02d}-10"},
+    )
+    calls = []
+
+    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)))
+
+    assert calls == [(2026, 9)]
+
+
+def test_one_month_failing_does_not_stop_the_other(monkeypatch):
+    def plan(y, m, c="Habit"):
+        if m == 9:
+            raise RuntimeError("classes API is on fire")
+        return {"date": f"{y:04d}-{m:02d}-10"}
+
+    monkeypatch.setattr(runner, "real_class_plan", plan)
+    calls = []
+
+    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)))
+
+    assert calls == [(2026, 10)]
+
+
+def test_the_tick_seeds_even_when_nothing_is_due(monkeypatch):
+    """The whole point: the seed cannot wait for approvals of a draft it makes."""
+    seeded_on = []
+    monkeypatch.setattr(
+        runner, "seed_recording_drafts", lambda today, seed=None: seeded_on.append(today) or []
+    )
+    monkeypatch.setattr(runner, "list_journeys", lambda path: [])
+
+    assert runner.main() == 0
+    assert len(seeded_on) == 1
+
+
+def test_the_real_seed_writes_next_months_draft_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    _habit_class_every_month(monkeypatch)
+
+    first = runner.seed_recording_drafts(date(YEAR, MONTH, 5))
+    again = runner.seed_recording_drafts(date(YEAR, MONTH, 6))
+
+    from twy_paths import newsletter_path
+
+    template = (workflow_module.RECORDING_TEMPLATE_DIR / "recording.md").read_text()
+    assert newsletter_path(YEAR, MONTH + 1, "recording").read_text() == template
+    assert first == [(YEAR, MONTH), (YEAR, MONTH + 1)]
+    assert again == []

@@ -6,7 +6,8 @@ Runs daily. The launch is idempotent per period, so a daily run schedules the
 period's sends once and, on later runs, provisions any email its send gate held
 earlier once the gate passes (a recording attached late, the class date arriving)
 without touching what already sent. With nothing On and approved, it launches
-nothing.
+nothing. Every run first seeds the Class Recording draft for this month and next
+(seed_recording_drafts), so there is always a draft to approve.
 
 The selection and per-period logic is campaign_ticker (unit tested). This wires
 the live SendGrid launcher and the gate context resolved from the class plans.
@@ -236,9 +237,47 @@ def _contribution_allows(journey) -> bool:
     return contribution.continued(INTEGRATION_REMINDER)
 
 
+def _following(year: int, month: int) -> tuple[int, int]:
+    return (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def seed_recording_drafts(today: date, seed=None) -> list:
+    """Copy the Class Recording draft from its template for this month and next.
+
+    Every tick, before and apart from any launch. The launch waits for every
+    email in the Yoga Habit campaign to be approved, the recording one included,
+    and until this copy exists there is nothing to approve: on 2026-09-29
+    October's Class Recording read Missing on the drafts page for exactly that
+    reason, once run_sendgrid_mailings.py (which seeded a month ahead) stopped at
+    2026_09 (JP "fix it"). A month is seeded only when it has a confirmed Habit
+    class, the fact the launch checks too, and the seed never overwrites, so an
+    edited draft is left alone. One month failing never stops the other or the
+    tick; the next tick tries again. Returns the months where something was new.
+    """
+    if seed is None:
+        from sendgrid_newsletter_workflow import ensure_recording_draft as seed
+    seeded = []
+    for year, month in ((today.year, today.month), _following(today.year, today.month)):
+        try:
+            if _plan_date(real_class_plan(year, month, CLASS_HABIT)) is None:
+                continue
+            if seed(year, month):
+                seeded.append((year, month))
+        except Exception as exc:  # noqa: BLE001 - one month must not stop the tick
+            log.error(
+                "%04d_%02d: recording draft not seeded this tick: %s", year, month, exc
+            )
+    return seeded
+
+
 def main():
     today = datetime.now(MOUNTAIN).date()
     year, month = today.year, today.month
+    for seeded_year, seeded_month in seed_recording_drafts(today):
+        log.info(
+            "campaign tick: recording draft seeded for %04d_%02d",
+            seeded_year, seeded_month,
+        )
     journeys = list_journeys(journeys_dir())
     held = [
         j for j in journeys
