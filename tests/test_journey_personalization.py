@@ -163,3 +163,79 @@ def test_the_live_welcome_sequence_personalizes_end_to_end():
         assert "{{" not in filled["subject"], f"email {index} subject kept a token"
         if index == 1:
             assert "Hello Sarah," in filled["body"]
+
+
+# ---- the next live classes (JP 2026-09-28) ----------------------------------
+
+WELCOME = (
+    "each other. {{#next_classes}}\n\n- {{next_class_1}}\n- {{next_class_2}}\n\n"
+    "{{/next_classes}}I am here"
+)
+
+
+def test_class_lines_fill_in_and_the_markers_go():
+    module = personalization()
+
+    assert module.personalize(WELCOME, classes=["A", "B"]) == (
+        "each other. \n\n- A\n- B\n\nI am here"
+    )
+
+
+def test_with_no_class_the_copy_reads_exactly_as_it_did_before():
+    module = personalization()
+
+    assert module.personalize(WELCOME, classes=[]) == "each other. I am here"
+    assert module.personalize(WELCOME) == "each other. I am here"
+
+
+def test_one_class_is_not_enough_for_a_section_that_names_two():
+    module = personalization()
+
+    assert module.personalize(WELCOME, classes=["A"]) == "each other. I am here"
+
+
+def test_a_section_naming_one_class_needs_only_one():
+    module = personalization()
+    text = "special.\n\n{{#next_classes}}Come: {{next_class_1}}.\n\n{{/next_classes}}Namaste"
+
+    assert module.personalize(text, classes=["A"]) == "special.\n\nCome: A.\n\nNamaste"
+    assert module.personalize(text) == "special.\n\nNamaste"
+
+
+def test_a_class_token_outside_a_section_with_no_class_stops_the_send():
+    module = personalization()
+
+    with pytest.raises(module.UnknownToken, match="next_classes"):
+        module.personalize("Come to {{next_class_1}}", classes=[])
+
+
+def test_an_unclosed_section_stops_the_send():
+    module = personalization()
+
+    with pytest.raises(module.UnknownToken):
+        module.personalize("{{#next_classes}} {{next_class_1}}", classes=["A"])
+
+
+def test_the_live_welcome_emails_name_the_classes_or_read_as_before():
+    """The real emails 1 and 2, with two classes and with none."""
+    import json
+
+    from twy_paths import journey_path
+
+    module = personalization()
+    path = journey_path("yoga_lifestyle_welcome_2024_05")
+    if not path.exists():
+        pytest.skip("the imported welcome sequence is not on this host")
+    first, second = json.loads(path.read_text())["emails"][:2]
+    if "next_classes" not in first["body"]:
+        pytest.skip("the welcome emails carry no class section on this host")
+
+    named = module.personalize_email(first, first_name="Sarah", classes=["A", "B"])
+    assert "- A\n- B" in named["body"] and "{{" not in named["body"]
+    assert "come use it: A is the next live class" in module.personalize_email(
+        second, first_name="Sarah", classes=["A", "B"]
+    )["body"]
+
+    plain = module.personalize_email(first, first_name="Sarah")
+    assert "each other. I am here to support you" in plain["body"]
+    assert "live class" not in module.personalize_email(second)["body"]

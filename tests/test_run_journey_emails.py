@@ -561,6 +561,60 @@ def test_an_unfillable_token_stops_the_send_rather_than_shipping(tmp_path):
     assert store().unresolved_sends(conn) == []
 
 
+CLASS_COPY = (
+    "Hello {{first_name}}, {{#next_classes}}come to {{next_class_1}} "
+    "or {{next_class_2}}. {{/next_classes}}Welcome."
+)
+
+
+def _welcome_with_classes():
+    welcome = journey()
+    welcome["emails"][0]["body"] = CLASS_COPY
+    return {welcome["journey_id"]: welcome}
+
+
+def _sent_text(api):
+    return next(
+        part["value"] for part in api.sent[0]["content"] if part["type"] == "text/html"
+    )
+
+
+def test_the_welcome_email_names_the_next_classes_asked_once_per_run(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+    asked = []
+
+    def next_classes(now):
+        asked.append(now)
+        return ["Tuesday Flow", "Thursday Expansion"]
+
+    go(tmp_path, conn, api=api, journeys=_welcome_with_classes(), next_classes=next_classes)
+
+    assert "come to Tuesday Flow or Thursday Expansion." in _sent_text(api)
+    assert asked == [NOW]
+
+
+def test_with_no_class_to_name_the_welcome_email_reads_as_before(tmp_path):
+    conn = connection(tmp_path)
+    enrolled(conn)
+    api = FakeAPI()
+
+    go(tmp_path, conn, api=api, journeys=_welcome_with_classes(), next_classes=lambda now: [])
+
+    text = _sent_text(api)
+    assert "Welcome." in text and "come to" not in text and "{{" not in text
+
+
+def test_nobody_due_means_the_classes_app_is_never_asked(tmp_path):
+    conn = connection(tmp_path)
+
+    def next_classes(now):
+        raise AssertionError("asked for classes with nobody due")
+
+    assert go(tmp_path, conn, next_classes=next_classes)["due"] == 0
+
+
 def test_the_limit_caps_how_many_go_out_in_one_tick(tmp_path):
     conn = connection(tmp_path)
     enrolled(conn, email="a@example.com")

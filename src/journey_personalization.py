@@ -13,6 +13,13 @@ typo stops the send rather than shipping.
 
 Substitution covers the subject and preheader as well as the body, which is why
 this is separate from render_newsletter: that one only ever sees a body.
+
+The welcome emails also name the next live classes (JP 2026-09-28).
+{{next_class_1}}, {{next_class_2}} and so on take the class lines
+next_live_classes supplies, and the copy around them sits between
+{{#next_classes}} and {{/next_classes}}. That whole stretch is left out, markers
+and all, whenever a class token inside it has no class behind it, so an email
+never promises a class nobody has planned and reads exactly as it did before.
 """
 from __future__ import annotations
 
@@ -33,9 +40,34 @@ PERSONALIZED_FIELDS = ("subject", "preheader", "body")
 
 _TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
 
+# The copy that names the next live classes. Everything between the two markers
+# stays only when every {{next_class_N}} inside has a class behind it.
+_CLASS_SECTION = re.compile(
+    r"\{\{\s*#\s*next_classes\s*\}\}(.*?)\{\{\s*/\s*next_classes\s*\}\}",
+    re.S | re.I,
+)
+_CLASS_TOKEN = re.compile(r"\{\{\s*next_class_(\d+)\s*\}\}", re.I)
+
 
 class UnknownToken(ValueError):
     """A token nobody can fill. Raised rather than sent."""
+
+
+def _class_values(classes) -> dict:
+    """{{next_class_1}}, {{next_class_2}} and on, one per class line given."""
+    return {
+        f"next_class_{number}": str(line)
+        for number, line in enumerate(classes or (), start=1)
+    }
+
+
+def _keep_or_drop_class_sections(text: str, class_values: dict) -> str:
+    def keep_or_drop(match):
+        inside = match.group(1)
+        wanted = {f"next_class_{int(n)}" for n in _CLASS_TOKEN.findall(inside)}
+        return inside if wanted <= set(class_values) else ""
+
+    return _CLASS_SECTION.sub(keep_or_drop, text)
 
 
 def first_name_or_fallback(first_name) -> str:
@@ -50,6 +82,12 @@ def first_name_or_fallback(first_name) -> str:
 
 def _resolve(token: str, values: dict) -> str:
     key = token.lower()
+    if key not in values and re.fullmatch(r"next_class_\d+", key):
+        raise UnknownToken(
+            f"{{{{{token}}}}} has no published class behind it right now. "
+            "Keep class tokens between {{#next_classes}} and {{/next_classes}}, "
+            "so those lines are left out when there is no class to name."
+        )
     if key not in values:
         raise UnknownToken(
             f"{{{{{token}}}}} is not a token this system can fill. "
@@ -58,15 +96,20 @@ def _resolve(token: str, values: dict) -> str:
     return values[key]
 
 
-def personalize(text, *, first_name=None) -> str:
+def personalize(text, *, first_name=None, classes=None) -> str:
     """Return the text with its tokens filled in.
 
     Case and inner spacing are forgiven, because Tiff types these by hand in the
     editor and {{ First_Name }} meaning something different from {{first_name}}
     would only ever be a trap.
+
+    classes are the lines for {{next_class_1}} onward, soonest first. None or
+    empty means there is no class to name, so every class section is left out.
     """
-    values = {"first_name": first_name_or_fallback(first_name)}
-    filled = _TOKEN.sub(lambda match: _resolve(match.group(1), values), str(text or ""))
+    class_values = _class_values(classes)
+    values = {"first_name": first_name_or_fallback(first_name), **class_values}
+    filled = _keep_or_drop_class_sections(str(text or ""), class_values)
+    filled = _TOKEN.sub(lambda match: _resolve(match.group(1), values), filled)
     leftover = re.search(r"\{\{.*?\}\}", filled, re.S)
     if leftover:
         raise UnknownToken(
@@ -76,7 +119,7 @@ def personalize(text, *, first_name=None) -> str:
     return filled
 
 
-def personalize_email(email: dict, *, first_name=None) -> dict:
+def personalize_email(email: dict, *, first_name=None, classes=None) -> dict:
     """The same email with subject, preheader and body filled in.
 
     Every other key is carried through untouched, so a caller can hand this
@@ -85,7 +128,9 @@ def personalize_email(email: dict, *, first_name=None) -> dict:
     filled = dict(email)
     for field in PERSONALIZED_FIELDS:
         if field in filled:
-            filled[field] = personalize(filled[field], first_name=first_name)
+            filled[field] = personalize(
+                filled[field], first_name=first_name, classes=classes
+            )
     return filled
 
 

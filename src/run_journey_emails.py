@@ -285,11 +285,19 @@ def run(
     limit: int | None = None,
     linker=None,
     announce=None,
+    next_classes=None,
 ) -> dict:
-    """Work the due queue. Returns what happened, in counts and reasons."""
+    """Work the due queue. Returns what happened, in counts and reasons.
+
+    next_classes(now) gives the class lines the welcome emails name
+    (next_live_classes.upcoming_classes). It is asked once, and only when
+    somebody is due, so a quiet quarter hour never calls the classes app.
+    Without it every class section is left out.
+    """
     due = journey_enrollment.due_enrollments(connection, now=now)
     if limit is not None:
         due = due[:limit]
+    classes = next_classes(now) if (next_classes and due) else []
 
     counts = {
         "due": len(due),
@@ -337,6 +345,7 @@ def run(
         filled = personalize_email(
             verdict.email,
             first_name=first_name_for(marvy_connection, enrollment),
+            classes=classes,
         )
 
         if dry_run:
@@ -445,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    from next_live_classes import upcoming_classes
     from resend_api import ResendAPI
     from sendgrid_api import SendGridAPI
     from sendgrid_campaigns import EXPECTED_ACCOUNT_EMAIL, SendGridRegistry
@@ -525,6 +535,7 @@ def main(argv=None) -> int:
             now=datetime.now(timezone.utc),
             dry_run=args.dry_run,
             limit=args.limit,
+            next_classes=upcoming_classes,
         )
     finally:
         marvy.close()
