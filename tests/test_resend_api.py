@@ -5,7 +5,7 @@ from resend_api import ResendAPI, ResendAPIError, to_resend_payload
 
 SENDGRID_PAYLOAD = {
     "personalizations": [{"to": [{"email": "member@example.com"}]}],
-    "from": {"email": "hello@mail.tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
+    "from": {"email": "hello@tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
     "reply_to": {"email": "tiffany@tiffanywoodyoga.com", "name": "Tiffany Wood Yoga"},
     "subject": "Welcome",
     "content": [
@@ -18,7 +18,7 @@ SENDGRID_PAYLOAD = {
     "custom_args": {"twy_campaign_id": "journey:yoga_lifestyle_welcome_2024_05:0"},
 }
 
-FROM = "Tiffany Wood Yoga <hello@mail.tiffanywoodyoga.com>"
+FROM = "Tiffany Wood Yoga <hello@tiffanywoodyoga.com>"
 
 
 def test_translation_keeps_the_parts_that_carry_meaning():
@@ -73,7 +73,7 @@ def test_a_send_without_a_body_is_refused():
 def test_sender_off_the_verified_domain_is_refused_at_construction():
     """Fail once at startup, not silently on every send."""
     with pytest.raises(ValueError):
-        ResendAPI("re_test", from_address="Tiff <hello@tiffanywoodyoga.com>")
+        ResendAPI("re_test", from_address="Tiff <hello@mail.tiffanywoodyoga.com>")
 
 
 def test_sender_on_the_verified_domain_constructs():

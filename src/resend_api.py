@@ -62,8 +62,10 @@ def to_resend_payload(payload: dict, *, from_address: str) -> dict:
 
     from_address is passed in rather than read off the SendGrid payload
     because Resend will only accept a sender on its own verified domain,
-    mail.tiffanywoodyoga.com. The reply-to is NOT rewritten: it stays on the
-    apex so replies keep landing in Tiff Google Workspace inbox.
+    tiffanywoodyoga.com (moved from mail.tiffanywoodyoga.com 2026-09-29, JP,
+    so drips and newsletters both come from hello@tiffanywoodyoga.com, an
+    alias of admin@). The reply-to is NOT rewritten: it stays tiffany@ so
+    replies keep landing in Tiff Google Workspace inbox.
 
     Dropped on purpose, because they have no Resend equivalent and are not
     wanted here: `asm` (the SendGrid unsubscribe group, and the journey footer
@@ -125,7 +127,7 @@ class ResendAPI:
         api_key: str,
         *,
         from_address: str,
-        sending_domain: str = "mail.tiffanywoodyoga.com",
+        sending_domain: str = "tiffanywoodyoga.com",
         session: requests.Session | None = None,
         sleep_fn: Callable[[float], None] = time.sleep,
     ):
