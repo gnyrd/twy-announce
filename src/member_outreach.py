@@ -9,24 +9,27 @@ kept 38% (vault reports/2026_09_28_membership_retention.md). The post waits
 until the attendance data covers the member's whole first 14 days, so a class
 taken on day 13 is never missed because the sync had not reached it yet.
 
-The monthly check-ins. On the first run of each month (Mountain time), two
-current TYL members are named for a personal check-in: one from members in their
-first year, where people leave, and one from the longer-standing core, who
-carry most of what TWY earns (28 of 87 members account for 80% of all paid
-months). Within each group the least recently picked go first, so nobody in a
-group is picked twice before everyone in it has been picked once. The pool is
-read fresh every month, so it follows members as they join and leave, and a
-member moves from the first-year group to the core on their first
-anniversary. When one group is empty both picks come from the other. Members
-in their first 30 days wait: the welcome week and the quiet-start post cover
-them. The first run records its own month without picking, so the first pair
-is named on the first run of the following month.
+The check-ins, every two weeks. On the first run of each two-week period
+(periods start on alternate Mondays, Mountain time, the first on 2026-09-28),
+two current TYL members are named for a personal check-in, one for each week
+(JP 2026-09-28: "we'll see if Tiff can reach 1 person per week"): one from
+members in their first year, where people leave, and one from the
+longer-standing core, who carry most of what TWY earns (28 of 87 members
+account for 80% of all paid months). Within each group the least recently
+picked go first, so nobody in a group is picked twice before everyone in it
+has been picked once. The pool is read fresh every period, so it follows
+members as they join and leave, and a member moves from the first-year group
+to the core on their first anniversary. When one group is empty both picks
+come from the other. Members in their first 30 days wait: the welcome week
+and the quiet-start post cover them.
 
 Both cover The Yoga Lifestyle Membership only. The Archive is ignored: Tiffany
 wants to retire it (JP 2026-09-28).
 
-Both are behind contribution.continued("member_outreach"). Off, nothing is
-posted and nothing is recorded, exactly as before this existed.
+Both are behind the Labs switch, `continued` in ops/contribution.toml, with
+no feature name of their own (JP 2026-09-28: "use whatever flag is associated
+with Labs, it is part of maintenance"). The job asks it on every run: off,
+nothing is posted and nothing is recorded, exactly as before this existed.
 
 Usage:
     python3 src/member_outreach.py            # post and record
@@ -50,7 +53,6 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-FEATURE = "member_outreach"
 DEFAULT_CHANNEL = "C0BH3142LNP"  # #member-activity, where the movement posts go
 MT = ZoneInfo("America/Denver")
 TYL_PRODUCT_ID = 52025
@@ -59,6 +61,8 @@ TYL_PRODUCT_NAME = "The Yoga Lifestyle Membership"
 QUIET_DAYS = 14
 QUIET_LOOKBACK_DAYS = 45  # a start older than this is no longer news
 NEWCOMER_DAYS = 30  # too new for a check-in
+PERIOD_DAYS = 14
+PERIOD_EPOCH = date(2026, 9, 28)  # a Monday; periods start every 14 days from here
 FIRST_YEAR_DAYS = 365
 ATTENDANCE_MAX_AGE_HOURS = 36
 
@@ -99,22 +103,28 @@ def quiet_starts(
     return [member for _, _, member in sorted(found, key=lambda item: item[:2])]
 
 
+def period_start(day: date) -> date:
+    """The Monday that starts the two-week period `day` falls in."""
+    return PERIOD_EPOCH + timedelta(days=PERIOD_DAYS * ((day - PERIOD_EPOCH).days // PERIOD_DAYS))
+
+
 def pick_checkins(
     members: list[Member],
     history: dict[str, list[int]],
-    month: str,
+    period: str,
     today: date,
 ) -> list[Member]:
-    """Two TYL members for this month's personal check-ins, one from the first
-    year and one from the core when both groups have someone eligible.
-    Archive-only members are never picked."""
+    """Two TYL members for this period's personal check-ins, one from the
+    first year and one from the core when both groups have someone eligible.
+    Archive-only members are never picked. `history` maps each earlier
+    period's start date to the members it named."""
     last_picked: dict[int, str] = {}
-    for picked_month, ids in history.items():
+    for picked_period, ids in history.items():
         for cid in ids:
-            last_picked[cid] = max(last_picked.get(cid, ""), picked_month)
+            last_picked[cid] = max(last_picked.get(cid, ""), picked_period)
 
     def order(member: Member) -> tuple[str, str]:
-        tiebreak = hashlib.sha256(f"{month}:{member.cid}".encode()).hexdigest()
+        tiebreak = hashlib.sha256(f"{period}:{member.cid}".encode()).hexdigest()
         return (last_picked.get(member.cid, ""), tiebreak)
 
     eligible = [m for m in members if m.tyl and (today - m.start).days >= NEWCOMER_DAYS]
@@ -149,11 +159,14 @@ def quiet_message(quiet: list[Member], tyl_start: dict[int, date]) -> str:
     return "\n".join(lines)
 
 
-def checkin_message(picks: list[Member], month_label: str) -> str:
+def checkin_message(picks: list[Member], start: date) -> str:
+    end = start + timedelta(days=PERIOD_DAYS - 1)
     named = [f"{_link(m)} (member since {m.start:%b %Y})" for m in picks]
     who = " and ".join(named)
     head = "Check-ins" if len(picks) > 1 else "Check-in"
-    return f"*{head} for {month_label}:* {who}. A short personal note from Tiffany, no agenda."
+    pace = "One a week" if len(picks) > 1 else "This week or next"
+    return (f"*{head}, {start:%b} {start.day} to {end:%b} {end.day}:* {who}. "
+            f"{pace}, a short personal note from Tiffany, no agenda.")
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +266,8 @@ def main(argv=None) -> int:
     from twy_platform.contribution import continued
 
     load_env()
-    if not continued(FEATURE):
-        print(json.dumps({"skipped": f"contribution: {FEATURE} is off"}))
+    if not continued():
+        print(json.dumps({"skipped": "contribution: the Labs switch (continued) is off"}))
         return 0
 
     from marvelous_memberships import latest_fresh_snapshot
@@ -262,7 +275,7 @@ def main(argv=None) -> int:
 
     now = datetime.now(timezone.utc)
     today = now.astimezone(MT).date()
-    month = today.strftime("%Y-%m")
+    period = period_start(today)
     snapshot = latest_fresh_snapshot(reports_dir=hm_subscriptions_dir(),
                                      prefix="active_subscriptions", now=now)
     database = sqlite3.connect(f"file:{marvy_db_path()}?mode=ro", uri=True)
@@ -274,7 +287,6 @@ def main(argv=None) -> int:
         database.close()
 
     state_path = data_root() / "member_outreach" / "state.json"
-    first_run = not state_path.exists()
     state = load_state(state_path)
     channel = os.getenv("SLACK_MOVEMENT_CHANNEL", DEFAULT_CHANNEL)
     summary = {"members": len(members), "snapshot": snapshot.name, "quiet": [], "checkins": None}
@@ -290,16 +302,13 @@ def main(argv=None) -> int:
     posts = []
     if quiet:
         posts.append(("quiet", quiet, quiet_message(quiet, tyl_start)))
-    if month not in state["checkins"]:
-        if first_run:
-            state["checkins"][month] = []  # the first pair is named next month
+    if period.isoformat() not in state["checkins"]:
+        history = {p: [int(c) for c in ids] for p, ids in state["checkins"].items()}
+        picks = pick_checkins(members, history, period.isoformat(), today)
+        if picks:
+            posts.append(("checkins", picks, checkin_message(picks, period)))
         else:
-            history = {m: [int(c) for c in ids] for m, ids in state["checkins"].items()}
-            picks = pick_checkins(members, history, month, today)
-            if picks:
-                posts.append(("checkins", picks, checkin_message(picks, today.strftime("%B"))))
-            else:
-                state["checkins"][month] = []
+            state["checkins"][period.isoformat()] = []
 
     failed = False
     for kind, people, text in posts:
@@ -314,7 +323,7 @@ def main(argv=None) -> int:
                 state["quiet_alerted"][str(member.cid)] = today.isoformat()
             summary["quiet"] = [m.cid for m in people]
         else:
-            state["checkins"][month] = [m.cid for m in people]
+            state["checkins"][period.isoformat()] = [m.cid for m in people]
             summary["checkins"] = [m.cid for m in people]
 
     if not args.dry_run:

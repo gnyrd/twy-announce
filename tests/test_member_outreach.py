@@ -67,7 +67,7 @@ def test_several_quiet_members_come_in_one_post_oldest_first():
     assert text.startswith("*New members, no live class in their first two weeks:*")
 
 
-# ---- the monthly check-ins --------------------------------------------------
+# ---- the check-ins, every two weeks ------------------------------------------
 
 def first_year(cid, days=100, today=TODAY):
     return M(cid, f"N{cid}", today - timedelta(days=days), True)
@@ -78,7 +78,7 @@ def core(cid, days=800, today=TODAY):
 
 
 def test_one_from_the_first_year_and_one_from_the_core():
-    picks = mo.pick_checkins([first_year(1), first_year(2), core(10), core(11)], {}, "2026-10", TODAY)
+    picks = mo.pick_checkins([first_year(1), first_year(2), core(10), core(11)], {}, "2026-10-12", TODAY)
     assert len(picks) == 2
     assert sorted(p.cid < 10 for p in picks) == [False, True]
 
@@ -86,42 +86,51 @@ def test_one_from_the_first_year_and_one_from_the_core():
 def test_nobody_in_a_group_is_picked_twice_before_everyone_in_it_has_been_picked():
     members = [first_year(1), first_year(2), first_year(3), core(10), core(11)]
     history = {}
-    for n, month in enumerate(("2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03")):
-        picks = mo.pick_checkins(members, history, month, TODAY)
-        history[month] = [p.cid for p in picks]
-    newer_order = [cid for month in sorted(history) for cid in history[month] if cid < 10]
-    core_order = [cid for month in sorted(history) for cid in history[month] if cid >= 10]
+    for n in range(6):
+        period = (mo.PERIOD_EPOCH + timedelta(days=14 * n)).isoformat()
+        picks = mo.pick_checkins(members, history, period, TODAY)
+        history[period] = [p.cid for p in picks]
+    newer_order = [cid for period in sorted(history) for cid in history[period] if cid < 10]
+    core_order = [cid for period in sorted(history) for cid in history[period] if cid >= 10]
     assert sorted(newer_order[:3]) == [1, 2, 3] and sorted(newer_order[3:6]) == [1, 2, 3]
     assert sorted(core_order[:2]) == [10, 11] and sorted(core_order[2:4]) == [10, 11]
 
 
 def test_members_in_their_first_thirty_days_wait():
-    picks = mo.pick_checkins([first_year(1, days=10), core(10)], {}, "2026-10", TODAY)
+    picks = mo.pick_checkins([first_year(1, days=10), core(10)], {}, "2026-10-12", TODAY)
     assert [p.cid for p in picks] == [10]
 
 
 def test_an_empty_group_means_both_picks_come_from_the_other():
-    picks = mo.pick_checkins([core(10), core(11), core(12)], {}, "2026-10", TODAY)
+    picks = mo.pick_checkins([core(10), core(11), core(12)], {}, "2026-10-12", TODAY)
     assert len(picks) == 2 and all(p.cid >= 10 for p in picks)
 
 
 def test_a_member_joins_the_core_on_their_first_anniversary():
     anniversary = first_year(1, days=365)
-    picks = mo.pick_checkins([anniversary, first_year(2)], {}, "2026-10", TODAY)
+    picks = mo.pick_checkins([anniversary, first_year(2)], {}, "2026-10-12", TODAY)
     assert {p.cid for p in picks} == {1, 2}  # one from each group
 
 
 def test_archive_only_members_are_never_picked():
     # JP 2026-09-28: Tiffany wants to retire The Archive, so it is ignored.
     archive_only = M(20, "Archive", TODAY - timedelta(days=800), False)
-    picks = mo.pick_checkins([archive_only, core(10), first_year(1)], {}, "2026-10", TODAY)
+    picks = mo.pick_checkins([archive_only, core(10), first_year(1)], {}, "2026-10-12", TODAY)
     assert 20 not in {p.cid for p in picks} and len(picks) == 2
 
 
-def test_the_checkin_post_names_both_with_their_member_since():
-    text = mo.checkin_message([first_year(1), core(10)], "October")
-    assert text.startswith("*Check-ins for October:*")
-    assert text.count("member since") == 2 and "Tiffany" in text
+def test_the_checkin_post_names_both_for_the_two_weeks_one_a_week():
+    text = mo.checkin_message([first_year(1), core(10)], mo.PERIOD_EPOCH)
+    assert text.startswith("*Check-ins, Sep 28 to Oct 11:*")
+    assert text.count("member since") == 2 and "One a week" in text and "Tiffany" in text
+
+
+def test_periods_start_on_alternate_mondays_from_2026_09_28():
+    assert mo.period_start(date(2026, 9, 28)) == date(2026, 9, 28)
+    assert mo.period_start(date(2026, 10, 11)) == date(2026, 9, 28)
+    assert mo.period_start(date(2026, 10, 12)) == date(2026, 10, 12)
+    assert mo.period_start(date(2026, 9, 27)) == date(2026, 9, 14)
+    assert all(mo.period_start(date(2026, 11, d)).weekday() == 0 for d in range(1, 29))
 
 
 # ---- the switch and a whole run -----------------------------------------------
@@ -148,15 +157,18 @@ def box(tmp_path, monkeypatch):
                          "Product Name": mo.TYL_PRODUCT_NAME, "Subscription Active Until": str(today + timedelta(days=20))})
         writer.writerow({"Email": "keen@example.com", "First Name": "Keen", "Last Name": "Starter",
                          "Product Name": mo.TYL_PRODUCT_NAME, "Subscription Active Until": str(today + timedelta(days=20))})
+        writer.writerow({"Email": "steady@example.com", "First Name": "Steady", "Last Name": "Member",
+                         "Product Name": mo.TYL_PRODUCT_NAME, "Subscription Active Until": str(today + timedelta(days=20))})
     db = tmp_path / "marvy.db"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE customers (id INTEGER, email TEXT)")
     con.execute("CREATE TABLE purchases (customer_id INTEGER, product_id INTEGER, created TEXT)")
     con.execute("CREATE TABLE attendance (customer_id INTEGER, student_email TEXT, event_start_datetime TEXT, attended INTEGER, synced_at TEXT)")
     start = today - timedelta(days=20)
-    for cid, email in ((1, "quiet@example.com"), (2, "keen@example.com")):
+    for cid, email, began in ((1, "quiet@example.com", start), (2, "keen@example.com", start),
+                              (3, "steady@example.com", today - timedelta(days=500))):
         con.execute("INSERT INTO customers VALUES (?, ?)", (cid, email))
-        con.execute("INSERT INTO purchases VALUES (?, ?, ?)", (cid, mo.TYL_PRODUCT_ID, f"{start}T12:00:00Z"))
+        con.execute("INSERT INTO purchases VALUES (?, ?, ?)", (cid, mo.TYL_PRODUCT_ID, f"{began}T12:00:00Z"))
     con.execute("INSERT INTO attendance VALUES (2, 'keen@example.com', ?, 1, ?)",
                 (f"{start + timedelta(days=3)}T15:00:00Z", now.isoformat()))
     con.execute("INSERT INTO attendance VALUES (99, 'other@example.com', ?, 1, ?)",
@@ -174,25 +186,30 @@ def box(tmp_path, monkeypatch):
     return tmp_path, posted, contribution
 
 
-def test_switched_off_it_posts_nothing_and_records_nothing(box, monkeypatch):
+def test_with_the_labs_switch_off_it_posts_nothing_and_records_nothing(box, monkeypatch):
     tmp_path, posted, contribution = box
-    monkeypatch.setattr(contribution, "continued", lambda feature=None: feature != mo.FEATURE)
+    asked = []
+    monkeypatch.setattr(contribution, "continued", lambda feature=None: asked.append(feature) or False)
     assert mo.main([]) == 0
     assert posted == []
+    assert asked == [None]  # the master switch itself, no feature name of its own
     assert not (tmp_path / "member_outreach").exists()
 
 
-def test_a_run_names_the_quiet_starter_once_and_waits_a_month_for_checkins(box):
+def test_a_run_names_the_quiet_starter_and_this_periods_checkins_once_each(box):
     tmp_path, posted, _ = box
     assert mo.main([]) == 0
-    assert len(posted) == 1
-    channel, text = posted[0]
-    assert channel == mo.DEFAULT_CHANNEL
-    assert "customers/1|Quiet Starter" in text and "Keen" not in text
+    assert len(posted) == 2
+    assert all(channel == mo.DEFAULT_CHANNEL for channel, _ in posted)
+    quiet_text, checkin_text = posted[0][1], posted[1][1]
+    assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
+    assert "customers/3|Steady Member" in checkin_text  # the two new members are under 30 days
+    assert "Quiet" not in checkin_text and "Keen" not in checkin_text
     state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
-    assert "1" in state["quiet_alerted"] and list(state["checkins"].values()) == [[]]
+    assert "1" in state["quiet_alerted"]
+    assert list(state["checkins"].values()) == [[3]]
     assert mo.main([]) == 0
-    assert len(posted) == 1  # nothing twice
+    assert len(posted) == 2  # nothing twice
 
 
 def test_dry_run_prints_and_writes_nothing(box, capsys):
