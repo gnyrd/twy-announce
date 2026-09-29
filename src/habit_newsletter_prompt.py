@@ -37,7 +37,7 @@ _SUBJECT_JOBS = {
     "lifestyle": """SUBJECT JOB: Member monthly story
 Write a descriptive subject for current Yoga Lifestyle members. Signal the monthly member note and include the canonical monthly theme in a natural way. Do not use the bare theme title by itself.""",
     "non_lifestyle": """SUBJECT JOB: General invitation
-Invite an established practitioner into the free Yoga Habit class through one specific lived benefit, body experience, or class angle. Do not use the monthly theme by itself. Do not duplicate the member monthly subject.""",
+Lead with the concrete facts, then one short human hook: the word Free, the class date, and the apex pose or physical focus, followed by a brief lived angle. Shape: "Free class [Month Day]: [pose or focus], and [short hook]". September's "Free class Sept 12: Bakasana, and the art of getting unstuck" drew more than twice the clicks of August's invitation. Use the real date and pose from the class details below. Do not use the monthly theme by itself. Do not duplicate the member monthly subject.""",
     "non_opener": """SUBJECT JOB: Non-opener resend
 Give the unopened general invitation a genuinely different subject and angle. Keep it low-key or use one concrete body moment from the class. Do not repeat the general invitation subject and do not use the monthly theme by itself.""",
     "reminder": """SUBJECT JOB: Registered-attendee reminder
@@ -49,6 +49,12 @@ Write a direct thank-you or immediate reflection subject for someone who attende
     "ph2": """SUBJECT JOB: Second post-class follow-up
 Write a week-later continuation subject that reopens the invitation without forced urgency. It must differ from the first follow-up subject and must not use the monthly theme by itself.""",
 }
+
+
+# The two highest-clicked non-member invitations so far (September 2026
+# Transitions campaign, 17 and 16 clicks against 7 for August's newsletter
+# invitation). Added 2026-09-29 at JP's direction.
+_TRANSITIONS_REFERENCE = 'CLICK-TESTED INVITATIONS (September 2026 Transitions campaign):\nTake from these the concrete class facts stated early, the brevity, and the single clear ask. The SUBJECT JOB above governs your subject line. They were campaign emails, so they use a raw link, bold, and emoji bullets. Do NOT copy those: follow this prompt\'s token rules ({CLASS_TITLE}, {REGISTER_CTA}, {CALENDAR_CTA}), its no-bullets rule, and its banned-punctuation rule. For Tiff\'s voice, follow the approved reference newsletters when this prompt includes them.\n\n## Transitions Email 1 (invitation)\nSubject: Free class Sept 12: Bakasana, and the art of getting unstuck\nPreheader: Saturday, September 12 at 9am MT. Live on Zoom, free.\n\nDear friends,\n\nSometimes we find ourselves in a deadlock. We have tried the thing. We have tried harder. We have pushed, negotiated, made the list, made another list. Still, nothing budges.\n\nSeptember\'s series is called **Transitions**, and it opens with a slightly mischievous question: what if pushing harder isn\'t the answer?\n\nOn **Saturday, September 12 at 9am MT**, I\'m teaching a free live class called **Bhakasana Transitions**. Here\'s what we\'ll explore:\n\n✨ **Demystifying Bakasana (Crow Pose).** We\'ll refine the relationship between hands, shoulders, core, and midline, step by step. And for the curious, Bakasana push-ups.\n✨ **The pause that creates possibility.** When something won\'t budge, we hug in, pause, and make enough space to discover another way through.\n✨ **The affirmation carrying the month:** "I pause long enough to know what is true, then move from there."\n\nIt is free. Just come and breathe.\n\nBring a friend, a blanket, and whatever feels stuck.\n\n[Save your spot, free](https://habit.tiffanywoodyoga.com?utm_source=email&utm_campaign=transitions-2026-09&utm_content=email1)\n\nWith love,\nTiff\n\n## Transitions Email 2 (this-Saturday reminder)\nSubject: This Saturday: Bakasana, and a little wriggle room 🧘\u200d♀️\nPreheader: The free Transitions class is this Saturday at 9am MT.\n\nHi loves,\n\nJust a quick reminder. The free live class is this Saturday, September 12 at 9am MT.\n\nWe will demystify Bakasana together. Hands, shoulders, core, midline. And underneath the pose, the real practice of this month\'s Transitions series: when something won\'t budge, hug in, pause, and create enough space to find another possibility.\n\nThe affirmation I keep coming back to:\n\n"I pause long enough to know what is true, then move from there."\n\nIf your week has been a lot, let this be your hour. No pressure, no performance. Come as you are.\n\n[Save your spot, free](https://habit.tiffanywoodyoga.com?utm_source=email&utm_campaign=transitions-2026-09&utm_content=email2)\n\nSee you Saturday,\nTiff'
 
 
 def _subject_job(audience: str) -> str:
@@ -409,6 +415,8 @@ Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 Hard limit: 175 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, body, event details (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Tiff's non-member openers tend to land directly on what the class is, often something like "This month's Yoga Habit class, {{CLASS_TITLE}}, explores [actual class subject]" or "This month's free Yoga Habit class, {{CLASS_TITLE}}, is a [practice description] centered around [specific details]" -- direct and specific. She also opens with first-person reflection sometimes ("Lately I've been reflecting on..."). The references below show both shapes. Avoid rhetorical-question hooks. The API will reject any body that begins with `#`. No bullets.
 
+{_TRANSITIONS_REFERENCE}
+
 {recent_refs}"""
 
 
@@ -600,6 +608,8 @@ Do NOT write literal URLs. Do NOT write [Register Here](url). Use the tokens.
 
 Hard limit: 100 words. Subject line included, not counted.
 Shape: natural, not formulaic. Subject line, 1-2 short paragraphs (using {{CLASS_TITLE}} where the title goes), {{REGISTER_CTA}} alone on a line, {{CALENDAR_CTA}} alone on a line, sign-off. Resend openers tend to be functional and low-key ("Just sending this back around in case you missed it." is one shape she uses; she also opens with a single concrete somatic moment, e.g. "There's a moment in Camel where the thighs press forward, the legs root down..."). The references below show both. Avoid a fresh hook on a resend -- the original framing already exists. The API will reject any body that begins with `#`. No bullets.
+
+{_TRANSITIONS_REFERENCE}
 
 {recent_refs}"""
 
