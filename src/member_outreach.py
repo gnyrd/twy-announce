@@ -26,7 +26,7 @@ and the quiet-start post cover them.
 Both cover The Yoga Lifestyle Membership only. The Archive is ignored: Tiffany
 wants to retire it (JP 2026-09-28).
 
-Both are behind the Labs switch, `continued` in ops/contribution.toml, with
+Both are behind the Labs switch, `maintenance` in ops/contribution.toml, with
 no feature name of their own (JP 2026-09-28: "use whatever flag is associated
 with Labs, it is part of maintenance"). The job asks it on every run: off,
 nothing is posted and nothing is recorded, exactly as before this existed.
@@ -267,7 +267,7 @@ def main(argv=None) -> int:
 
     load_env()
     if not continued():
-        print(json.dumps({"skipped": "contribution: the Labs switch (continued) is off"}))
+        print(json.dumps({"skipped": "contribution: the maintenance switch is off"}))
         return 0
 
     from marvelous_memberships import latest_fresh_snapshot
