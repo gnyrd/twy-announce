@@ -589,7 +589,7 @@ def assemble_non_opener_prompt(overview: dict, plans: dict, year: int, month: in
 
 These readers have NO prior context about this class. They did not see the first email. DO NOT write as a reminder. DO NOT use phrases like "still time," "last call," "don't forget," "just a reminder," or "Yoga Habit is coming up." Write as if introducing the class to them fresh.
 
-The first send opened with: "If your practice has been feeling stuck... this is usually why. You're trying to open without support." Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
+Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
 
 Yoga Habit class details - use ONLY these. Do not invent, embellish, or omit:
 Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
