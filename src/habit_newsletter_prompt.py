@@ -57,6 +57,23 @@ Write a week-later continuation subject that reopens the invitation without forc
 _TRANSITIONS_REFERENCE = 'CLICK-TESTED INVITATIONS (September 2026 Transitions campaign):\nTake from these the concrete class facts stated early, the brevity, and the single clear ask. The SUBJECT JOB above governs your subject line. They were campaign emails, so they use a raw link, bold, and emoji bullets. Do NOT copy those: follow this prompt\'s token rules ({CLASS_TITLE}, {REGISTER_CTA}, {CALENDAR_CTA}), its no-bullets rule, and its banned-punctuation rule. For Tiff\'s voice, follow the approved reference newsletters when this prompt includes them.\n\n## Transitions Email 1 (invitation)\nSubject: Free class Sept 12: Bakasana, and the art of getting unstuck\nPreheader: Saturday, September 12 at 9am MT. Live on Zoom, free.\n\nDear friends,\n\nSometimes we find ourselves in a deadlock. We have tried the thing. We have tried harder. We have pushed, negotiated, made the list, made another list. Still, nothing budges.\n\nSeptember\'s series is called **Transitions**, and it opens with a slightly mischievous question: what if pushing harder isn\'t the answer?\n\nOn **Saturday, September 12 at 9am MT**, I\'m teaching a free live class called **Bhakasana Transitions**. Here\'s what we\'ll explore:\n\n✨ **Demystifying Bakasana (Crow Pose).** We\'ll refine the relationship between hands, shoulders, core, and midline, step by step. And for the curious, Bakasana push-ups.\n✨ **The pause that creates possibility.** When something won\'t budge, we hug in, pause, and make enough space to discover another way through.\n✨ **The affirmation carrying the month:** "I pause long enough to know what is true, then move from there."\n\nIt is free. Just come and breathe.\n\nBring a friend, a blanket, and whatever feels stuck.\n\n[Save your spot, free](https://habit.tiffanywoodyoga.com?utm_source=email&utm_campaign=transitions-2026-09&utm_content=email1)\n\nWith love,\nTiff\n\n## Transitions Email 2 (this-Saturday reminder)\nSubject: This Saturday: Bakasana, and a little wriggle room 🧘\u200d♀️\nPreheader: The free Transitions class is this Saturday at 9am MT.\n\nHi loves,\n\nJust a quick reminder. The free live class is this Saturday, September 12 at 9am MT.\n\nWe will demystify Bakasana together. Hands, shoulders, core, midline. And underneath the pose, the real practice of this month\'s Transitions series: when something won\'t budge, hug in, pause, and create enough space to find another possibility.\n\nThe affirmation I keep coming back to:\n\n"I pause long enough to know what is true, then move from there."\n\nIf your week has been a lot, let this be your hour. No pressure, no performance. Come as you are.\n\n[Save your spot, free](https://habit.tiffanywoodyoga.com?utm_source=email&utm_campaign=transitions-2026-09&utm_content=email2)\n\nSee you Saturday,\nTiff'
 
 
+def _friendly_time(value: str) -> str:
+    """A class plan's 24-hour "09:00" as email copy writes it: "9am".
+
+    Tweee copies the Date/time line into the newsletter as given, so the
+    format is set here (JP 2026-09-29, after October's drafts read "09:00 MT").
+    "17:30" becomes "5:30pm". Anything unparseable passes through unchanged.
+    """
+    try:
+        hour_text, minute_text = str(value).strip().split(":")[:2]
+        hour, minute = int(hour_text), int(minute_text)
+    except (ValueError, TypeError):
+        return value
+    suffix = "am" if hour < 12 else "pm"
+    hour12 = hour % 12 or 12
+    return f"{hour12}{suffix}" if minute == 0 else f"{hour12}:{minute:02d}{suffix}"
+
+
 def _subject_job(audience: str) -> str:
     return _SUBJECT_JOBS[audience]
 
@@ -349,7 +366,7 @@ Class schedule this month:
 {plans_block}
 
 Yoga Habit class (free, open to anyone -- invite members to bring someone):
-Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Date/time: {habit_str} | {_friendly_time(habit_plan.get('time', ''))} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
@@ -395,7 +412,7 @@ Theme title (SUBJECT line only, silent throughline in the body): {overview.get('
 TEACHER'S NOTES (write FROM these, never quote or describe them in the body): {overview.get('teaching_notes', '')}
 
 Yoga Habit class -- this is what you're inviting them to. Use ONLY these details. Do not invent or embellish:
-Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Date/time: {habit_str} | {_friendly_time(habit_plan.get('time', ''))} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
@@ -592,7 +609,7 @@ These readers have NO prior context about this class. They did not see the first
 Take a completely different angle. Different hook, different image, different way in. Do not reference the first email or the fact that the reader didn't open it.
 
 Yoga Habit class details - use ONLY these. Do not invent, embellish, or omit:
-Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Date/time: {habit_str} | {_friendly_time(habit_plan.get('time', ''))} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Description: {habit_plan.get('description', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
@@ -635,7 +652,7 @@ def assemble_reminder_prompt(overview: dict, plans: dict, year: int, month: int)
 This is a service email, not marketing. They've already committed. Job: warm "see you tomorrow" with practical info. Do NOT pitch. Do NOT invite them to bring a friend. Do NOT include a Register CTA button - they are already registered.
 
 Yoga Habit class details - use ONLY these. Do not invent or embellish:
-Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Date/time: {habit_str} | {_friendly_time(habit_plan.get('time', ''))} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 Apex pose: {habit_plan.get('apex_pose', '')}
 Bring: yoga mat, 2 blocks, strap, blanket if you use one.
@@ -675,7 +692,7 @@ def assemble_gentle_nudge_prompt(overview: dict, plans: dict, year: int, month: 
 They have already seen the pitch. They know what it is about. DO NOT repeat the case for the class. DO NOT manufacture urgency. DO NOT be pushy. The point of this email is just to circle back gently - in case they meant to register and forgot. If they decided not to come, that is also fine.
 
 Class details - use sparingly, just for context:
-Date/time: {habit_str} | {habit_plan.get('time', '')} MT | {habit_plan.get('duration', '')} min | Free on Zoom
+Date/time: {habit_str} | {_friendly_time(habit_plan.get('time', ''))} MT | {habit_plan.get('duration', '')} min | Free on Zoom
 Title: {habit_plan.get('title', '')}
 
 Write this as Tiff - short, soft, one breath. No yoga jargon. No new pitch. No "still time" or "last chance" pressure. Acknowledge gently. Sign Tiff.
