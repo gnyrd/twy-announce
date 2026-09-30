@@ -824,11 +824,7 @@ def resolve_section_tokens(
         if product_id
         else ""
     )
-    landing = (
-        f"{HABIT_LANDING_URL}?utm_source=newsletter"
-        f"&utm_campaign={year:04d}-{month:02d}"
-        f"&utm_content={key.replace('_', '-')}"
-    )
+    landing = _habit_landing(year, month, key)
     subject = str(section.get("subject") or "")
     preheader = str(section.get("preheader") or "")
     body = str(section.get("body") or "")
@@ -855,7 +851,27 @@ def resolve_section_tokens(
     return resolved
 
 
-def ensure_recording_draft(year: int, month: int) -> bool:
+def _habit_landing(year: int, month: int, key: str) -> str:
+    """The Habit landing page a newsletter's class title links to, tagged per email."""
+    return (
+        f"{HABIT_LANDING_URL}?utm_source=newsletter"
+        f"&utm_campaign={year:04d}-{month:02d}"
+        f"&utm_content={key.replace('_', '-')}"
+    )
+
+
+def _with_class_title(text: str, title: str, year: int, month: int) -> str:
+    """The recording template with {CLASS_TITLE} filled: plain in the subject
+    line, linked in the body, the same link lock time would have given it."""
+    subject, newline, body = text.partition("\n")
+    subject = subject.replace("{CLASS_TITLE}", title)
+    body = body.replace(
+        "{CLASS_TITLE}", f"[{title}]({_habit_landing(year, month, 'recording')})"
+    )
+    return subject + newline + body
+
+
+def ensure_recording_draft(year: int, month: int, class_title: str = "") -> bool:
     """Seed the month's recording section from the canonical template.
 
     The Class Recording mailing is generic: one token template works for
@@ -863,18 +879,30 @@ def ensure_recording_draft(year: int, month: int) -> bool:
     and the recording product link from the month's provisioning record.
     Seeding makes each month editable in the Class Plans editor with no
     hand authoring.
+
+    Given the month's class title, the seed fills it in at once, so the draft
+    reads like the others the monthly run writes (JP 2026-09-29). Only
+    {RECORDING_CTA} and {OFFER} wait for send time: the recording link does
+    not exist until after the class, and the offer can close before then. A
+    draft still identical to the bare template gets the title filled later;
+    a draft anybody has edited is never touched.
     """
     changed = False
     target = newsletter_path(year, month, "recording")
+    template = (RECORDING_TEMPLATE_DIR / "recording.md").read_text(encoding="utf-8")
+    title = " ".join(str(class_title or "").split())
+    seeded = _with_class_title(template, title, year, month) if title else template
     if not target.exists():
-        template = RECORDING_TEMPLATE_DIR / "recording.md"
         try:
-            locked_create(target, template.read_text(encoding="utf-8"))
+            locked_create(target, seeded)
             changed = True
         except FileExistsError:
             # A concurrent seed beat us to it; either way the file is there
             # now, so this caller has nothing new to report.
             pass
+    elif title and target.read_text(encoding="utf-8") == template:
+        locked_write(target, seeded)
+        changed = True
     metadata = _load_metadata(year, month)
     drafts = metadata.setdefault("drafts", {})
     entry = drafts.setdefault("recording", {})

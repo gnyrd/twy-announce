@@ -250,8 +250,8 @@ def seed_recording_drafts(today: date, seed=None) -> list:
     October's Class Recording read Missing on the drafts page for exactly that
     reason, once run_sendgrid_mailings.py (which seeded a month ahead) stopped at
     2026_09 (JP "fix it"). A month is seeded only when it has a confirmed Habit
-    class, the fact the launch checks too, and the seed never overwrites, so an
-    edited draft is left alone. One month failing never stops the other or the
+    class, the fact the launch checks too, with that class's title filled in,
+    and the seed never overwrites an edited draft. One month failing never stops the other or the
     tick; the next tick tries again. Returns the months where something was new.
     """
     if seed is None:
@@ -259,9 +259,10 @@ def seed_recording_drafts(today: date, seed=None) -> list:
     seeded = []
     for year, month in ((today.year, today.month), _following(today.year, today.month)):
         try:
-            if _plan_date(real_class_plan(year, month, CLASS_HABIT)) is None:
+            plan = real_class_plan(year, month, CLASS_HABIT)
+            if _plan_date(plan) is None:
                 continue
-            if seed(year, month):
+            if seed(year, month, class_title=str(plan.get("title") or "")):
                 seeded.append((year, month))
         except Exception as exc:  # noqa: BLE001 - one month must not stop the tick
             log.error(

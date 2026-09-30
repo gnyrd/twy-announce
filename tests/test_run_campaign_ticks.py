@@ -425,7 +425,7 @@ def test_the_recording_draft_is_seeded_for_this_month_and_next(monkeypatch):
     calls = []
 
     seeded = runner.seed_recording_drafts(
-        date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)) or True
+        date(2026, 9, 29), seed=lambda y, m, class_title="": calls.append((y, m)) or True
     )
 
     assert calls == [(2026, 9), (2026, 10)]
@@ -436,7 +436,7 @@ def test_december_seeds_january_of_the_next_year(monkeypatch):
     _habit_class_every_month(monkeypatch)
     calls = []
 
-    runner.seed_recording_drafts(date(2026, 12, 2), seed=lambda y, m: calls.append((y, m)))
+    runner.seed_recording_drafts(date(2026, 12, 2), seed=lambda y, m, class_title="": calls.append((y, m)))
 
     assert calls == [(2026, 12), (2027, 1)]
 
@@ -449,7 +449,7 @@ def test_a_month_without_a_confirmed_habit_class_is_not_seeded(monkeypatch):
     )
     calls = []
 
-    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)))
+    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m, class_title="": calls.append((y, m)))
 
     assert calls == [(2026, 9)]
 
@@ -463,7 +463,7 @@ def test_one_month_failing_does_not_stop_the_other(monkeypatch):
     monkeypatch.setattr(runner, "real_class_plan", plan)
     calls = []
 
-    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m: calls.append((y, m)))
+    runner.seed_recording_drafts(date(2026, 9, 29), seed=lambda y, m, class_title="": calls.append((y, m)))
 
     assert calls == [(2026, 10)]
 
@@ -493,3 +493,75 @@ def test_the_real_seed_writes_next_months_draft_once(monkeypatch, tmp_path):
     assert newsletter_path(YEAR, MONTH + 1, "recording").read_text() == template
     assert first == [(YEAR, MONTH), (YEAR, MONTH + 1)]
     assert again == []
+
+
+# --- the seeded draft carries the class title (JP 2026-09-29) ---------------
+
+TITLE = "The Back of the Heart"
+LINK = (
+    f"[{TITLE}](https://habit.tiffanywoodyoga.com?utm_source=newsletter"
+    f"&utm_campaign={YEAR:04d}-{MONTH:02d}&utm_content=recording)"
+)
+
+
+def _recording_text(tmp_path):
+    from twy_paths import newsletter_path
+
+    return newsletter_path(YEAR, MONTH, "recording").read_text()
+
+
+def test_the_seeded_draft_reads_with_the_class_title(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+
+    assert ensure_recording_draft(YEAR, MONTH, class_title=f"  {TITLE} ") is True
+
+    text = _recording_text(tmp_path)
+    subject, _, body = text.partition("\n")
+    assert subject == f"# Your {TITLE} recording"
+    assert LINK in body and "{CLASS_TITLE}" not in text
+    # The two that cannot be known yet still wait for send time.
+    assert "{RECORDING_CTA}" in body and "{OFFER}" in body
+
+
+def test_send_time_resolution_gives_the_same_email_either_way(monkeypatch, tmp_path):
+    """Filling the title early changes the draft Tiff reads, never the mail."""
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    template = (workflow_module.RECORDING_TEMPLATE_DIR / "recording.md").read_text()
+    _, _, bare = template.partition("\n")
+    ensure_recording_draft(YEAR, MONTH, class_title=TITLE)
+    _, _, early = _recording_text(tmp_path).partition("\n")
+    monkeypatch.setattr(
+        workflow_module, "_recording_record", lambda y, m: {"class_title": TITLE, "product_id": 7}
+    )
+    monkeypatch.setattr(workflow_module, "offer_line", lambda y, m: "")
+
+    def resolved(body):
+        section = {"subject": "S", "preheader": "P", "body": body}
+        return workflow_module.resolve_section_tokens("recording", section, year=YEAR, month=MONTH)["body"]
+
+    assert resolved(early) == resolved(bare)
+
+
+def test_an_untouched_seed_gets_the_title_on_a_later_tick(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    ensure_recording_draft(YEAR, MONTH)
+    monkeypatch.setattr(
+        runner, "real_class_plan", lambda y, m, c="Habit": {"date": f"{y:04d}-{m:02d}-10", "title": TITLE}
+    )
+
+    runner.seed_recording_drafts(date(YEAR, MONTH, 5))
+
+    assert LINK in _recording_text(tmp_path)
+
+
+def test_an_edited_draft_is_never_touched(monkeypatch, tmp_path):
+    monkeypatch.setenv("TWY_DATA_DIR", str(tmp_path / "data"))
+    ensure_recording_draft(YEAR, MONTH)
+    from twy_paths import newsletter_path
+
+    path = newsletter_path(YEAR, MONTH, "recording")
+    edited = path.read_text() + "\nA line Tiff added.\n"
+    path.write_text(edited)
+
+    assert ensure_recording_draft(YEAR, MONTH, class_title=TITLE) is False
+    assert path.read_text() == edited
