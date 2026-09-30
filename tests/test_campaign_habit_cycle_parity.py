@@ -39,10 +39,12 @@ HABIT_CLASS_CYCLE = {
     "segment_name": "Audience: Non Members",
     "emails": [
         # 0 General Invitation: the Monday before class, non-members, with a
-        # resend child to non-openers two days later (the legacy Resend).
+        # resend child to non-openers two days later (the legacy Resend), which
+        # sends the Non-Opener Resend draft as the legacy Resend did
+        # (JP 2026-09-30).
         _email("Come to the free class", "non_lifestyle",
                anchor="class_weekday_before", weekday=0, gate="class_exists",
-               resend={"wait_days": 2}),
+               resend={"wait_days": 2, "section": "non_opener"}),
         # 1 Gentle Reminder: the Friday before, to invitation openers not registered.
         _email("A gentle nudge", "gentle_nudge",
                anchor="class_weekday_before", weekday=4, gate="class_exists",

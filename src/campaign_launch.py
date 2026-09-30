@@ -571,6 +571,34 @@ class CampaignLauncher:
                 f"{label} contains prohibited punctuation: {offenders}"
             )
 
+    def _section_content(self, section: str):
+        """One section's copy for the period, or None when it must hold.
+
+        Shared by a section-sourced email and by a resend child carrying a
+        section of its own, so both hold on the same three facts: no draft
+        this period, a draft not yet approved, a draft still carrying a token.
+        """
+        resolved = self.sections.get(section)
+        if not resolved:
+            return None
+        # Approval is a per-month fact: the period's draft of this section
+        # must be approved before its copy may send (JP 2026-08-24).
+        # Fail closed: unknown reads as unapproved.
+        if not self.section_approvals.get(section):
+            return None
+        content = {
+            "subject": str(resolved.get("subject") or ""),
+            "preheader": str(resolved.get("preheader") or ""),
+            "body": str(resolved.get("body") or ""),
+        }
+        # The draft still carries an unresolved template token (the campaign
+        # content path does not resolve tokens the way the old workflow's
+        # locking does), so hold rather than send a literal {CLASS_TITLE}.
+        combined = "\n".join(content.values())
+        if _UNRESOLVED_TOKEN.search(combined):
+            return None
+        return content
+
     def _email_content(self, email: dict):
         """This email's subject, preheader and body for the period, or None.
 
@@ -582,26 +610,7 @@ class CampaignLauncher:
         """
         section = str(email.get("section") or "").strip()
         if section:
-            resolved = self.sections.get(section)
-            if not resolved:
-                return None
-            # Approval is a per-month fact: the period's draft of this section
-            # must be approved before its copy may send (JP 2026-08-24).
-            # Fail closed: unknown reads as unapproved.
-            if not self.section_approvals.get(section):
-                return None
-            content = {
-                "subject": str(resolved.get("subject") or ""),
-                "preheader": str(resolved.get("preheader") or ""),
-                "body": str(resolved.get("body") or ""),
-            }
-            # The draft still carries an unresolved template token (the campaign
-            # content path does not resolve tokens the way the old workflow's
-            # locking does), so hold rather than send a literal {CLASS_TITLE}.
-            combined = "\n".join(content.values())
-            if _UNRESOLVED_TOKEN.search(combined):
-                return None
-            return content
+            return self._section_content(section)
         # Copy typed into the campaign itself. Its class tokens resolve from
         # this period's class, so a reminder written once names the class Tiff
         # authored this month. A token with no fact behind it holds the email
@@ -711,12 +720,38 @@ class CampaignLauncher:
         draft-sourced parent carries this month's draft copy.
         """
         parent_day = self._email_dates(start_date)[index]
-        child_send_at = self._format(
-            self._send_at(parent_day + timedelta(days=int(resend["wait_days"])))
+        child_moment = self._send_at(
+            parent_day + timedelta(days=int(resend["wait_days"]))
         )
+        child_send_at = self._format(child_moment)
         entry = (state.get("resends") or {}).get(str(index))
         if entry and self._already_scheduled(entry, child_send_at):
             return {**entry, "resend_of": index, "skipped": True}
+        name = campaign_resend_send_name(self._year, self._month, self._name, index)
+        # A resend carrying a section of its own sends THAT draft rather than
+        # the parent's words (JP 2026-09-30, "wire the resend to send the
+        # second-look copy"). The legacy Resend mailing sent the Non-Opener
+        # Resend draft, and the cutover's inherit-the-parent default had left
+        # that draft written, approved and unsent. The child holds on its own
+        # draft the way a parent does, and the parent is untouched by the hold.
+        section = str(resend.get("section") or "").strip()
+        if section:
+            own = self._section_content(section)
+            if own is None:
+                return {
+                    "resend_of": index, "name": name, "section": section,
+                    "send_at": child_send_at, "content_pending": True,
+                    "skipped": True,
+                }
+            parent_content = own
+        if self._past_due(child_moment):
+            # Only reachable through a hold that lifted too late, since without
+            # one the child is booked in the parent's own run. Its moment has
+            # gone, so skip it alone, the way a past-due parent is skipped.
+            return {
+                "resend_of": index, "name": name, "send_at": child_send_at,
+                "past_due": True, "skipped": True,
+            }
         segment_id = self._ensure_non_opener_segment(index, parent_send_id, state)
         payload = self._resend_payload(index, parent_content, resend, segment_id)
         _child_id, record = self._provision(

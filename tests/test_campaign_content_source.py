@@ -196,3 +196,97 @@ def test_launch_holds_a_section_email_until_its_period_draft_is_approved(tmp_pat
     assert api.created_single_sends == []
     assert len(pending) == 1
     assert pending[0].get("skipped") is True
+
+
+# -- a resend child with a draft of its own (JP 2026-09-30) -------------------
+# The legacy Resend mailing sent the Non-Opener Resend draft. The cutover's
+# default, a resend inherits its parent's copy, left that draft written,
+# approved and unsent. A resend carrying `section` sends that draft instead.
+
+RESEND_SECTIONS = {
+    "non_lifestyle": {
+        "subject": "Come to the free class",
+        "preheader": "Saturday at 9",
+        "body": "The invitation body.",
+    },
+    "non_opener": {
+        "subject": "A different way in",
+        "preheader": "Second look",
+        "body": "The second-look body for non-openers.",
+    },
+}
+
+
+def _invitation_with_resend(resend):
+    return [{"section": "non_lifestyle", "subject": "STATIC", "body": "STATIC",
+             "interval_days": 0, "resend": resend}]
+
+
+def test_resend_child_sends_its_own_section_draft(tmp_path):
+    api = FakeAPI()
+    launcher = _launcher(
+        _invitation_with_resend({"wait_days": 2, "section": "non_opener"}),
+        tmp_path, sections=RESEND_SECTIONS, api=api,
+    )
+    launcher.launch(date(2026, 9, 12))
+    parent, child = api.created_single_sends
+    assert parent["email_config"]["subject"] == "Come to the free class"
+    assert child["email_config"]["subject"] == "A different way in"
+    # email_config carries rendered html and plain text, not the raw fields
+    assert "second-look body for non-openers" in child["email_config"]["plain_content"]
+    assert "The invitation body" not in child["email_config"]["plain_content"]
+
+
+def test_resend_child_without_a_section_still_inherits_the_parent_draft(tmp_path):
+    api = FakeAPI()
+    launcher = _launcher(
+        _invitation_with_resend({"wait_days": 2}),
+        tmp_path, sections=RESEND_SECTIONS, api=api,
+    )
+    launcher.launch(date(2026, 9, 12))
+    parent, child = api.created_single_sends
+    assert child["email_config"]["subject"] == parent["email_config"]["subject"]
+    assert child["email_config"]["plain_content"] == parent["email_config"]["plain_content"]
+
+
+def test_resend_child_holds_on_its_own_unapproved_draft_and_the_parent_still_sends(tmp_path):
+    api = FakeAPI()
+    launcher = _launcher(
+        _invitation_with_resend({"wait_days": 2, "section": "non_opener"}),
+        tmp_path, sections=RESEND_SECTIONS, api=api,
+        approvals={"non_lifestyle": True, "non_opener": False},
+    )
+    result = launcher.launch(date(2026, 9, 12))
+    assert len(api.created_single_sends) == 1  # the invitation went, alone
+    child = next(r for r in result["sends"] if r.get("resend_of") == 0)
+    assert child["content_pending"] is True
+    assert child["skipped"] is True
+    assert child["section"] == "non_opener"
+
+
+def test_resend_child_holds_when_its_own_draft_is_missing(tmp_path):
+    api = FakeAPI()
+    only_the_invitation = {"non_lifestyle": RESEND_SECTIONS["non_lifestyle"]}
+    launcher = _launcher(
+        _invitation_with_resend({"wait_days": 2, "section": "non_opener"}),
+        tmp_path, sections=only_the_invitation, api=api,
+    )
+    result = launcher.launch(date(2026, 9, 12))
+    assert len(api.created_single_sends) == 1
+    child = next(r for r in result["sends"] if r.get("resend_of") == 0)
+    assert child["content_pending"] is True
+
+
+def test_a_held_resend_is_provisioned_on_a_later_run_once_its_draft_is_approved(tmp_path):
+    api = FakeAPI()
+    emails = _invitation_with_resend({"wait_days": 2, "section": "non_opener"})
+    first = _launcher(emails, tmp_path, sections=RESEND_SECTIONS, api=api,
+                      approvals={"non_lifestyle": True, "non_opener": False})
+    first.launch(date(2026, 9, 12))
+    assert len(api.created_single_sends) == 1
+    later = _launcher(emails, tmp_path, sections=RESEND_SECTIONS, api=api)
+    result = later.launch(date(2026, 9, 12))
+    assert len(api.created_single_sends) == 2
+    child = next(r for r in result["sends"] if r.get("resend_of") == 0)
+    assert child["skipped"] is False
+    assert api.created_single_sends[1]["email_config"]["subject"] == "A different way in"
