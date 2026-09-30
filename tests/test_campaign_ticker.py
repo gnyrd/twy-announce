@@ -165,3 +165,31 @@ def test_an_unapproved_email_still_holds_a_monthly_campaign():
     journey = _monthly_approval("2026_09")
     journey["emails"][0].pop("approved_at")
     assert ct.is_due(journey, "2026_09") is False
+
+
+# --- an email read from a monthly draft is approved on its draft only (2026-09-29)
+
+
+def _drafted(section):
+    return {"subject": "(from the monthly draft)", "body": "", "section": section}
+
+
+def test_a_campaign_of_drafted_emails_is_due_with_no_stamps():
+    """The Yoga Habit shape: every email reads a draft, and the launcher holds
+    each one until its draft is approved in Newsletter Drafts."""
+    journey = _campaign(emails=[_drafted("non_lifestyle"), _drafted("reminder")])
+    assert ct.is_due(journey, "2026_10") is True
+    assert ct.is_due(_campaign(approval="monthly", emails=[_drafted("lifestyle")]), "2026_10") is True
+
+
+def test_a_typed_email_beside_drafted_ones_still_needs_its_own_stamp():
+    typed = {"subject": "Typed", "body": "x", "interval_days": 0}
+    journey = _campaign(emails=[_drafted("non_lifestyle"), typed])
+    assert ct.is_due(journey, "2026_10") is False
+    typed["approved_at"] = "2026-09-29T00:00:00+00:00"
+    assert ct.is_due(journey, "2026_10") is True
+
+
+def test_a_blank_section_is_typed_copy():
+    journey = _campaign(emails=[{"subject": "S", "body": "x", "section": "  "}])
+    assert ct.is_due(journey, "2026_10") is False

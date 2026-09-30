@@ -33,6 +33,14 @@ def all_emails_approved(journey: dict, period: str | None = None) -> bool:
     holds a campaign with even one unapproved email, exactly like the manual
     launch does.
 
+    An email that reads a monthly draft (it has a `section`) is approved in one
+    place only: on that month's draft, in Newsletter Drafts. The launcher holds
+    each such email until its draft is approved and sends the others, so the
+    campaign itself asks nothing more of it here. Only an email with copy typed
+    into the campaign carries its own Approved stamp (JP 2026-09-29, after
+    Tiff's approved October drafts would not have sent for want of a second
+    tick on each email).
+
     On a campaign whose approval scope is monthly, a stamp counts only for the
     period it was given for. Tiff edits the copy for this month's class and
     ticks again, and last month's approval cannot send this month's mail. The
@@ -43,6 +51,9 @@ def all_emails_approved(journey: dict, period: str | None = None) -> bool:
     emails = journey.get("emails") or []
     if not emails:
         return False
+    emails = [email for email in emails if not str(email.get("section") or "").strip()]
+    if not emails:
+        return True
     if not all(email.get("approved_at") for email in emails):
         return False
     try:
