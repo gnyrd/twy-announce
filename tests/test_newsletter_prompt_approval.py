@@ -263,3 +263,16 @@ def test_malformed_approval_item_fails_closed(
             2026,
             4,
         )
+
+
+def test_follow_up_prompt_is_written_for_the_tuesday_after_the_class(
+    prompt_inputs,
+    sample_overview,
+    sample_plans,
+):
+    prompt = assemble_ph1_prompt(sample_overview, sample_plans, 2026, 4)
+    assert "Tuesday after the Saturday class" in prompt
+    assert 'Never write "yesterday"' in prompt
+    assert "24 hours after class" not in prompt
+    assert "attended yesterday" not in prompt
+    assert "$49 first month must be in it" in prompt

@@ -45,7 +45,7 @@ Write a warm, functional subject for someone who is already registered. Signal t
     "gentle_nudge": """SUBJECT JOB: Gentle nudge
 Write a soft in-case-you-meant-to subject for someone who opened the invitation but did not register. Do not manufacture urgency. Do not repeat either non-member invitation subject and do not use the monthly theme by itself.""",
     "ph1": """SUBJECT JOB: First post-class follow-up
-Write a direct thank-you or immediate reflection subject for someone who attended yesterday. It should sound like the conversation after class, not a monthly campaign. Do not use the monthly theme by itself.""",
+Write a direct thank-you or reflection subject for someone who attended the class on Saturday, three days ago. It should sound like the conversation after class, not a monthly campaign. Do not use the monthly theme by itself.""",
     "ph2": """SUBJECT JOB: Second post-class follow-up
 Write a week-later continuation subject that reopens the invitation without forced urgency. It must differ from the first follow-up subject and must not use the monthly theme by itself.""",
 }
@@ -499,7 +499,7 @@ P.S. Our next Yoga Habit class is [NEXT MONTH DATE] - mark your calendar. You ar
 
 
 def assemble_ph1_prompt(overview: dict, plans: dict, year: int, month: int) -> str:
-    """Prompt for the first post-Habit-class follow-up email (send +24hrs)."""
+    """Prompt for the post-Habit-class follow-up email, sent the Tuesday after the class."""
     habit_date = get_habit_class_date(year, month)
     habit_str = habit_date.strftime("%B %-d")
     habit_plan = plans.get(habit_date.isoformat(), {})
@@ -521,7 +521,7 @@ Title: {habit_plan.get('title', 'The Yoga Habit')}
 Description: {habit_plan.get('description', '')}
 Theme: {overview.get('title', '')} - {overview.get('teaching_notes', '')}
 
-This email sends 24 hours after class ends. The reader just practiced with Tiff for the first time (or returned after a gap). They're in the afterglow.
+This email sends on the Tuesday after the Saturday class, three days later. The reader practiced with Tiff for the first time (or returned after a gap) and has had a few ordinary days since. Never write "yesterday" or "last night": say "on Saturday" or "this weekend". It is the last email after the class, so the $49 first month must be in it, and "this week" is still true for it.
 
 Goal: contemplative thank-you that weaves the practice into life and naturally opens into an invitation to continue inside The Yoga Lifestyle. Match the reference's non-dual undertone, its weaving of the work into the everyday, its lack of formula. Discovered, not delivered. Offer: first month for $49. Do not fabricate details about the class - use only what's provided above.
 

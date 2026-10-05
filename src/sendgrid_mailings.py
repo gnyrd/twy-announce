@@ -187,6 +187,18 @@ def _at_mountain(day: date, hour: int, minute: int) -> datetime:
     return local.astimezone(timezone.utc)
 
 
+# From the October 2026 class on, Follow Up 1 goes out on the Tuesday after the
+# Saturday class, three days on, where it used to go the next morning, and
+# there is no Follow Up 2 (Tiffany on the 2026-10-05 call, JP the same day).
+# Earlier periods keep the dates and the emails they actually had.
+FOLLOW_UP_CHANGE_FROM = (2026, 10)
+
+
+def follow_up_2_retired(year: int, month: int) -> bool:
+    """True for every period that has no Follow Up 2."""
+    return (year, month) >= FOLLOW_UP_CHANGE_FROM
+
+
 def mailing_schedule(
     year: int,
     month: int,
@@ -221,11 +233,12 @@ def mailing_schedule(
         return _at_mountain(class_date - timedelta(days=1), 10, 17)
     if purpose is MailingPurpose.CLASS_RECORDING:
         # The day after class, evening. The edited recording has to exist and be
-        # attached to its free product before this goes, and Follow Up 1 lands
-        # the same morning, so this sits well clear of both.
+        # attached to its free product before this goes. Follow Up 1 landed the
+        # same morning until October 2026 and follows two days later since.
         return _at_mountain(class_date + timedelta(days=1), 17, 17)
     if purpose is MailingPurpose.FOLLOW_UP_1:
-        return _at_mountain(class_date + timedelta(days=1), 10, 17)
+        days = 3 if follow_up_2_retired(year, month) else 1
+        return _at_mountain(class_date + timedelta(days=days), 10, 17)
     if purpose is MailingPurpose.FOLLOW_UP_2:
         return _at_mountain(class_date + timedelta(days=7), 10, 17)
     raise ValueError("unsupported mailing purpose")

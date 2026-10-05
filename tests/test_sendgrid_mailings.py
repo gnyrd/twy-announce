@@ -110,3 +110,19 @@ def test_resend_is_exact_single_send_non_openers():
     assert "event_type = 'processed'" in query
     assert "event_type = 'open'" in query
     assert "NOT IN" in query
+
+
+def test_follow_up_1_goes_out_the_tuesday_after_from_october_2026():
+    from sendgrid_mailings import follow_up_2_retired
+
+    september = date(2026, 9, 12)
+    october = date(2026, 10, 10)
+    assert mailing_schedule(
+        2026, 9, MailingPurpose.FOLLOW_UP_1, september
+    ).isoformat() == "2026-09-13T16:17:00+00:00"
+    tuesday = mailing_schedule(2026, 10, MailingPurpose.FOLLOW_UP_1, october)
+    assert tuesday.isoformat() == "2026-10-13T16:17:00+00:00"
+    assert tuesday.weekday() == 1
+    assert follow_up_2_retired(2026, 9) is False
+    assert follow_up_2_retired(2026, 10) is True
+    assert follow_up_2_retired(2027, 1) is True

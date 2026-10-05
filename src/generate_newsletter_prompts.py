@@ -69,7 +69,8 @@ def main():
         return
 
     # If newsletters already exist for next month, nothing to do
-    AUDIENCES = ("lifestyle", "non-lifestyle", "non-opener", "reminder", "gentle-nudge", "ph1", "ph2")
+    # No "ph2": Follow Up 2 was retired from the October 2026 class on (JP 2026-10-05).
+    AUDIENCES = ("lifestyle", "non-lifestyle", "non-opener", "reminder", "gentle-nudge", "ph1")
     nl_paths = {a: newsletter_path(year, month, a) for a in AUDIENCES}
     if all(p.exists() for p in nl_paths.values()):
         print(f"All {len(AUDIENCES)} newsletters exist for {month_label}, nothing to do")
@@ -138,10 +139,9 @@ def main():
     save_prompt(year, month, "reminder", hnp.assemble_reminder_prompt(overview, plans, year, month))
     save_prompt(year, month, "gentle-nudge", hnp.assemble_gentle_nudge_prompt(overview, plans, year, month))
     save_prompt(year, month, "ph1", hnp.assemble_ph1_prompt(overview, plans, year, month))
-    save_prompt(year, month, "ph2", hnp.assemble_ph2_prompt(overview, plans, year, month))
 
     msg = (
-        f":memo: All prompts ready for {month_label} (newsletters + follow-ups). "
+        f":memo: All prompts ready for {month_label} (newsletters + follow-up). "
         f"Trigger Tweee: \"Use your Actions: get the {month_label} newsletter prompts and save the newsletter content\""
     )
     post_slack(SLACK_STATUS_CHANNEL, msg)
