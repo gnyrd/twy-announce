@@ -1577,6 +1577,10 @@ def post_slack_dm_once(
             "channel": user_id,
             "text": render_slack(report) + stats_link(),
             "client_msg_id": deterministic_client_msg_id(report["week_end"]),
+            # The post links stay links, with no preview under the review
+            # (JP 2026-10-05).
+            "unfurl_links": False,
+            "unfurl_media": False,
         },
         timeout=15,
     )

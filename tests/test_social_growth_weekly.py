@@ -534,6 +534,35 @@ def test_slack_dm_targets_jp_and_is_idempotent(tmp_path, monkeypatch):
     assert calls[0]["json"]["client_msg_id"] == weekly.deterministic_client_msg_id(report["week_end"])
 
 
+def test_slack_dm_asks_for_no_link_previews(tmp_path):
+    # The Top Reel and top Short dates link to the posts, and Slack expanded
+    # the Short into a video player under the review (JP 2026-10-05: "turn
+    # off the preview in that post").
+    report = weekly.build_weekly_review([], week_end=date(2026, 7, 28))
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True}
+
+    def fake_post(url, **kwargs):
+        calls.append(kwargs)
+        return Response()
+
+    assert weekly.post_slack_dm_once(
+        report,
+        state_path=tmp_path / weekly.SLACK_STATE_FILE,
+        token="bot-token",
+        user_id="UJP",
+        post=fake_post,
+    )
+    assert calls[0]["json"]["unfurl_links"] is False
+    assert calls[0]["json"]["unfurl_media"] is False
+
+
 def test_slack_dm_http_error_does_not_write_state(tmp_path):
     report = weekly.build_weekly_review([], week_end=date(2026, 7, 28))
     state_path = tmp_path / weekly.SLACK_STATE_FILE
