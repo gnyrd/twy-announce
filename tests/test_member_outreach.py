@@ -67,7 +67,7 @@ def test_several_quiet_members_come_in_one_post_oldest_first():
     assert text.startswith("*New members, no live class in their first two weeks:*")
 
 
-# ---- the check-ins, every two weeks ------------------------------------------
+# ---- the check-in, every Monday afternoon ------------------------------------
 
 def first_year(cid, days=100, today=TODAY):
     return M(cid, f"N{cid}", today - timedelta(days=days), True)
@@ -77,67 +77,98 @@ def core(cid, days=800, today=TODAY):
     return M(cid, f"C{cid}", today - timedelta(days=days), True)
 
 
-def test_one_from_the_first_year_and_one_from_the_core():
-    picks = mo.pick_checkins([first_year(1), first_year(2), core(10), core(11)], {}, "2026-10-12", TODAY)
-    assert len(picks) == 2
-    assert sorted(p.cid < 10 for p in picks) == [False, True]
+FIRST_YEAR_WEEK = "2026-10-12"  # an even week counted from Monday 2026-09-28
+CORE_WEEK = "2026-10-19"
+
+
+def test_the_weeks_alternate_between_the_first_year_and_the_core():
+    members = [first_year(1), first_year(2), core(10), core(11)]
+    assert mo.pick_checkin(members, {}, FIRST_YEAR_WEEK, TODAY).cid < 10
+    assert mo.pick_checkin(members, {}, CORE_WEEK, TODAY).cid >= 10
 
 
 def test_nobody_in_a_group_is_picked_twice_before_everyone_in_it_has_been_picked():
     members = [first_year(1), first_year(2), first_year(3), core(10), core(11)]
     history = {}
-    for n in range(6):
-        period = (mo.PERIOD_EPOCH + timedelta(days=14 * n)).isoformat()
-        picks = mo.pick_checkins(members, history, period, TODAY)
-        history[period] = [p.cid for p in picks]
-    newer_order = [cid for period in sorted(history) for cid in history[period] if cid < 10]
-    core_order = [cid for period in sorted(history) for cid in history[period] if cid >= 10]
-    assert sorted(newer_order[:3]) == [1, 2, 3] and sorted(newer_order[3:6]) == [1, 2, 3]
+    for n in range(10):
+        week = (mo.PERIOD_EPOCH + timedelta(days=7 * n)).isoformat()
+        history[week] = [mo.pick_checkin(members, history, week, TODAY).cid]
+    newer_order = [cid for week in sorted(history) for cid in history[week] if cid < 10]
+    core_order = [cid for week in sorted(history) for cid in history[week] if cid >= 10]
+    assert sorted(newer_order[:3]) == [1, 2, 3] and len(set(newer_order[3:5])) == 2
     assert sorted(core_order[:2]) == [10, 11] and sorted(core_order[2:4]) == [10, 11]
 
 
 def test_members_in_their_first_thirty_days_wait():
-    picks = mo.pick_checkins([first_year(1, days=10), core(10)], {}, "2026-10-12", TODAY)
-    assert [p.cid for p in picks] == [10]
+    pick = mo.pick_checkin([first_year(1, days=10), core(10)], {}, FIRST_YEAR_WEEK, TODAY)
+    assert pick.cid == 10
 
 
-def test_an_empty_group_means_both_picks_come_from_the_other():
-    picks = mo.pick_checkins([core(10), core(11), core(12)], {}, "2026-10-12", TODAY)
-    assert len(picks) == 2 and all(p.cid >= 10 for p in picks)
+def test_an_empty_group_means_the_other_fills_in():
+    assert mo.pick_checkin([core(10)], {}, FIRST_YEAR_WEEK, TODAY).cid == 10
+    assert mo.pick_checkin([first_year(1)], {}, CORE_WEEK, TODAY).cid == 1
+    assert mo.pick_checkin([], {}, CORE_WEEK, TODAY) is None
 
 
 def test_a_member_joins_the_core_on_their_first_anniversary():
-    anniversary = first_year(1, days=365)
-    picks = mo.pick_checkins([anniversary, first_year(2)], {}, "2026-10-12", TODAY)
-    assert {p.cid for p in picks} == {1, 2}  # one from each group
+    members = [first_year(1, days=365), first_year(2)]
+    assert mo.pick_checkin(members, {}, CORE_WEEK, TODAY).cid == 1
+    assert mo.pick_checkin(members, {}, FIRST_YEAR_WEEK, TODAY).cid == 2
 
 
 def test_archive_only_members_are_never_picked():
     # JP 2026-09-28: Tiffany wants to retire The Archive, so it is ignored.
     archive_only = M(20, "Archive", TODAY - timedelta(days=800), False)
-    picks = mo.pick_checkins([archive_only, core(10), first_year(1)], {}, "2026-10-12", TODAY)
-    assert 20 not in {p.cid for p in picks} and len(picks) == 2
+    assert mo.pick_checkin([archive_only, core(10)], {}, CORE_WEEK, TODAY).cid == 10
+    assert mo.pick_checkin([archive_only], {}, CORE_WEEK, TODAY) is None
 
 
-def test_the_checkin_post_names_both_for_the_two_weeks_one_a_week():
-    text = mo.checkin_message([first_year(1), core(10)], mo.PERIOD_EPOCH)
-    assert text.startswith("*Check-ins, Sep 28 to Oct 11:*")
-    assert text.count("member since") == 2 and "One a week" in text and "Tiffany" in text
+def test_the_checkin_post_names_one_member_for_the_week():
+    text = mo.checkin_message(core(10), date(2026, 10, 12))
+    assert text.startswith("*Check-in, week of Oct 12:*")
+    assert text.count("member since") == 1 and "customers/10|C10" in text
+    assert text.endswith("A short personal note from Tiffany, no agenda.")
 
 
-def test_periods_start_on_alternate_mondays_from_2026_09_28():
+def test_weeks_start_on_mondays_from_2026_09_28():
     assert mo.period_start(date(2026, 9, 28)) == date(2026, 9, 28)
-    assert mo.period_start(date(2026, 10, 11)) == date(2026, 9, 28)
+    assert mo.period_start(date(2026, 10, 11)) == date(2026, 10, 5)
     assert mo.period_start(date(2026, 10, 12)) == date(2026, 10, 12)
-    assert mo.period_start(date(2026, 9, 27)) == date(2026, 9, 14)
+    assert mo.period_start(date(2026, 9, 27)) == date(2026, 9, 21)
     assert all(mo.period_start(date(2026, 11, d)).weekday() == 0 for d in range(1, 29))
+
+
+def test_the_checkin_is_due_from_monday_afternoon_until_the_week_ends():
+    def at(day, hour, minute):
+        return datetime(2026, 10, day, hour, minute, tzinfo=mo.MT)
+    assert not mo.checkin_due(at(12, 1, 40))  # the daily run, Monday morning
+    assert not mo.checkin_due(at(12, 14, 14))
+    assert mo.checkin_due(at(12, 14, 15))
+    assert mo.checkin_due(at(13, 1, 40))  # Tuesday: a missed Monday is caught up
+    assert mo.checkin_due(at(18, 23, 59))  # Sunday, still that week
+    assert not mo.checkin_due(at(19, 1, 40))  # the next Monday, before 14:15
 
 
 # ---- the switch and a whole run -----------------------------------------------
 
+SNAPSHOT_AT = datetime(2026, 10, 5, 7, 20, tzinfo=timezone.utc)  # the Monday 07:20 UTC report
+MONDAY_AFTERNOON = datetime(2026, 10, 5, 20, 15, tzinfo=timezone.utc)  # 14:15 MT, the check-in run
+MONDAY_MORNING = datetime(2026, 10, 5, 7, 40, tzinfo=timezone.utc)  # 01:40 MT, the daily run
+CLOCK = [MONDAY_AFTERNOON]
+
+
+class Frozen(datetime):
+    """datetime with its clock stopped at CLOCK[0]; main() calls datetime.now."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return CLOCK[0].astimezone(tz) if tz else CLOCK[0].replace(tzinfo=None)
+
+
 @pytest.fixture
 def box(tmp_path, monkeypatch):
-    """A tiny marvy.db and a fresh HM report, wired in through twy_paths."""
+    """A tiny marvy.db and a fresh HM report, wired in through twy_paths,
+    with the clock stopped on Monday 2026-10-05 at 14:15 MT."""
     import twy_paths
     import twy_platform.contribution as contribution
     import importlib
@@ -145,8 +176,10 @@ def box(tmp_path, monkeypatch):
     # so fetch the module itself: main() reads slack from it at call time.
     slack_module = importlib.import_module("twy_platform.slack")
 
-    now = datetime.now(timezone.utc)
-    today = now.date()
+    CLOCK[0] = MONDAY_AFTERNOON
+    monkeypatch.setattr(mo, "datetime", Frozen)
+    now = SNAPSHOT_AT
+    today = MONDAY_AFTERNOON.astimezone(mo.MT).date()
     reports = tmp_path / "reports"
     reports.mkdir()
     snapshot = reports / f"active_subscriptions_{now:%Y%m%dT%H%M%SZ}.csv"
@@ -196,20 +229,33 @@ def test_with_the_labs_switch_off_it_posts_nothing_and_records_nothing(box, monk
     assert not (tmp_path / "member_outreach").exists()
 
 
-def test_a_run_names_the_quiet_starter_and_this_periods_checkins_once_each(box):
+def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     tmp_path, posted, _ = box
     assert mo.main([]) == 0
     assert len(posted) == 2
     assert all(channel == mo.DEFAULT_CHANNEL for channel, _ in posted)
     quiet_text, checkin_text = posted[0][1], posted[1][1]
     assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
+    assert checkin_text.startswith("*Check-in, week of Oct 5:*")
     assert "customers/3|Steady Member" in checkin_text  # the two new members are under 30 days
     assert "Quiet" not in checkin_text and "Keen" not in checkin_text
     state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
     assert "1" in state["quiet_alerted"]
-    assert list(state["checkins"].values()) == [[3]]
+    assert state["checkins"] == {"2026-10-05": [3]}
     assert mo.main([]) == 0
     assert len(posted) == 2  # nothing twice
+
+
+def test_the_daily_run_before_monday_afternoon_leaves_the_checkin_for_later(box):
+    tmp_path, posted, _ = box
+    CLOCK[0] = MONDAY_MORNING
+    assert mo.main([]) == 0
+    assert [text[:12] for _, text in posted] == ["*New member,"]
+    state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
+    assert state["checkins"] == {}
+    CLOCK[0] = MONDAY_AFTERNOON
+    assert mo.main([]) == 0
+    assert [text[:12] for _, text in posted] == ["*New member,", "*Check-in, w"]
 
 
 def test_dry_run_prints_and_writes_nothing(box, capsys):

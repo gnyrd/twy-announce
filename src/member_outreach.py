@@ -9,19 +9,22 @@ kept 38% (vault reports/2026_09_28_membership_retention.md). The post waits
 until the attendance data covers the member's whole first 14 days, so a class
 taken on day 13 is never missed because the sync had not reached it yet.
 
-The check-ins, every two weeks. On the first run of each two-week period
-(periods start on alternate Mondays, Mountain time, the first on 2026-09-28),
-two current TYL members are named for a personal check-in, one for each week
-(JP 2026-09-28: "we'll see if Tiff can reach 1 person per week"): one from
-members in their first year, where people leave, and one from the
-longer-standing core, who carry most of what TWY earns (28 of 87 members
-account for 80% of all paid months). Within each group the least recently
-picked go first, so nobody in a group is picked twice before everyone in it
-has been picked once. The pool is read fresh every period, so it follows
+The check-in, every Monday afternoon. Each week one current TYL member is
+named for a personal check-in, posted at 14:15 Mountain time on the Monday
+(JP 2026-10-06: "make it weekly, one name each Monday around 2:15pm MT";
+until then it was two names every other Monday, JP 2026-09-28: "we'll see if
+Tiff can reach 1 person per week"). The weeks alternate between two groups,
+counting from Monday 2026-09-28: members in their first year, where people
+leave, and the longer-standing core, who carry most of what TWY earns (28 of
+87 members account for 80% of all paid months). Within each group the least
+recently picked go first, so nobody in a group is picked twice before everyone
+in it has been picked once. The pool is read fresh every week, so it follows
 members as they join and leave, and a member moves from the first-year group
-to the core on their first anniversary. When one group is empty both picks
-come from the other. Members in their first 30 days wait: the welcome week
-and the quiet-start post cover them.
+to the core on their first anniversary. When the week's group has nobody
+eligible the other group fills in. Members in their first 30 days wait: the
+welcome week and the quiet-start post cover them. The post is due from 14:15
+MT on the Monday, so the daily run earlier that day never posts it, and a
+later run in the same week posts it if the Monday run failed.
 
 Both cover The Yoga Lifestyle Membership only. The Archive is ignored: Tiffany
 wants to retire it (JP 2026-09-28).
@@ -47,7 +50,7 @@ import sqlite3
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -61,8 +64,9 @@ TYL_PRODUCT_NAME = "The Yoga Lifestyle Membership"
 QUIET_DAYS = 14
 QUIET_LOOKBACK_DAYS = 45  # a start older than this is no longer news
 NEWCOMER_DAYS = 30  # too new for a check-in
-PERIOD_DAYS = 14
-PERIOD_EPOCH = date(2026, 9, 28)  # a Monday; periods start every 14 days from here
+PERIOD_DAYS = 7
+PERIOD_EPOCH = date(2026, 9, 28)  # a Monday; weeks start every Monday from here
+CHECKIN_TIME = time(14, 15)  # Monday afternoon, Mountain time (JP 2026-10-06)
 FIRST_YEAR_DAYS = 365
 ATTENDANCE_MAX_AGE_HOURS = 36
 
@@ -104,20 +108,27 @@ def quiet_starts(
 
 
 def period_start(day: date) -> date:
-    """The Monday that starts the two-week period `day` falls in."""
+    """The Monday that starts the week `day` falls in."""
     return PERIOD_EPOCH + timedelta(days=PERIOD_DAYS * ((day - PERIOD_EPOCH).days // PERIOD_DAYS))
 
 
-def pick_checkins(
+def checkin_due(now_mt: datetime) -> bool:
+    """True from 14:15 Mountain time on the week's Monday until the week ends."""
+    due = datetime.combine(period_start(now_mt.date()), CHECKIN_TIME, tzinfo=MT)
+    return now_mt >= due
+
+
+def pick_checkin(
     members: list[Member],
     history: dict[str, list[int]],
     period: str,
     today: date,
-) -> list[Member]:
-    """Two TYL members for this period's personal check-ins, one from the
-    first year and one from the core when both groups have someone eligible.
-    Archive-only members are never picked. `history` maps each earlier
-    period's start date to the members it named."""
+) -> Member | None:
+    """One TYL member for this week's personal check-in. The weeks alternate
+    between the first-year group and the core, first-year on the even weeks
+    counted from PERIOD_EPOCH, and the other group fills in when the week's
+    group has nobody eligible. Archive-only members are never picked.
+    `history` maps each earlier week's Monday to the members it named."""
     last_picked: dict[int, str] = {}
     for picked_period, ids in history.items():
         for cid in ids:
@@ -130,13 +141,11 @@ def pick_checkins(
     eligible = [m for m in members if m.tyl and (today - m.start).days >= NEWCOMER_DAYS]
     first_year = sorted((m for m in eligible if (today - m.start).days < FIRST_YEAR_DAYS), key=order)
     core = sorted((m for m in eligible if (today - m.start).days >= FIRST_YEAR_DAYS), key=order)
-    picks = [group[0] for group in (first_year, core) if group]
-    for member in sorted(eligible, key=order):
-        if len(picks) >= 2:
-            break
-        if member not in picks:
-            picks.append(member)
-    return picks[:2]
+    week = (date.fromisoformat(period) - PERIOD_EPOCH).days // PERIOD_DAYS
+    for group in (first_year, core) if week % 2 == 0 else (core, first_year):
+        if group:
+            return group[0]
+    return None
 
 
 def _link(member: Member) -> str:
@@ -159,14 +168,10 @@ def quiet_message(quiet: list[Member], tyl_start: dict[int, date]) -> str:
     return "\n".join(lines)
 
 
-def checkin_message(picks: list[Member], start: date) -> str:
-    end = start + timedelta(days=PERIOD_DAYS - 1)
-    named = [f"{_link(m)} (member since {m.start:%b %Y})" for m in picks]
-    who = " and ".join(named)
-    head = "Check-ins" if len(picks) > 1 else "Check-in"
-    pace = "One a week" if len(picks) > 1 else "This week or next"
-    return (f"*{head}, {start:%b} {start.day} to {end:%b} {end.day}:* {who}. "
-            f"{pace}, a short personal note from Tiffany, no agenda.")
+def checkin_message(pick: Member, start: date) -> str:
+    return (f"*Check-in, week of {start:%b} {start.day}:* {_link(pick)} "
+            f"(member since {pick.start:%b %Y}). A short personal note from "
+            f"Tiffany, no agenda.")
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +279,8 @@ def main(argv=None) -> int:
     from twy_platform.slack import slack
 
     now = datetime.now(timezone.utc)
-    today = now.astimezone(MT).date()
+    now_mt = now.astimezone(MT)
+    today = now_mt.date()
     period = period_start(today)
     snapshot = latest_fresh_snapshot(reports_dir=hm_subscriptions_dir(),
                                      prefix="active_subscriptions", now=now)
@@ -302,11 +308,11 @@ def main(argv=None) -> int:
     posts = []
     if quiet:
         posts.append(("quiet", quiet, quiet_message(quiet, tyl_start)))
-    if period.isoformat() not in state["checkins"]:
+    if checkin_due(now_mt) and period.isoformat() not in state["checkins"]:
         history = {p: [int(c) for c in ids] for p, ids in state["checkins"].items()}
-        picks = pick_checkins(members, history, period.isoformat(), today)
-        if picks:
-            posts.append(("checkins", picks, checkin_message(picks, period)))
+        pick = pick_checkin(members, history, period.isoformat(), today)
+        if pick:
+            posts.append(("checkin", [pick], checkin_message(pick, period)))
         else:
             state["checkins"][period.isoformat()] = []
 
