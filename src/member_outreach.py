@@ -24,7 +24,9 @@ to the core on their first anniversary. When the week's group has nobody
 eligible the other group fills in. Members in their first 30 days wait: the
 welcome week and the quiet-start post cover them. The post is due from 14:15
 MT on the Monday, so the daily run earlier that day never posts it, and a
-later run in the same week posts it if the Monday run failed.
+later run in the same week posts it if the Monday run failed. The post is an
+invitation to Tiffany, the week's Kula hello (wording JP 2026-10-06), and the
+member's name in it opens a new email to that member.
 
 Both cover The Yoga Lifestyle Membership only. The Archive is ignored: Tiffany
 wants to retire it (JP 2026-09-28).
@@ -52,6 +54,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -77,6 +80,7 @@ class Member:
     name: str
     start: date  # first record of any membership product
     tyl: bool  # a current TYL member, so live classes are part of it
+    email: str = ""  # as on the HM report, for the check-in's email link
 
 
 def quiet_starts(
@@ -168,10 +172,30 @@ def quiet_message(quiet: list[Member], tyl_start: dict[int, date]) -> str:
     return "\n".join(lines)
 
 
-def checkin_message(pick: Member, start: date) -> str:
-    return (f"*Check-in, week of {start:%b} {start.day}:* {_link(pick)} "
-            f"(member since {pick.start:%b %Y}). A short personal note from "
-            f"Tiffany, no agenda.")
+def _slack_text(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def checkin_message(pick: Member, today: date) -> str:
+    """The week's Kula hello, an invitation to Tiffany (wording JP
+    2026-10-06). The bold name opens a new email to the member. The post
+    never knows a member's pronouns, so it uses the first name instead."""
+    name = _slack_text(pick.name)
+    first = _slack_text(pick.name.split()[0]) if pick.name.split() else name
+    since = f"{pick.start:%B}" if pick.start.year == today.year else f"{pick.start:%B %Y}"
+    if pick.email:
+        link = f"*<mailto:{quote(pick.email, safe='@.+-_')}|{name}>*"
+    else:
+        link = f"*{_link(pick)}*"
+    if (today - pick.start).days < FIRST_YEAR_DAYS:
+        words = 'Nothing formal. Just a few words to say "I see you, and I\'m glad you\'re here."'
+    else:
+        words = ("A few personal words can go a long way toward reminding someone "
+                 "that they're part of this Kula.")
+    return (f"*This week's Kula hello* :yellow_heart:\n"
+            f"{name} has been practicing with you since {since}.\n\n"
+            f"If you have a moment this week, send {link} a little hello. {words}\n\n"
+            f"Click {first}'s name and an email will open, ready for you.")
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +237,11 @@ def load_members(snapshot: Path, database: sqlite3.Connection) -> tuple[list[Mem
                 continue
             name = " ".join(p for p in ((row.get("First Name") or "").strip(),
                                         (row.get("Last Name") or "").strip()) if p)
-            entry = people.setdefault(cid, {"name": name or str(cid), "tyl": False})
+            entry = people.setdefault(cid, {"name": name or str(cid), "tyl": False,
+                                            "email": (row.get("Email") or "").strip()})
             if (row.get("Product Name") or "").strip() == TYL_PRODUCT_NAME:
                 entry["tyl"] = True
-    members = [Member(cid, p["name"], starts[cid], p["tyl"]) for cid, p in people.items()]
+    members = [Member(cid, p["name"], starts[cid], p["tyl"], p["email"]) for cid, p in people.items()]
     return members, tyl_start, email_to_cid
 
 
@@ -312,7 +337,7 @@ def main(argv=None) -> int:
         history = {p: [int(c) for c in ids] for p, ids in state["checkins"].items()}
         pick = pick_checkin(members, history, period.isoformat(), today)
         if pick:
-            posts.append(("checkin", [pick], checkin_message(pick, period)))
+            posts.append(("checkin", [pick], checkin_message(pick, today)))
         else:
             state["checkins"][period.isoformat()] = []
 

@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 import csv
 import json
+import re
 import sqlite3
 
 import pytest
@@ -123,11 +124,40 @@ def test_archive_only_members_are_never_picked():
     assert mo.pick_checkin([archive_only], {}, CORE_WEEK, TODAY) is None
 
 
-def test_the_checkin_post_names_one_member_for_the_week():
-    text = mo.checkin_message(core(10), date(2026, 10, 12))
-    assert text.startswith("*Check-in, week of Oct 12:*")
-    assert text.count("member since") == 1 and "customers/10|C10" in text
-    assert text.endswith("A short personal note from Tiffany, no agenda.")
+AMY = M(10, "Amy Becker", date(2026, 1, 8), True, "amy.b+yoga@example.com")
+SHAWN = M(11, "Shawn Bonifay", date(2023, 5, 2), True, "shawn@example.com")
+
+
+def test_the_kula_hello_invites_tiffany_with_an_email_link():
+    text = mo.checkin_message(AMY, date(2026, 10, 12))
+    assert text.startswith("*This week's Kula hello* :yellow_heart:\n")
+    assert "Amy Becker has been practicing with you since January.\n" in text
+    assert "send *<mailto:amy.b+yoga@example.com|Amy Becker>* a little hello." in text
+    assert 'Just a few words to say "I see you, and I\'m glad you\'re here."' in text
+    assert text.endswith("Click Amy's name and an email will open, ready for you.")
+
+
+def test_a_longer_standing_member_gets_the_year_and_the_kula_line():
+    text = mo.checkin_message(SHAWN, date(2026, 10, 19))
+    assert "Shawn Bonifay has been practicing with you since May 2023." in text
+    assert "reminding someone that they're part of this Kula." in text
+    assert "I see you" not in text
+
+
+def test_the_kula_hello_never_guesses_pronouns():
+    for member, day in ((AMY, date(2026, 10, 12)), (SHAWN, date(2026, 10, 19))):
+        words = set(re.findall(r"[a-z]+", mo.checkin_message(member, day).lower()))
+        assert not words & {"she", "her", "hers", "herself", "he", "him", "his", "himself"}
+
+
+def test_a_member_with_no_email_on_file_links_to_marvelous_instead():
+    text = mo.checkin_message(M(12, "Pat Lee", date(2025, 2, 1), True), date(2026, 10, 12))
+    assert "send *<https://app.heymarvelous.com/customers/12|Pat Lee>* a little hello." in text
+
+
+def test_names_are_escaped_for_slack():
+    text = mo.checkin_message(M(13, "Ann <A> & Co", date(2026, 3, 1), True, "ann@example.com"), date(2026, 10, 12))
+    assert "Ann &lt;A&gt; &amp; Co has been practicing" in text
 
 
 def test_weeks_start_on_mondays_from_2026_09_28():
@@ -236,8 +266,8 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     assert all(channel == mo.DEFAULT_CHANNEL for channel, _ in posted)
     quiet_text, checkin_text = posted[0][1], posted[1][1]
     assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
-    assert checkin_text.startswith("*Check-in, week of Oct 5:*")
-    assert "customers/3|Steady Member" in checkin_text  # the two new members are under 30 days
+    assert checkin_text.startswith("*This week's Kula hello*")
+    assert "mailto:steady@example.com|Steady Member" in checkin_text  # the two new members are under 30 days
     assert "Quiet" not in checkin_text and "Keen" not in checkin_text
     state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
     assert "1" in state["quiet_alerted"]
@@ -255,7 +285,7 @@ def test_the_daily_run_before_monday_afternoon_leaves_the_checkin_for_later(box)
     assert state["checkins"] == {}
     CLOCK[0] = MONDAY_AFTERNOON
     assert mo.main([]) == 0
-    assert [text[:12] for _, text in posted] == ["*New member,", "*Check-in, w"]
+    assert [text[:12] for _, text in posted] == ["*New member,", "*This week's"]
 
 
 def test_dry_run_prints_and_writes_nothing(box, capsys):
