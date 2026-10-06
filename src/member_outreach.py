@@ -28,12 +28,14 @@ MT on the Tuesday, so the daily run earlier that day never posts it, and a
 later run in the same week posts it if the Tuesday run failed. The post is an
 invitation to Tiffany, the week's Kula hello (wording JP 2026-10-06), and the
 member's name in it opens a new email to that member. Once it is in the
-channel, the whole post is sent to Tiffany as a direct message from JP, so
-the email link works right there (JP 2026-10-06: "it should post to member
-activity and then be forwarded from me", then "add Tiff to the channel, and
-DM the whole post"). That send uses JP's post-only user token,
-SLACK_JP_POST_TOKEN. A DM that fails is tried again by every later run that
-week, and the channel post is never repeated. JP can choose a week's member
+channel, that post is forwarded to Tiffany as a direct message from JP: its
+link is the whole DM, which Slack shows as the shared post, the way the
+twy-slack-update skill forwards an update (JP 2026-10-06: "that post is
+supposed to be FORWARDED to the DM", after a first run sent a copy of the
+text instead). Tiffany is in #member-activity, so the shared post opens for
+her. That send uses JP's post-only user token, SLACK_JP_POST_TOKEN. A forward
+that fails is tried again by every later run that week, and the channel post
+is never repeated. JP can choose a week's member
 and add a line about them: `overrides` in the state file maps the week's
 first day to {cid, note} (JP 2026-10-06: "switch it to Amy Burkhart, add a
 comment that Amy has spent a lot of time in the on-demand library"). An
@@ -72,6 +74,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 DEFAULT_CHANNEL = "C0BH3142LNP"  # #member-activity, where the movement posts go
 TIFF_DM_CHANNEL = "D06RJ3K14JZ"  # JP's direct messages with Tiffany (U03EK5CN002)
+WORKSPACE_URL = "https://tiffanywoodyogagroup.slack.com"
 MT = ZoneInfo("America/Denver")
 TYL_PRODUCT_ID = 52025
 MEMBERSHIP_PRODUCT_IDS = (52025, 87290)  # TYL Membership, The Archive
@@ -290,6 +293,10 @@ def load_state(path: Path) -> dict:
     return payload
 
 
+def permalink(channel: str, ts: str) -> str:
+    return f"{WORKSPACE_URL}/archives/{channel}/p{ts.replace('.', '')}"
+
+
 def post_message(token: str | None, channel: str, text: str) -> str | None:
     """chat.postMessage. The message's ts, or None when it did not land.
     Never raises, so a Slack outage fails the run (exit 1) and nothing else."""
@@ -392,7 +399,7 @@ def main(argv=None) -> int:
         if args.dry_run:
             print("--- would post to %s ---\n%s" % (channel, text))
             if kind == "checkin":
-                print("--- then send the same post to %s as JP ---" % dm_channel)
+                print("--- then forward it to %s as JP ---" % dm_channel)
             continue
         if kind == "quiet":
             if not slack(text, channel=channel):
@@ -407,13 +414,14 @@ def main(argv=None) -> int:
                 failed = True
                 continue
             state["checkins"][period.isoformat()] = [m.cid for m in people]
-            state["checkin_posts"][period.isoformat()] = {"channel": channel, "ts": ts, "text": text}
+            state["checkin_posts"][period.isoformat()] = {"channel": channel, "ts": ts}
             summary["checkins"] = [m.cid for m in people]
 
     # This week's post goes on to Tiffany as a DM from JP, once.
     posted = state["checkin_posts"].get(period.isoformat())
     if posted and not posted.get("forwarded_ts") and not args.dry_run:
-        dm_ts = post_message(os.getenv("SLACK_JP_POST_TOKEN"), dm_channel, posted["text"])
+        dm_ts = post_message(os.getenv("SLACK_JP_POST_TOKEN"), dm_channel,
+                             permalink(posted["channel"], posted["ts"]))
         if dm_ts:
             posted["forwarded_ts"] = dm_ts
             summary["forwarded"] = dm_channel
