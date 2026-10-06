@@ -239,14 +239,40 @@ def box(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    posted = []
+    posted = Outbox()  # (sender, channel, text) for every post that landed
+    posted.failing = set()  # senders whose posts fail: "bot", "jp"
+
+    def post_message(token, channel, text):
+        who = {"bot-token": "bot", "jp-token": "jp"}.get(token, token)
+        if who in posted.failing:
+            return None
+        ts = f"1791240000.{len(posted):06d}"
+        posted.append((who, channel, text))
+        return ts
+
+    def slack(text, channel=None):
+        return post_message("bot-token", channel, text) is not None
+
+    for name in ("SLACK_MOVEMENT_CHANNEL", "SLACK_JP_TIFF_DM"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TWY_REPORTER_BOT_TOKEN", "bot-token")
+    monkeypatch.setenv("SLACK_JP_POST_TOKEN", "jp-token")
     monkeypatch.setattr(twy_paths, "load_env", lambda *a, **k: None)
     monkeypatch.setattr(twy_paths, "data_root", lambda: tmp_path)
     monkeypatch.setattr(twy_paths, "hm_subscriptions_dir", lambda: reports)
     monkeypatch.setattr(twy_paths, "marvy_db_path", lambda: db)
     monkeypatch.setattr(contribution, "continued", lambda feature=None: True)
-    monkeypatch.setattr(slack_module, "slack", lambda text, channel=None: posted.append((channel, text)) or True)
+    monkeypatch.setattr(slack_module, "slack", slack)
+    monkeypatch.setattr(mo, "post_message", post_message)
     return tmp_path, posted, contribution
+
+
+class Outbox(list):
+    failing: set
+
+
+def read_state(tmp_path):
+    return json.loads((tmp_path / "member_outreach" / "state.json").read_text())
 
 
 def test_with_the_labs_switch_off_it_posts_nothing_and_records_nothing(box, monkeypatch):
@@ -262,35 +288,70 @@ def test_with_the_labs_switch_off_it_posts_nothing_and_records_nothing(box, monk
 def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     tmp_path, posted, _ = box
     assert mo.main([]) == 0
-    assert len(posted) == 2
-    assert all(channel == mo.DEFAULT_CHANNEL for channel, _ in posted)
-    quiet_text, checkin_text = posted[0][1], posted[1][1]
+    assert [(who, channel) for who, channel, _ in posted] == [
+        ("bot", mo.DEFAULT_CHANNEL), ("bot", mo.DEFAULT_CHANNEL), ("jp", "D06RJ3K14JZ")]
+    quiet_text, checkin_text, forward_text = (text for _, _, text in posted)
     assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
     assert checkin_text.startswith("*This week's Kula hello*")
     assert "mailto:steady@example.com|Steady Member" in checkin_text  # the two new members are under 30 days
     assert "Quiet" not in checkin_text and "Keen" not in checkin_text
-    state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
+    state = read_state(tmp_path)
     assert "1" in state["quiet_alerted"]
     assert state["checkins"] == {"2026-10-05": [3]}
+    ts = state["checkin_posts"]["2026-10-05"]["ts"]
+    assert forward_text == f"https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p{ts.replace('.', '')}"
+    assert state["checkin_posts"]["2026-10-05"]["forwarded_ts"]
     assert mo.main([]) == 0
-    assert len(posted) == 2  # nothing twice
+    assert len(posted) == 3  # nothing twice
 
 
 def test_the_daily_run_before_monday_afternoon_leaves_the_checkin_for_later(box):
     tmp_path, posted, _ = box
     CLOCK[0] = MONDAY_MORNING
     assert mo.main([]) == 0
-    assert [text[:12] for _, text in posted] == ["*New member,"]
-    state = json.loads((tmp_path / "member_outreach" / "state.json").read_text())
-    assert state["checkins"] == {}
+    assert [text[:12] for _, _, text in posted] == ["*New member,"]
+    assert read_state(tmp_path)["checkins"] == {}
     CLOCK[0] = MONDAY_AFTERNOON
     assert mo.main([]) == 0
-    assert [text[:12] for _, text in posted] == ["*New member,", "*This week's"]
+    assert [text[:12] for _, _, text in posted] == ["*New member,", "*This week's", "https://tiff"]
+
+
+def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):
+    tmp_path, posted, _ = box
+    posted.failing.add("jp")
+    assert mo.main([]) == 1
+    assert [who for who, _, _ in posted] == ["bot", "bot"]
+    assert "forwarded_ts" not in read_state(tmp_path)["checkin_posts"]["2026-10-05"]
+    posted.failing.clear()
+    CLOCK[0] = MONDAY_AFTERNOON + timedelta(hours=1)
+    assert mo.main([]) == 0
+    assert [who for who, _, _ in posted] == ["bot", "bot", "jp"]
+    assert mo.main([]) == 0
+    assert len(posted) == 3
+
+
+def test_a_failed_channel_post_is_not_recorded_or_forwarded(box):
+    tmp_path, posted, _ = box
+    posted.failing.add("bot")
+    assert mo.main([]) == 1
+    assert posted == []
+    state = read_state(tmp_path)
+    assert state["checkins"] == {} and state["checkin_posts"] == {}
+
+
+def test_the_forward_is_the_posts_permalink():
+    assert mo.permalink("C0BH3142LNP", "1791271218.093289") == (
+        "https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p1791271218093289")
+
+
+def test_post_message_without_a_token_sends_nothing():
+    assert mo.post_message(None, "D06RJ3K14JZ", "text") is None
 
 
 def test_dry_run_prints_and_writes_nothing(box, capsys):
     tmp_path, posted, _ = box
     assert mo.main(["--dry-run"]) == 0
     assert posted == []
-    assert "Quiet Starter" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Quiet Starter" in out and "then send its link to D06RJ3K14JZ as JP" in out
     assert not (tmp_path / "member_outreach").exists()
