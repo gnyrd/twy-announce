@@ -298,8 +298,7 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     state = read_state(tmp_path)
     assert "1" in state["quiet_alerted"]
     assert state["checkins"] == {"2026-10-06": [3]}
-    ts = state["checkin_posts"]["2026-10-06"]["ts"]
-    assert forward_text == f"https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p{ts.replace('.', '')}"
+    assert forward_text == checkin_text  # the whole post, so the email link works in the DM
     assert state["checkin_posts"]["2026-10-06"]["forwarded_ts"]
     assert mo.main([]) == 0
     assert len(posted) == 3  # nothing twice
@@ -313,7 +312,7 @@ def test_the_daily_run_before_tuesday_afternoon_leaves_the_checkin_for_later(box
     assert read_state(tmp_path)["checkins"] == {}
     CLOCK[0] = TUESDAY_AFTERNOON
     assert mo.main([]) == 0
-    assert [text[:12] for _, _, text in posted] == ["*New member,", "*This week's", "https://tiff"]
+    assert [text[:12] for _, _, text in posted] == ["*New member,", "*This week's", "*This week's"]
 
 
 def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):
@@ -326,6 +325,7 @@ def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):
     CLOCK[0] = TUESDAY_AFTERNOON + timedelta(hours=1)
     assert mo.main([]) == 0
     assert [who for who, _, _ in posted] == ["bot", "bot", "jp"]
+    assert posted[2][2] == posted[1][2]
     assert mo.main([]) == 0
     assert len(posted) == 3
 
@@ -339,11 +339,6 @@ def test_a_failed_channel_post_is_not_recorded_or_forwarded(box):
     assert state["checkins"] == {} and state["checkin_posts"] == {}
 
 
-def test_the_forward_is_the_posts_permalink():
-    assert mo.permalink("C0BH3142LNP", "1791271218.093289") == (
-        "https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p1791271218093289")
-
-
 def test_post_message_without_a_token_sends_nothing():
     assert mo.post_message(None, "D06RJ3K14JZ", "text") is None
 
@@ -353,5 +348,5 @@ def test_dry_run_prints_and_writes_nothing(box, capsys):
     assert mo.main(["--dry-run"]) == 0
     assert posted == []
     out = capsys.readouterr().out
-    assert "Quiet Starter" in out and "then send its link to D06RJ3K14JZ as JP" in out
+    assert "Quiet Starter" in out and "then send the same post to D06RJ3K14JZ as JP" in out
     assert not (tmp_path / "member_outreach").exists()
