@@ -155,6 +155,11 @@ def test_a_member_with_no_email_on_file_links_to_marvelous_instead():
     assert "send *<https://app.heymarvelous.com/customers/12|Pat Lee>* a little hello." in text
 
 
+def test_a_note_follows_the_history_line():
+    text = mo.checkin_message(SHAWN, date(2026, 10, 19), "Shawn has spent a lot of time in the on-demand library.")
+    assert "since May 2023. Shawn has spent a lot of time in the on-demand library.\n\nIf you have a moment" in text
+
+
 def test_names_are_escaped_for_slack():
     text = mo.checkin_message(M(13, "Ann <A> & Co", date(2026, 3, 1), True, "ann@example.com"), date(2026, 10, 12))
     assert "Ann &lt;A&gt; &amp; Co has been practicing" in text
@@ -313,6 +318,29 @@ def test_the_daily_run_before_tuesday_afternoon_leaves_the_checkin_for_later(box
     CLOCK[0] = TUESDAY_AFTERNOON
     assert mo.main([]) == 0
     assert [text[:12] for _, _, text in posted] == ["*New member,", "*This week's", "*This week's"]
+
+
+def write_state(tmp_path, state):
+    (tmp_path / "member_outreach").mkdir(exist_ok=True)
+    (tmp_path / "member_outreach" / "state.json").write_text(json.dumps(state))
+
+
+def test_an_override_names_the_member_and_adds_the_note(box):
+    tmp_path, posted, _ = box
+    write_state(tmp_path, {"version": 1, "quiet_alerted": {"1": "2026-10-06"}, "checkins": {},
+                           "overrides": {"2026-10-06": {"cid": 2, "note": "Keen has been in the library a lot."}}})
+    assert mo.main([]) == 0
+    checkin = posted[0][2]
+    assert "Keen Starter has been practicing with you since" in checkin and "Keen has been in the library a lot." in checkin
+    assert read_state(tmp_path)["checkins"] == {"2026-10-06": [2]}
+
+
+def test_an_override_for_someone_not_a_member_falls_back_to_the_pick(box):
+    tmp_path, posted, _ = box
+    write_state(tmp_path, {"version": 1, "quiet_alerted": {"1": "2026-10-06"}, "checkins": {},
+                           "overrides": {"2026-10-06": {"cid": 999, "note": "never shown"}}})
+    assert mo.main([]) == 0
+    assert "Steady Member" in posted[0][2] and "never shown" not in posted[0][2]
 
 
 def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):

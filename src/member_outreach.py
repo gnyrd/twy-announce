@@ -33,7 +33,11 @@ the email link works right there (JP 2026-10-06: "it should post to member
 activity and then be forwarded from me", then "add Tiff to the channel, and
 DM the whole post"). That send uses JP's post-only user token,
 SLACK_JP_POST_TOKEN. A DM that fails is tried again by every later run that
-week, and the channel post is never repeated.
+week, and the channel post is never repeated. JP can choose a week's member
+and add a line about them: `overrides` in the state file maps the week's
+first day to {cid, note} (JP 2026-10-06: "switch it to Amy Burkhart, add a
+comment that Amy has spent a lot of time in the on-demand library"). An
+override naming someone who is not a current member falls back to the pick.
 
 Both cover The Yoga Lifestyle Membership only. The Archive is ignored: Tiffany
 wants to retire it (JP 2026-09-28).
@@ -184,7 +188,7 @@ def _slack_text(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def checkin_message(pick: Member, today: date) -> str:
+def checkin_message(pick: Member, today: date, note: str | None = None) -> str:
     """The week's Kula hello, an invitation to Tiffany (wording JP
     2026-10-06). The bold name opens a new email to the member. The post
     never knows a member's pronouns, so it uses the first name instead."""
@@ -201,7 +205,8 @@ def checkin_message(pick: Member, today: date) -> str:
         words = ("A few personal words can go a long way toward reminding someone "
                  "that they're part of this Kula.")
     return (f"*This week's Kula hello* :yellow_heart:\n"
-            f"{name} has been practicing with you since {since}.\n\n"
+            f"{name} has been practicing with you since {since}."
+            f"{(' ' + _slack_text(note)) if note else ''}\n\n"
             f"If you have a moment this week, send {link} a little hello. {words}\n\n"
             f"Click {first}'s name and an email will open, ready for you.")
 
@@ -274,13 +279,14 @@ def load_attendance(database: sqlite3.Connection, email_to_cid: dict[str, int],
 
 def load_state(path: Path) -> dict:
     if not path.exists():
-        return {"version": 1, "quiet_alerted": {}, "checkins": {}, "checkin_posts": {}}
+        return {"version": 1, "quiet_alerted": {}, "checkins": {}, "checkin_posts": {}, "overrides": {}}
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("version") != 1:
         raise ValueError("unsupported member outreach state")
     payload.setdefault("quiet_alerted", {})
     payload.setdefault("checkins", {})
     payload.setdefault("checkin_posts", {})
+    payload.setdefault("overrides", {})
     return payload
 
 
@@ -369,9 +375,14 @@ def main(argv=None) -> int:
         posts.append(("quiet", quiet, quiet_message(quiet, tyl_start)))
     if checkin_due(now_mt) and period.isoformat() not in state["checkins"]:
         history = {p: [int(c) for c in ids] for p, ids in state["checkins"].items()}
-        pick = pick_checkin(members, history, period.isoformat(), today)
+        override = state["overrides"].get(period.isoformat()) or {}
+        chosen = [m for m in members if m.tyl and m.cid == override.get("cid")]
+        pick = chosen[0] if chosen else pick_checkin(members, history, period.isoformat(), today)
+        if override:
+            summary["override"] = "used" if chosen else f"{override.get('cid')} is not a current member"
         if pick:
-            posts.append(("checkin", [pick], checkin_message(pick, today)))
+            note = override.get("note") if chosen else None
+            posts.append(("checkin", [pick], checkin_message(pick, today, note)))
         else:
             state["checkins"][period.isoformat()] = []
 
