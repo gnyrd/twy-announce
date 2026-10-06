@@ -9,12 +9,13 @@ kept 38% (vault reports/2026_09_28_membership_retention.md). The post waits
 until the attendance data covers the member's whole first 14 days, so a class
 taken on day 13 is never missed because the sync had not reached it yet.
 
-The check-in, every Monday afternoon. Each week one current TYL member is
-named for a personal check-in, posted at 14:15 Mountain time on the Monday
-(JP 2026-10-06: "make it weekly, one name each Monday around 2:15pm MT";
-until then it was two names every other Monday, JP 2026-09-28: "we'll see if
-Tiff can reach 1 person per week"). The weeks alternate between two groups,
-counting from Monday 2026-09-28: members in their first year, where people
+The check-in, every Tuesday afternoon. Each week one current TYL member is
+named for a personal check-in, posted at 14:15 Mountain time on the Tuesday
+(JP 2026-10-06: "make it weekly, one name each Monday around 2:15pm MT", then
+"I want the posts to go out on Tuesdays. And it can start today". Until then
+it was two names every other Monday, JP 2026-09-28: "we'll see if Tiff can
+reach 1 person per week"). The weeks alternate between two groups, counting
+from Tuesday 2026-10-06: members in their first year, where people
 leave, and the longer-standing core, who carry most of what TWY earns (28 of
 87 members account for 80% of all paid months). Within each group the least
 recently picked go first, so nobody in a group is picked twice before everyone
@@ -23,8 +24,8 @@ members as they join and leave, and a member moves from the first-year group
 to the core on their first anniversary. When the week's group has nobody
 eligible the other group fills in. Members in their first 30 days wait: the
 welcome week and the quiet-start post cover them. The post is due from 14:15
-MT on the Monday, so the daily run earlier that day never posts it, and a
-later run in the same week posts it if the Monday run failed. The post is an
+MT on the Tuesday, so the daily run earlier that day never posts it, and a
+later run in the same week posts it if the Tuesday run failed. The post is an
 invitation to Tiffany, the week's Kula hello (wording JP 2026-10-06), and the
 member's name in it opens a new email to that member. Once it is in the
 channel, its link is sent to Tiffany as a direct message from JP, the way the
@@ -75,8 +76,8 @@ QUIET_DAYS = 14
 QUIET_LOOKBACK_DAYS = 45  # a start older than this is no longer news
 NEWCOMER_DAYS = 30  # too new for a check-in
 PERIOD_DAYS = 7
-PERIOD_EPOCH = date(2026, 9, 28)  # a Monday; weeks start every Monday from here
-CHECKIN_TIME = time(14, 15)  # Monday afternoon, Mountain time (JP 2026-10-06)
+PERIOD_EPOCH = date(2026, 10, 6)  # a Tuesday, the first weekly post. Weeks start every Tuesday from here
+CHECKIN_TIME = time(14, 15)  # Tuesday afternoon, Mountain time (JP 2026-10-06)
 FIRST_YEAR_DAYS = 365
 ATTENDANCE_MAX_AGE_HOURS = 36
 
@@ -119,12 +120,12 @@ def quiet_starts(
 
 
 def period_start(day: date) -> date:
-    """The Monday that starts the week `day` falls in."""
+    """The Tuesday that starts the week `day` falls in."""
     return PERIOD_EPOCH + timedelta(days=PERIOD_DAYS * ((day - PERIOD_EPOCH).days // PERIOD_DAYS))
 
 
 def checkin_due(now_mt: datetime) -> bool:
-    """True from 14:15 Mountain time on the week's Monday until the week ends."""
+    """True from 14:15 Mountain time on the week's Tuesday until the week ends."""
     due = datetime.combine(period_start(now_mt.date()), CHECKIN_TIME, tzinfo=MT)
     return now_mt >= due
 
@@ -139,7 +140,7 @@ def pick_checkin(
     between the first-year group and the core, first-year on the even weeks
     counted from PERIOD_EPOCH, and the other group fills in when the week's
     group has nobody eligible. Archive-only members are never picked.
-    `history` maps each earlier week's Monday to the members it named."""
+    `history` maps each earlier week's first day to the members it named."""
     last_picked: dict[int, str] = {}
     for picked_period, ids in history.items():
         for cid in ids:

@@ -68,7 +68,7 @@ def test_several_quiet_members_come_in_one_post_oldest_first():
     assert text.startswith("*New members, no live class in their first two weeks:*")
 
 
-# ---- the check-in, every Monday afternoon ------------------------------------
+# ---- the check-in, every Tuesday afternoon ------------------------------------
 
 def first_year(cid, days=100, today=TODAY):
     return M(cid, f"N{cid}", today - timedelta(days=days), True)
@@ -78,8 +78,8 @@ def core(cid, days=800, today=TODAY):
     return M(cid, f"C{cid}", today - timedelta(days=days), True)
 
 
-FIRST_YEAR_WEEK = "2026-10-12"  # an even week counted from Monday 2026-09-28
-CORE_WEEK = "2026-10-19"
+FIRST_YEAR_WEEK = "2026-10-06"  # an even week counted from Tuesday 2026-10-06
+CORE_WEEK = "2026-10-13"
 
 
 def test_the_weeks_alternate_between_the_first_year_and_the_core():
@@ -160,31 +160,31 @@ def test_names_are_escaped_for_slack():
     assert "Ann &lt;A&gt; &amp; Co has been practicing" in text
 
 
-def test_weeks_start_on_mondays_from_2026_09_28():
-    assert mo.period_start(date(2026, 9, 28)) == date(2026, 9, 28)
-    assert mo.period_start(date(2026, 10, 11)) == date(2026, 10, 5)
-    assert mo.period_start(date(2026, 10, 12)) == date(2026, 10, 12)
-    assert mo.period_start(date(2026, 9, 27)) == date(2026, 9, 21)
-    assert all(mo.period_start(date(2026, 11, d)).weekday() == 0 for d in range(1, 29))
+def test_weeks_start_on_tuesdays_from_2026_10_06():
+    assert mo.period_start(date(2026, 10, 6)) == date(2026, 10, 6)
+    assert mo.period_start(date(2026, 10, 12)) == date(2026, 10, 6)
+    assert mo.period_start(date(2026, 10, 13)) == date(2026, 10, 13)
+    assert mo.period_start(date(2026, 10, 5)) == date(2026, 9, 29)
+    assert all(mo.period_start(date(2026, 11, d)).weekday() == 1 for d in range(1, 29))
 
 
-def test_the_checkin_is_due_from_monday_afternoon_until_the_week_ends():
+def test_the_checkin_is_due_from_tuesday_afternoon_until_the_week_ends():
     def at(day, hour, minute):
         return datetime(2026, 10, day, hour, minute, tzinfo=mo.MT)
-    assert not mo.checkin_due(at(12, 1, 40))  # the daily run, Monday morning
-    assert not mo.checkin_due(at(12, 14, 14))
-    assert mo.checkin_due(at(12, 14, 15))
-    assert mo.checkin_due(at(13, 1, 40))  # Tuesday: a missed Monday is caught up
-    assert mo.checkin_due(at(18, 23, 59))  # Sunday, still that week
-    assert not mo.checkin_due(at(19, 1, 40))  # the next Monday, before 14:15
+    assert not mo.checkin_due(at(13, 1, 40))  # the daily run, Tuesday morning
+    assert not mo.checkin_due(at(13, 14, 14))
+    assert mo.checkin_due(at(13, 14, 15))
+    assert mo.checkin_due(at(14, 1, 40))  # Wednesday: a missed Tuesday is caught up
+    assert mo.checkin_due(at(19, 23, 59))  # Monday, still that week
+    assert not mo.checkin_due(at(20, 1, 40))  # the next Tuesday, before 14:15
 
 
 # ---- the switch and a whole run -----------------------------------------------
 
-SNAPSHOT_AT = datetime(2026, 10, 5, 7, 20, tzinfo=timezone.utc)  # the Monday 07:20 UTC report
-MONDAY_AFTERNOON = datetime(2026, 10, 5, 20, 15, tzinfo=timezone.utc)  # 14:15 MT, the check-in run
-MONDAY_MORNING = datetime(2026, 10, 5, 7, 40, tzinfo=timezone.utc)  # 01:40 MT, the daily run
-CLOCK = [MONDAY_AFTERNOON]
+SNAPSHOT_AT = datetime(2026, 10, 6, 7, 20, tzinfo=timezone.utc)  # the Tuesday 07:20 UTC report
+TUESDAY_AFTERNOON = datetime(2026, 10, 6, 20, 15, tzinfo=timezone.utc)  # 14:15 MT, the check-in run
+TUESDAY_MORNING = datetime(2026, 10, 6, 7, 40, tzinfo=timezone.utc)  # 01:40 MT, the daily run
+CLOCK = [TUESDAY_AFTERNOON]
 
 
 class Frozen(datetime):
@@ -198,7 +198,7 @@ class Frozen(datetime):
 @pytest.fixture
 def box(tmp_path, monkeypatch):
     """A tiny marvy.db and a fresh HM report, wired in through twy_paths,
-    with the clock stopped on Monday 2026-10-05 at 14:15 MT."""
+    with the clock stopped on Tuesday 2026-10-06 at 14:15 MT."""
     import twy_paths
     import twy_platform.contribution as contribution
     import importlib
@@ -206,10 +206,10 @@ def box(tmp_path, monkeypatch):
     # so fetch the module itself: main() reads slack from it at call time.
     slack_module = importlib.import_module("twy_platform.slack")
 
-    CLOCK[0] = MONDAY_AFTERNOON
+    CLOCK[0] = TUESDAY_AFTERNOON
     monkeypatch.setattr(mo, "datetime", Frozen)
     now = SNAPSHOT_AT
-    today = MONDAY_AFTERNOON.astimezone(mo.MT).date()
+    today = TUESDAY_AFTERNOON.astimezone(mo.MT).date()
     reports = tmp_path / "reports"
     reports.mkdir()
     snapshot = reports / f"active_subscriptions_{now:%Y%m%dT%H%M%SZ}.csv"
@@ -297,21 +297,21 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     assert "Quiet" not in checkin_text and "Keen" not in checkin_text
     state = read_state(tmp_path)
     assert "1" in state["quiet_alerted"]
-    assert state["checkins"] == {"2026-10-05": [3]}
-    ts = state["checkin_posts"]["2026-10-05"]["ts"]
+    assert state["checkins"] == {"2026-10-06": [3]}
+    ts = state["checkin_posts"]["2026-10-06"]["ts"]
     assert forward_text == f"https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p{ts.replace('.', '')}"
-    assert state["checkin_posts"]["2026-10-05"]["forwarded_ts"]
+    assert state["checkin_posts"]["2026-10-06"]["forwarded_ts"]
     assert mo.main([]) == 0
     assert len(posted) == 3  # nothing twice
 
 
-def test_the_daily_run_before_monday_afternoon_leaves_the_checkin_for_later(box):
+def test_the_daily_run_before_tuesday_afternoon_leaves_the_checkin_for_later(box):
     tmp_path, posted, _ = box
-    CLOCK[0] = MONDAY_MORNING
+    CLOCK[0] = TUESDAY_MORNING
     assert mo.main([]) == 0
     assert [text[:12] for _, _, text in posted] == ["*New member,"]
     assert read_state(tmp_path)["checkins"] == {}
-    CLOCK[0] = MONDAY_AFTERNOON
+    CLOCK[0] = TUESDAY_AFTERNOON
     assert mo.main([]) == 0
     assert [text[:12] for _, _, text in posted] == ["*New member,", "*This week's", "https://tiff"]
 
@@ -321,9 +321,9 @@ def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):
     posted.failing.add("jp")
     assert mo.main([]) == 1
     assert [who for who, _, _ in posted] == ["bot", "bot"]
-    assert "forwarded_ts" not in read_state(tmp_path)["checkin_posts"]["2026-10-05"]
+    assert "forwarded_ts" not in read_state(tmp_path)["checkin_posts"]["2026-10-06"]
     posted.failing.clear()
-    CLOCK[0] = MONDAY_AFTERNOON + timedelta(hours=1)
+    CLOCK[0] = TUESDAY_AFTERNOON + timedelta(hours=1)
     assert mo.main([]) == 0
     assert [who for who, _, _ in posted] == ["bot", "bot", "jp"]
     assert mo.main([]) == 0
