@@ -27,13 +27,15 @@ welcome week and the quiet-start post cover them. The post is due from 14:15
 MT on the Tuesday, so the daily run earlier that day never posts it, and a
 later run in the same week posts it if the Tuesday run failed. The post is an
 invitation to Tiffany, the week's Kula hello (wording JP 2026-10-06), and the
-member's name in it opens a new email to that member. Once it is in the
-channel, that post is forwarded to Tiffany as a direct message from JP: its
-link is the whole DM, which Slack shows as the shared post, the way the
+member's name in it opens a new email to that member. It posts in #updates
+as Friend, and that post is forwarded to Tiffany as a direct message from JP:
+its link is the whole DM, which Slack shows as the shared post, the way the
 twy-slack-update skill forwards an update (JP 2026-10-06: "that post is
 supposed to be FORWARDED to the DM", after a first run sent a copy of the
-text instead). Tiffany is in #member-activity, so the shared post opens for
-her. That send uses JP's post-only user token, SLACK_JP_POST_TOKEN. A forward
+text instead). It moved from #member-activity on 2026-10-13 (JP "ok, post to
+Updates"): Slack shows no preview for a link to a private channel's message
+posted through the API, so the first forward arrived as a bare link. #updates
+is public, and its links preview. That send uses JP's post-only user token, SLACK_JP_POST_TOKEN. A forward
 that fails is tried again by every later run that week, and the channel post
 is never repeated. JP can choose a week's member
 and add a line about them: `overrides` in the state file maps the week's
@@ -73,6 +75,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 DEFAULT_CHANNEL = "C0BH3142LNP"  # #member-activity, where the movement posts go
+CHECKIN_CHANNEL = "C0BDRRX79E3"  # #updates, public, so the forwarded Kula Hello previews
 TIFF_DM_CHANNEL = "D06RJ3K14JZ"  # JP's direct messages with Tiffany (U03EK5CN002)
 WORKSPACE_URL = "https://tiffanywoodyogagroup.slack.com"
 MT = ZoneInfo("America/Denver")
@@ -395,9 +398,10 @@ def main(argv=None) -> int:
 
     failed = False
     dm_channel = os.getenv("SLACK_JP_TIFF_DM", TIFF_DM_CHANNEL)
+    checkin_channel = os.getenv("SLACK_CHECKIN_CHANNEL", CHECKIN_CHANNEL)
     for kind, people, text in posts:
         if args.dry_run:
-            print("--- would post to %s ---\n%s" % (channel, text))
+            print("--- would post to %s ---\n%s" % (checkin_channel if kind == "checkin" else channel, text))
             if kind == "checkin":
                 print("--- then forward it to %s as JP ---" % dm_channel)
             continue
@@ -409,12 +413,12 @@ def main(argv=None) -> int:
                 state["quiet_alerted"][str(member.cid)] = today.isoformat()
             summary["quiet"] = [m.cid for m in people]
         else:
-            ts = post_message(os.getenv("TWY_REPORTER_BOT_TOKEN"), channel, text)
+            ts = post_message(os.getenv("SLACK_BOT_TOKEN"), checkin_channel, text)
             if not ts:
                 failed = True
                 continue
             state["checkins"][period.isoformat()] = [m.cid for m in people]
-            state["checkin_posts"][period.isoformat()] = {"channel": channel, "ts": ts}
+            state["checkin_posts"][period.isoformat()] = {"channel": checkin_channel, "ts": ts}
             summary["checkins"] = [m.cid for m in people]
 
     # This week's post goes on to Tiffany as a DM from JP, once.

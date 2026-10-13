@@ -245,10 +245,10 @@ def box(tmp_path, monkeypatch):
     con.close()
 
     posted = Outbox()  # (sender, channel, text) for every post that landed
-    posted.failing = set()  # senders whose posts fail: "bot", "jp"
+    posted.failing = set()  # senders whose posts fail: "bot", "friend", "jp"
 
     def post_message(token, channel, text):
-        who = {"bot-token": "bot", "jp-token": "jp"}.get(token, token)
+        who = {"bot-token": "bot", "friend-token": "friend", "jp-token": "jp"}.get(token, token)
         if who in posted.failing:
             return None
         ts = f"1791240000.{len(posted):06d}"
@@ -258,9 +258,10 @@ def box(tmp_path, monkeypatch):
     def slack(text, channel=None):
         return post_message("bot-token", channel, text) is not None
 
-    for name in ("SLACK_MOVEMENT_CHANNEL", "SLACK_JP_TIFF_DM"):
+    for name in ("SLACK_MOVEMENT_CHANNEL", "SLACK_JP_TIFF_DM", "SLACK_CHECKIN_CHANNEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("TWY_REPORTER_BOT_TOKEN", "bot-token")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "friend-token")
     monkeypatch.setenv("SLACK_JP_POST_TOKEN", "jp-token")
     monkeypatch.setattr(twy_paths, "load_env", lambda *a, **k: None)
     monkeypatch.setattr(twy_paths, "data_root", lambda: tmp_path)
@@ -294,7 +295,7 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     tmp_path, posted, _ = box
     assert mo.main([]) == 0
     assert [(who, channel) for who, channel, _ in posted] == [
-        ("bot", mo.DEFAULT_CHANNEL), ("bot", mo.DEFAULT_CHANNEL), ("jp", "D06RJ3K14JZ")]
+        ("bot", mo.DEFAULT_CHANNEL), ("friend", "C0BDRRX79E3"), ("jp", "D06RJ3K14JZ")]
     quiet_text, checkin_text, forward_text = (text for _, _, text in posted)
     assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
     assert checkin_text.startswith("*This week's Kula Hello*")
@@ -304,7 +305,7 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
     assert "1" in state["quiet_alerted"]
     assert state["checkins"] == {"2026-10-06": [3]}
     ts = state["checkin_posts"]["2026-10-06"]["ts"]
-    assert forward_text == f"https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p{ts.replace('.', '')}"
+    assert forward_text == f"https://tiffanywoodyogagroup.slack.com/archives/C0BDRRX79E3/p{ts.replace('.', '')}"
     assert state["checkin_posts"]["2026-10-06"]["forwarded_ts"]
     assert mo.main([]) == 0
     assert len(posted) == 3  # nothing twice
@@ -348,20 +349,20 @@ def test_a_failed_forward_is_tried_again_and_the_post_is_never_repeated(box):
     tmp_path, posted, _ = box
     posted.failing.add("jp")
     assert mo.main([]) == 1
-    assert [who for who, _, _ in posted] == ["bot", "bot"]
+    assert [who for who, _, _ in posted] == ["bot", "friend"]
     assert "forwarded_ts" not in read_state(tmp_path)["checkin_posts"]["2026-10-06"]
     posted.failing.clear()
     CLOCK[0] = TUESDAY_AFTERNOON + timedelta(hours=1)
     assert mo.main([]) == 0
-    assert [who for who, _, _ in posted] == ["bot", "bot", "jp"]
-    assert posted[2][2].startswith("https://tiffanywoodyogagroup.slack.com/archives/C0BH3142LNP/p")
+    assert [who for who, _, _ in posted] == ["bot", "friend", "jp"]
+    assert posted[2][2].startswith("https://tiffanywoodyogagroup.slack.com/archives/C0BDRRX79E3/p")
     assert mo.main([]) == 0
     assert len(posted) == 3
 
 
 def test_a_failed_channel_post_is_not_recorded_or_forwarded(box):
     tmp_path, posted, _ = box
-    posted.failing.add("bot")
+    posted.failing.update({"bot", "friend"})
     assert mo.main([]) == 1
     assert posted == []
     state = read_state(tmp_path)
