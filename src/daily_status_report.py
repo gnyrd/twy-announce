@@ -531,7 +531,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if label == "YouTube":
             exact = youtube_exact_changes(now)
             if exact:
-                followers.append(f"*{label}*: {current:,}")
+                followers.append(f"*{label}*: {current:,} (approx)")
                 followers.append(format_youtube_exact_line(exact))
                 continue
         followers.append(f"*{label}*: {current:,}")
