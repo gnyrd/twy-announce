@@ -130,7 +130,7 @@ SHAWN = M(11, "Shawn Bonifay", date(2023, 5, 2), True, "shawn@example.com")
 
 def test_the_kula_hello_invites_tiffany_with_an_email_link():
     text = mo.checkin_message(AMY, date(2026, 10, 12))
-    assert text.startswith("*This week's Kula hello* :yellow_heart:\n")
+    assert text.startswith("*This week's Kula Hello* :yellow_heart:\n")
     assert "Amy Becker has been practicing with you since January.\n" in text
     assert "send *<mailto:amy.b+yoga@example.com|Amy Becker>* a little hello." in text
     assert 'Just a few words to say "I see you, and I\'m glad you\'re here."' in text
@@ -297,7 +297,7 @@ def test_a_run_names_the_quiet_starter_and_this_weeks_checkin_once_each(box):
         ("bot", mo.DEFAULT_CHANNEL), ("bot", mo.DEFAULT_CHANNEL), ("jp", "D06RJ3K14JZ")]
     quiet_text, checkin_text, forward_text = (text for _, _, text in posted)
     assert "customers/1|Quiet Starter" in quiet_text and "Keen" not in quiet_text
-    assert checkin_text.startswith("*This week's Kula hello*")
+    assert checkin_text.startswith("*This week's Kula Hello*")
     assert "mailto:steady@example.com|Steady Member" in checkin_text  # the two new members are under 30 days
     assert "Quiet" not in checkin_text and "Keen" not in checkin_text
     state = read_state(tmp_path)

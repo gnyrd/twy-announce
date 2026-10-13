@@ -207,7 +207,7 @@ def checkin_message(pick: Member, today: date, note: str | None = None) -> str:
     else:
         words = ("A few personal words can go a long way toward reminding someone "
                  "that they're part of this Kula.")
-    return (f"*This week's Kula hello* :yellow_heart:\n"
+    return (f"*This week's Kula Hello* :yellow_heart:\n"
             f"{name} has been practicing with you since {since}."
             f"{(' ' + _slack_text(note)) if note else ''}\n\n"
             f"If you have a moment this week, send {link} a little hello. {words}\n\n"
