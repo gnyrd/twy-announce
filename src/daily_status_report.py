@@ -453,13 +453,11 @@ def youtube_exact_changes(now: datetime, fetch=None) -> Optional[Dict[str, Any]]
 def format_youtube_exact_line(exact: Dict[str, Any]) -> str:
     """Delta line from youtube_exact_changes, zeros included, so a quiet week
     reads as 0 rather than disappearing."""
-    through = datetime.strptime(exact["through"], "%Y-%m-%d")
     segments = []
     for label in ("week", "month", "year"):
         n = exact[label]
         segments.append(f"{label}: {'+' if n > 0 else ''}{n}")
-    return ("   𝚫 " + "  |  ".join(segments)
-            + f"  (exact, through {through.strftime('%b')} {through.day})")
+    return "   𝚫 " + "  |  ".join(segments)
 
 
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> tuple[str, str]:
@@ -533,7 +531,7 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if label == "YouTube":
             exact = youtube_exact_changes(now)
             if exact:
-                followers.append(f"*{label}*: {current:,} (YouTube rounds this)")
+                followers.append(f"*{label}*: {current:,}")
                 followers.append(format_youtube_exact_line(exact))
                 continue
         followers.append(f"*{label}*: {current:,}")

@@ -29,10 +29,9 @@ def test_net_change_counts_back_from_the_last_day_analytics_has():
     assert exact["year"] == 1
 
 
-def test_line_shows_zeros_and_the_through_date():
+def test_line_shows_zeros_and_no_parentheticals():
     line = format_youtube_exact_line({"through": "2026-10-10", "week": 0, "month": 3, "year": -1})
-    assert "week: 0" in line and "month: +3" in line and "year: -1" in line
-    assert line.endswith("(exact, through Oct 10)")
+    assert line == "   𝚫 week: 0  |  month: +3  |  year: -1"
 
 
 def test_analytics_failure_falls_back():
