@@ -412,6 +412,56 @@ def format_product_delta_line(product: str, cycle: str, current: int,
     return "   𝚫 " + "  |  ".join(segments)
 
 
+def youtube_exact_changes(now: datetime, fetch=None) -> Optional[Dict[str, Any]]:
+    """Exact net YouTube subscriber change over the last week, month and year,
+    from YouTube Analytics (subscribersGained - subscribersLost per day).
+
+    The Data API's subscriberCount is rounded to three significant figures, so
+    the stored snapshot sat at 1,080 while single subscribers came and went
+    (2026-10-13). Analytics runs two to three days behind, so `through` names
+    the last day it has. None when Analytics cannot be read; the caller then
+    keeps the snapshot delta.
+    """
+    start = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    end = now.strftime("%Y-%m-%d")
+    try:
+        if fetch is None:
+            from run_social_post_performance import youtube_analytics_client
+            client = youtube_analytics_client()
+
+            def fetch(start, end):
+                res = client.reports().query(
+                    ids="channel==MINE", startDate=start, endDate=end,
+                    metrics="subscribersGained,subscribersLost", dimensions="day",
+                ).execute()
+                return res.get("rows") or []
+        rows = fetch(start, end)
+    except Exception as e:
+        print(f"Warning: YouTube Analytics not read: {e}")
+        return None
+    if not rows:
+        return None
+    through = max(r[0] for r in rows)
+    last = datetime.strptime(through, "%Y-%m-%d")
+    out: Dict[str, Any] = {"through": through}
+    for label, days in (("week", 7), ("month", 30), ("year", 365)):
+        since = (last - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        out[label] = sum(int(g) - int(l) for d, g, l in rows if d >= since)
+    return out
+
+
+def format_youtube_exact_line(exact: Dict[str, Any]) -> str:
+    """Delta line from youtube_exact_changes, zeros included, so a quiet week
+    reads as 0 rather than disappearing."""
+    through = datetime.strptime(exact["through"], "%Y-%m-%d")
+    segments = []
+    for label in ("week", "month", "year"):
+        n = exact[label]
+        segments.append(f"{label}: {'+' if n > 0 else ''}{n}")
+    return ("   𝚫 " + "  |  ".join(segments)
+            + f"  (exact, through {through.strftime('%b')} {through.day})")
+
+
 def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict[str, int]) -> tuple[str, str]:
     """Build two Slack messages: (social, members).
 
@@ -480,6 +530,12 @@ def format_report(subscriptions: List[Dict[str, Any]], today: str, changes: Dict
         if not today_snap:
             continue
         current = today_snap[key]
+        if label == "YouTube":
+            exact = youtube_exact_changes(now)
+            if exact:
+                followers.append(f"*{label}*: {current:,} (YouTube rounds this)")
+                followers.append(format_youtube_exact_line(exact))
+                continue
         followers.append(f"*{label}*: {current:,}")
         week_val = week_snap[key] if week_snap else None
         month_val = month_snap[key] if month_snap else None
